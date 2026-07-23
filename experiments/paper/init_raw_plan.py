@@ -665,11 +665,25 @@ def build_plan(
                             "native_noninferiority_margin": float(native_margin),
                         }
                     )
+    raw_margins = campaign.get("execution", {}).get("native_margins", {}) or {}
+    if not isinstance(raw_margins, dict):
+        raise EvidenceValidationError("execution.native_margins must be a mapping")
+    native_margins = {}
+    for setting in chosen:
+        margin = raw_margins.get(setting["id"], 0.0)
+        try:
+            margin = float(margin)
+        except (TypeError, ValueError) as error:
+            raise EvidenceValidationError(
+                f"execution.native_margins.{setting['id']} must be numeric"
+            ) from error
+        native_margins[setting["id"]] = margin
     plan = {
         "schema_version": 2,
         "campaign_id": campaign.get("campaign_id"),
         "selection_freeze_id": freeze_id.strip(),
         "bootstrap": dict(bootstrap),
+        "native_margins": native_margins,
         "units": units,
     }
     plan["artifact_contracts"] = _artifact_contracts(

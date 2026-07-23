@@ -315,6 +315,7 @@ class RQ3Evidence:
     all_five_arms_feasible: bool = False
     common_support: bool = False
     common_support_units: int = 0
+    low_tail_support: bool = False
     min_forget_margin: float | None = None
     min_utility_margin: float | None = None
     profile_mean: float | None = None
@@ -400,6 +401,10 @@ class RQ3Evidence:
             common_support_units=_as_count(
                 data.get("common_support_units", 0),
                 field_name=f"{name}.common_support_units",
+            ),
+            low_tail_support=_as_bool(
+                data.get("low_tail_support", False),
+                field_name=f"{name}.low_tail_support",
             ),
             min_forget_margin=_optional_number(
                 data.get("min_forget_margin"),

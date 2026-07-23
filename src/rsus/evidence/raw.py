@@ -231,9 +231,9 @@ def raw_plan_from_mapping(raw: object) -> RawPlan:
         native_margin = _number(
             item, "native_noninferiority_margin", where=where
         )
-        if native_margin < 0.0:
+        if not 0.0 <= native_margin <= 0.1:
             raise EvidenceValidationError(
-                f"{where}.native_noninferiority_margin must be non-negative"
+                f"{where}.native_noninferiority_margin must lie in [0, 0.1]"
             )
         native_name = _required_text(item, "native_metric_name", where=where)
         native_orientation = item.get("native_metric_orientation")
@@ -1132,6 +1132,7 @@ def _hierarchical_bootstrap(
     request_of: Callable[[Any], str],
     seed_of: Callable[[Any], str],
     resampled_metrics: Callable[[Any, random.Random], Mapping[str, float] | None],
+    max_rejection_fraction: float = 0.5,
 ) -> list[dict[str, float]]:
     by_request: dict[str, list[Any]] = defaultdict(list)
     for unit in units:
@@ -1169,6 +1170,13 @@ def _hierarchical_bootstrap(
         raise EvidenceValidationError(
             "hierarchical bootstrap could not produce enough finite paired draws; "
             "increase within-group candidate variation or inspect the raw shard"
+        )
+    rejection_fraction = 1.0 - replicates / attempts
+    if rejection_fraction > max_rejection_fraction:
+        raise EvidenceValidationError(
+            f"hierarchical bootstrap rejected {rejection_fraction:.0%} of "
+            f"replicates (cap {max_rejection_fraction:.0%}); the resampled "
+            "statistic is too fragile to report"
         )
     return draws
 
@@ -1212,6 +1220,7 @@ def _empty_rq3(*, selection_valid: bool = False) -> dict[str, object]:
         "all_five_arms_feasible": False,
         "common_support": False,
         "common_support_units": 0,
+        "low_tail_support": False,
         "min_forget_margin": None,
         "min_utility_margin": None,
         "profile_mean": None,
@@ -1489,6 +1498,9 @@ def aggregate_raw_evidence(
                 "common_support": len(protection_common_data)
                 == len(reached_valid),
                 "common_support_units": len(protection_common_data),
+                "low_tail_support": any(
+                    len(data.candidates) < 20 for data in protection_common_data
+                ),
                 "min_forget_margin": min(
                     data.min_forget_margin
                     for data in protection_common_data

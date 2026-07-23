@@ -33,6 +33,7 @@ def _plan(
     units: list[tuple[str, str]] | None = None,
     replicates: int = 39,
     native_orientation: str = "higher",
+    native_margin: float = 0.05,
 ):
     request_seeds = units or [("r1", "1"), ("r2", "1")]
     return raw_plan_from_mapping(
@@ -58,12 +59,19 @@ def _plan(
                     "tail_m": 2,
                     "native_metric_name": "retain_answer_token_recall",
                     "native_metric_orientation": native_orientation,
-                    "native_noninferiority_margin": 0.05,
+                    "native_noninferiority_margin": native_margin,
                 }
                 for request, seed in request_seeds
             ],
         }
     )
+
+
+def test_native_margin_outside_frozen_cap_is_rejected():
+    with pytest.raises(EvidenceValidationError, match=r"\[0, 0.1\]"):
+        _plan(native_margin=0.5)
+    with pytest.raises(EvidenceValidationError, match=r"\[0, 0.1\]"):
+        _plan(native_margin=-0.01)
 
 
 def _prediction(request: str, seed: str = "1") -> list[dict]:

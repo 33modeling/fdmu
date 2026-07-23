@@ -142,3 +142,14 @@ def test_rq1_pass_requires_positive_joint_bound(tmp_path):
     decision = report["rows"][0]["rq1"]
     assert decision["eligible"]
     assert not decision["claim_pass"]
+
+
+def test_rq2_cell_never_shows_eligible_for_ineligible_rows(tmp_path):
+    contract = _config(tmp_path)
+    raw = _row("primary", complete=False)
+    ledger = _ledger([raw])
+    report = _report(contract, ledger)
+    core = render_core_evidence_table(contract, ledger, report)
+    robustness = render_robustness_table(contract, ledger, report)
+    assert "y/--" not in core
+    assert "y/--" not in robustness
