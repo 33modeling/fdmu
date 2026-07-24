@@ -32,9 +32,11 @@ PAPER_STAGE_CONTRACT = {
     "consumes_campaign_config": True,
     "uses_adapter_registry": True,
     "consumes_exact_roster": True,
-    "emits_selection_inputs": True,
-    "emits_candidate_level_prediction_raw": True,
-    "emits_candidate_level_protection_raw": True,
+    "executes_unit_commands": True,
+    "validates_selection_inputs": True,
+    "validates_candidate_level_prediction_raw": True,
+    "validates_fidelity_raw": True,
+    "validates_candidate_level_protection_raw": True,
 }
 
 STAGE_OUTPUTS = {

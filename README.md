@@ -56,8 +56,10 @@ damage  d(x) = ℓ(x; θ_T) − ℓ(x; θ_0)      # 양수 = 손상
 
 ## 3. 어떤 실험인가 (파이프라인)
 
-논문 실행 경로는 **`experiments/paper/run_v4_stage.py`**이며, 정확한
-`D_cal/D_pred/D_prot/target` roster를 소비하고 후보 원자료를 봉인한다.
+논문 stage 오케스트레이터는 **`experiments/paper/run_v4_stage.py`**이며,
+정확한 `D_cal/D_pred/D_prot/target` roster와 unit command를 소비하고 후보
+원자료를 검증·봉인한다. 실제 모델 원자료를 생성하는 dataset unit producer는
+별도 계약이며 현재 TOFU용 producer도 아직 없다.
 `experiments/gate_1p5b/gate.py`는 단일 요청 진단 드라이버로 아래 산출물을 남긴다.
 
 ```
@@ -170,15 +172,17 @@ fdmu/  (retain-susceptibility 포크)
 | 언러닝 objectives (ga/graddiff/npo/simnpo/idkdpo/rmu/gru/circuit_breakers/repnoise) | ✅ |
 | **PDF v4 Eq. (7)--(8) repair + first-reaching wrapper** | ✅ **구현·단위테스트** (`repair.py`, `generators/repaired.py`) |
 | **RQ1/RQ2/RQ3 raw aggregation + 4/4/12-way IUT** | ✅ schema v2, fail-closed |
-| **정확 roster paper-stage executor** | ✅ 구현; 실제 GPU shard와 selection freeze는 아직 없음 |
+| **정확 roster paper-stage 오케스트레이터** | ✅ unit 실행·검증·봉인 구현 |
+| **TOFU PDF-v4 model-output unit producer** | ❌ 미구현; preflight가 명시적으로 차단 |
 | Table 1 예측 분석 / Table 2 보호 / Table 3 ablation / Table 4 cost | ✅ |
 | 데이터셋 **TOFU, RWKU, substrate** | ✅ 어댑터 구현 |
 | 데이터셋 **MUSE (News/Books)** | ✅ corpus-level 어댑터와 registry 구현; 독립 target-request roster는 미지원이라 paper preflight 차단 |
 | 데이터셋 **WMDP / PISTOL / KnowUnDo** | ❌ **미구현** (논문엔 있음) |
 
 > 요약: **v4 프로브·repair·증거 계약과 TOFU/RWKU/MUSE 로더는 구현됨**.
-> claim-ready 여부는 `experiments/paper/preflight.py`만 판단하며, 현재는 외부
-> 모델/roster/freeze가 없어서 준비되지 않은 상태다.
+> 다만 이 조각들을 paper raw schema로 실행하는 dataset unit producer는 아직
+> 없으며, 외부 모델/roster/freeze와 함께 `experiments/paper/preflight.py`가
+> 준비되지 않은 상태로 판정한다.
 
 ## 6. 설치 & 실행
 

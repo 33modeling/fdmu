@@ -6,12 +6,12 @@ Normative specification: `KDD_UnlearningFail.pdf` (13 pages)
 
 ## Bottom line
 
-The active code contract is now aligned with the July 24 PDF at the
-paper-execution and evidence boundaries. This remediation does not create
-experimental results and does not make the repository claim-ready. Preflight
-still fails because required model paths, the target-free selection freeze,
-WMDP/PISTOL adapters, MUSE independent request semantics, and several exact
-rosters are unavailable.
+The active code contract is aligned with the July 24 PDF at the evidence and
+stage-validation boundaries. This remediation does not create experimental
+results and does not make the repository claim-ready. Preflight still fails
+because no dataset-specific paper unit producer exists, required model paths
+and the target-free selection freeze are absent, and several dataset adapters,
+request semantics, and exact rosters remain unresolved.
 
 Legacy channel-matrix and Stage1/Stage2 programs remain diagnostic tools. They
 are not accepted as paper evidence. The paper path is:
@@ -19,6 +19,7 @@ are not accepted as paper evidence. The paper path is:
 ```text
 campaign.yaml
   -> preflight.py
+  -> dataset PAPER_UNIT_CONTRACT producer
   -> run_v4_stage.py
   -> aggregate_raw.py
   -> build_evidence.py
@@ -35,7 +36,8 @@ campaign.yaml
 | Equation (8): damped active-constraint filter, refresh, rollback and retry | Implemented and unit-tested | `src/rsus/repair.py`, `tests/test_repair_v4.py` |
 | `B_tok` repair budget and final feasibility gates | Implemented in v4 repair wrapper | `src/rsus/repair.py`, `src/rsus/generators/repaired.py` |
 | Exact `Kp`, selector-independent neutral data and score-independent folds | Implemented and frozen in manifests/plans | `src/rsus/partition.py`, `src/rsus/local_pdf_v4.py`, `experiments/paper/init_raw_plan.py` |
-| Exact `D_cal`, `D_pred`, `D_prot`, target roster consumption | Implemented in paper executor; external rosters remain unresolved for some datasets | `experiments/paper/run_v4_stage.py`, `configs/paper/campaign.yaml` |
+| Exact `D_cal`, `D_pred`, `D_prot`, target roster consumption | Implemented in paper orchestrator; external rosters remain unresolved for some datasets | `experiments/paper/run_v4_stage.py`, `configs/paper/campaign.yaml` |
+| Dataset model execution into paper raw schemas | Missing, including TOFU; preflight now blocks on `PAPER_UNIT_CONTRACT` | `experiments/paper/preflight.py`, `configs/paper/campaign.yaml` |
 | RQ1 four lower bounds and at least 80% tail eligibility | Implemented in schema-v2 raw aggregation and decision gate | `src/rsus/evidence/raw.py`, `src/rsus/evidence/pdf_v4.py` |
 | RQ2 fidelity/add-value four-way IUT | Implemented | `src/rsus/evidence/raw.py`, `src/rsus/evidence/pdf_v4.py` |
 | RQ3 eight damage UCBs and four native-NI LBs | Implemented; native raw data is mandatory | `src/rsus/evidence/raw.py`, `src/rsus/evidence/pdf_v4.py` |
@@ -76,12 +78,19 @@ campaign.yaml
    independent target-request rosters. Preflight does not treat registration
    alone as paper readiness.
 
+9. Stage orchestration and dataset model execution are now separate contracts.
+   `run_v4_stage.py` cannot satisfy `PAPER_UNIT_CONTRACT`, so validation code
+   can no longer masquerade as the missing TOFU raw producer.
+
 ## Remaining blockers
 
 These are real missing inputs or experiments, not code paths that may be
 silently substituted:
 
 - The configured `/group-volume/models/...` paths are absent on this host.
+- No dataset-specific paper unit producer exists. For TOFU this still requires
+  actual prediction/fidelity/protection raw emission, all PDF-v4 comparator
+  arms, and `retain_qa_accuracy`.
 - Llama-3.1-8B is not provisioned.
 - `configs/paper/selection_freeze.yaml` does not exist. It must be produced
   from target-free development stages and include `alpha_pred`, `alpha_prot`,
@@ -120,6 +129,6 @@ provenance, stage-roster sealing, RQ1/RQ2/RQ3 aggregation, tail eligibility,
 native non-inferiority, fractional CVaR, registry validation, and preflight.
 
 `experiments/paper/preflight.py` is expected to exit 2 in the current checkout.
-The useful condition is that `summary.unready_executors` is empty while the
-report names only actual model, freeze, adapter, capability, or roster
-blockers. No GPU/model campaign was run as part of this remediation.
+`summary.unready_executors` is empty because the stage orchestrator is real;
+`summary.unready_unit_producers` remains nonempty until dataset model runners
+exist. No GPU/model campaign was run as part of this remediation.

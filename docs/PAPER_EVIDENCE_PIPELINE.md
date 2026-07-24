@@ -203,8 +203,10 @@ incomplete draw makes the unit infeasible and non-common.
 ### Runner-to-ledger boundary
 
 The historical channel-matrix JSON (`results.json`) is not the candidate JSONL
-schema above and is never consumed directly by the paper gate. The active
-bridge is `experiments/paper/run_v4_stage.py`. A frozen stage manifest contains
+schema above and is never consumed directly by the paper gate. The stage
+orchestrator is `experiments/paper/run_v4_stage.py`. A separate dataset unit
+producer must create the shards; the orchestrator only runs that frozen
+command, validates its outputs, and seals them. A frozen stage manifest contains
 the exact `(parent, request, seed)` Cartesian roster, a shell-free argv command
 per unit, and its output shard paths:
 

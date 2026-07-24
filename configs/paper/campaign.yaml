@@ -129,6 +129,9 @@ models:
 datasets:
   TOFU:
     adapter: tofu
+    # run_v4_stage.py only orchestrates and validates shards. This remains
+    # blocked until a real model runner emits all PDF-v4 raw records.
+    unit_producer: TBD_TOFU_PDF_V4_UNIT_PRODUCER
     roster_unit: forget-author request_id
     native_metric:
       name: retain_qa_accuracy
@@ -145,6 +148,7 @@ datasets:
 
   "WMDP-bio/MMLU":
     adapter: wmdp_bio_mmlu
+    unit_producer: TBD_WMDP_PDF_V4_UNIT_PRODUCER
     roster_unit: TBD_WMDP_REQUEST_UNIT
     native_metric:
       name: mmlu_accuracy
@@ -158,6 +162,7 @@ datasets:
 
   MUSE-News:
     adapter: muse_news
+    unit_producer: TBD_MUSE_NEWS_PDF_V4_UNIT_PRODUCER
     roster_unit: corpus deletion request_id
     native_metric:
       name: retain_knowledge_accuracy
@@ -171,6 +176,7 @@ datasets:
 
   MUSE-Books:
     adapter: muse_books
+    unit_producer: TBD_MUSE_BOOKS_PDF_V4_UNIT_PRODUCER
     roster_unit: corpus deletion request_id
     native_metric:
       name: retain_knowledge_accuracy
@@ -184,6 +190,7 @@ datasets:
 
   RWKU:
     adapter: rwku
+    unit_producer: TBD_RWKU_PDF_V4_UNIT_PRODUCER
     roster_unit: forget-target request_id
     native_metric:
       name: neighbor_qa_accuracy
@@ -201,6 +208,7 @@ datasets:
 
   PISTOL:
     adapter: pistol
+    unit_producer: TBD_PISTOL_PDF_V4_UNIT_PRODUCER
     roster_unit: TBD_PISTOL_REQUEST_UNIT
     native_metric:
       name: retain_task_accuracy

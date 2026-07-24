@@ -2,8 +2,9 @@
 
 This command performs no model or dataset loading.  It verifies, before a GPU
 is allocated, that every evidence setting names a real adapter, an explicitly
-provisioned model and dtype, all seven parent implementations, and exact
-pairwise-disjoint ``D_cal``/``D_pred``/``D_prot``/``target`` rosters.
+provisioned model and dtype, all seven parent implementations, exact
+pairwise-disjoint ``D_cal``/``D_pred``/``D_prot``/``target`` rosters, a stage
+orchestrator, and a dataset-specific model-output producer.
 
 Exit codes:
   0 -- every setting and stage is ready
@@ -43,14 +44,57 @@ EXECUTOR_FLAGS = (
     "consumes_campaign_config",
     "uses_adapter_registry",
     "consumes_exact_roster",
+    "executes_unit_commands",
 )
 STAGE_EXECUTOR_FLAGS = {
-    "calibration": ("emits_selection_inputs",),
-    "prediction": ("emits_candidate_level_prediction_raw",),
-    "protection": ("emits_candidate_level_protection_raw",),
+    "calibration": ("validates_fidelity_raw",),
+    "prediction": (
+        "validates_candidate_level_prediction_raw",
+        "validates_selection_inputs",
+    ),
+    "protection": (
+        "validates_candidate_level_protection_raw",
+        "validates_selection_inputs",
+    ),
+    "target_evaluation": (
+        "validates_candidate_level_prediction_raw",
+        "validates_fidelity_raw",
+        "validates_candidate_level_protection_raw",
+    ),
+}
+UNIT_PRODUCER_MARKER = "PAPER_UNIT_CONTRACT"
+UNIT_PRODUCER_FLAGS = (
+    "consumes_campaign_config",
+    "consumes_frozen_unit_identity",
+    "uses_adapter_registry",
+    "executes_model",
+)
+STAGE_UNIT_PRODUCER_FLAGS = {
+    "calibration": (
+        "emits_fidelity_raw",
+        "computes_exact_gradient_reference",
+    ),
+    "prediction": (
+        "emits_candidate_level_prediction_raw",
+        "emits_selection_inputs",
+        "runs_parent_to_first_reaching_checkpoint",
+    ),
+    "protection": (
+        "emits_candidate_level_protection_raw",
+        "emits_selection_inputs",
+        "runs_parent_to_first_reaching_checkpoint",
+        "runs_pdf_v4_repair",
+        "runs_all_comparator_arms",
+        "emits_dataset_native_retention",
+    ),
     "target_evaluation": (
         "emits_candidate_level_prediction_raw",
+        "emits_fidelity_raw",
         "emits_candidate_level_protection_raw",
+        "runs_parent_to_first_reaching_checkpoint",
+        "runs_pdf_v4_repair",
+        "runs_all_comparator_arms",
+        "emits_dataset_native_retention",
     ),
 }
 
@@ -191,6 +235,83 @@ def _executor_report(stage: str, entrypoint: str) -> dict[str, Any]:
                     reasons.append(f"executor marker does not certify {flag}")
     return {
         "ready": not reasons,
+        "entrypoint": entrypoint,
+        "resolved_path": str(path) if path is not None else None,
+        "marker": marker if isinstance(marker, dict) else None,
+        "reasons": reasons,
+    }
+
+
+def _unit_producer_report(
+    stage: str,
+    dataset: str,
+    adapter: object,
+    entrypoint: object,
+) -> dict[str, Any]:
+    reasons: list[str] = []
+    path: Path | None = None
+    marker: object = None
+    if not _nonempty_string(entrypoint):
+        reasons.append("dataset unit_producer is missing")
+    elif _is_tbd(entrypoint):
+        reasons.append(f"dataset unit_producer is unresolved: {entrypoint}")
+    else:
+        path = Path(entrypoint)
+        if not path.is_absolute():
+            path = ROOT / path
+        path = path.resolve()
+        if not path.is_file():
+            reasons.append(f"dataset unit_producer is missing: {path}")
+        else:
+            try:
+                tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+                for node in tree.body:
+                    if not isinstance(node, (ast.Assign, ast.AnnAssign)):
+                        continue
+                    targets = node.targets if isinstance(node, ast.Assign) else [node.target]
+                    if any(
+                        isinstance(target, ast.Name)
+                        and target.id == UNIT_PRODUCER_MARKER
+                        for target in targets
+                    ):
+                        marker = ast.literal_eval(node.value)
+                        break
+            except (OSError, SyntaxError, ValueError) as error:
+                reasons.append(f"cannot inspect dataset unit_producer contract: {error}")
+    if path is not None and path.is_file():
+        if not isinstance(marker, dict):
+            reasons.append(
+                f"dataset unit_producer lacks literal {UNIT_PRODUCER_MARKER} marker"
+            )
+        else:
+            if marker.get("schema_version") != 1:
+                reasons.append("dataset unit_producer marker schema_version is not 1")
+            adapters = marker.get("adapters")
+            if (
+                not isinstance(adapters, (list, tuple))
+                or not _nonempty_string(adapter)
+                or adapter not in adapters
+            ):
+                reasons.append(
+                    f"dataset unit_producer does not support adapter {adapter!r}"
+                )
+            supported = marker.get("stages")
+            if not isinstance(supported, (list, tuple)) or stage not in supported:
+                reasons.append(
+                    f"dataset unit_producer does not support stage {stage!r}"
+                )
+            for flag in (
+                UNIT_PRODUCER_FLAGS + STAGE_UNIT_PRODUCER_FLAGS.get(stage, ())
+            ):
+                if marker.get(flag) is not True:
+                    reasons.append(
+                        f"dataset unit_producer marker does not certify {flag}"
+                    )
+    return {
+        "ready": not reasons,
+        "dataset": dataset,
+        "adapter": adapter,
+        "stage": stage,
         "entrypoint": entrypoint,
         "resolved_path": str(path) if path is not None else None,
         "marker": marker if isinstance(marker, dict) else None,
@@ -614,6 +735,22 @@ def build_preflight_report(
         stage: _executor_report(stage, spec["executor"])
         for stage, spec in stages.items()
     }
+    unit_producer_reports = {
+        dataset: {
+            stage: _unit_producer_report(
+                stage,
+                dataset,
+                dataset_reports[dataset]["adapter"],
+                (
+                    dataset_configs.get(dataset, {}).get("unit_producer")
+                    if isinstance(dataset_configs.get(dataset), dict)
+                    else None
+                ),
+            )
+            for stage in stages
+        }
+        for dataset in dataset_names
+    }
     selection_freeze = _selection_freeze_report(evidence, campaign)
 
     setting_reports: list[dict[str, Any]] = []
@@ -643,6 +780,7 @@ def build_preflight_report(
         for stage, spec in stages.items():
             reasons: list[str] = []
             executor_report = executor_reports[stage]
+            unit_producer_report = unit_producer_reports[dataset][stage]
             roster_report = dataset_report["rosters"].get(spec["roster"], {})
             if not dataset_report["adapter_registered"]:
                 reasons.append(f"dataset adapter {dataset_report['adapter']!r} is unavailable")
@@ -667,6 +805,8 @@ def build_preflight_report(
                 reasons.append(parent_reason)
             if not executor_report["ready"]:
                 reasons.extend(executor_report["reasons"])
+            if not unit_producer_report["ready"]:
+                reasons.extend(unit_producer_report["reasons"])
             if stage == "target_evaluation" and not selection_freeze["ready"]:
                 reasons.extend(selection_freeze["reasons"])
             ready = not reasons
@@ -676,6 +816,8 @@ def build_preflight_report(
                 "adapter_capability": spec["adapter_capability"],
                 "executor": executor_report["entrypoint"],
                 "executor_ready": executor_report["ready"],
+                "unit_producer": unit_producer_report["entrypoint"],
+                "unit_producer_ready": unit_producer_report["ready"],
                 "roster": spec["roster"],
                 "roster_count": roster_report.get("count", 0),
                 "roster_sha256": roster_report.get("sha256"),
@@ -716,6 +858,7 @@ def build_preflight_report(
         },
         "stages": stages,
         "executors": executor_reports,
+        "unit_producers": unit_producer_reports,
         "selection_freeze": selection_freeze,
         "datasets": dataset_reports,
         "models": model_reports,
@@ -741,6 +884,12 @@ def build_preflight_report(
             ),
             "unready_executors": sorted(
                 stage for stage, item in executor_reports.items() if not item["ready"]
+            ),
+            "unready_unit_producers": sorted(
+                f"{dataset}/{stage}"
+                for dataset, by_stage in unit_producer_reports.items()
+                for stage, item in by_stage.items()
+                if not item["ready"]
             ),
             "selection_freeze_ready": selection_freeze["ready"],
         },

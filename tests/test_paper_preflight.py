@@ -47,9 +47,11 @@ def _ready_contract(tmp_path: Path) -> tuple[Path, Path, Path]:
                 "consumes_campaign_config": True,
                 "uses_adapter_registry": True,
                 "consumes_exact_roster": True,
-                "emits_selection_inputs": True,
-                "emits_candidate_level_prediction_raw": True,
-                "emits_candidate_level_protection_raw": True,
+                "executes_unit_commands": True,
+                "validates_selection_inputs": True,
+                "validates_candidate_level_prediction_raw": True,
+                "validates_fidelity_raw": True,
+                "validates_candidate_level_protection_raw": True,
             }
         )
         + "\n",
@@ -57,6 +59,34 @@ def _ready_contract(tmp_path: Path) -> tuple[Path, Path, Path]:
     )
     for stage in campaign["stages"].values():
         stage["executor"] = str(executor)
+    producer = tmp_path / "paper_unit_producer.py"
+    producer.write_text(
+        "PAPER_UNIT_CONTRACT = "
+        + repr(
+            {
+                "schema_version": 1,
+                "adapters": ["tofu"],
+                "stages": list(campaign["stages"]),
+                "consumes_campaign_config": True,
+                "consumes_frozen_unit_identity": True,
+                "uses_adapter_registry": True,
+                "executes_model": True,
+                "emits_fidelity_raw": True,
+                "computes_exact_gradient_reference": True,
+                "emits_candidate_level_prediction_raw": True,
+                "emits_selection_inputs": True,
+                "runs_parent_to_first_reaching_checkpoint": True,
+                "emits_candidate_level_protection_raw": True,
+                "runs_pdf_v4_repair": True,
+                "runs_all_comparator_arms": True,
+                "emits_dataset_native_retention": True,
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    for dataset in campaign["datasets"].values():
+        dataset["unit_producer"] = str(producer)
     freeze = {
         "schema_version": 1,
         "status": "frozen",
@@ -133,6 +163,7 @@ def test_ready_setting_reports_exact_rosters_dtype_and_seven_parents(tmp_path):
     assert report["summary"]["settings_ready"] == 8
     assert report["summary"]["stages_ready"] == 32
     assert report["summary"]["unready_executors"] == []
+    assert report["summary"]["unready_unit_producers"] == []
     assert report["summary"]["selection_freeze_ready"]
 
 
@@ -183,6 +214,64 @@ def test_tbd_missing_adapter_and_unprovisioned_model_are_explicit(tmp_path):
         "reasons"
     ] == ["contains unresolved ids: TBD_WMDP_D_CAL_REQUEST_IDS"]
     assert "Llama-3.1-8B" in report["summary"]["unprovisioned_models"]
+    assert not report["unit_producers"]["TOFU"]["prediction"]["ready"]
+    assert report["unit_producers"]["TOFU"]["prediction"]["reasons"] == [
+        "dataset unit_producer is unresolved: TBD_TOFU_PDF_V4_UNIT_PRODUCER"
+    ]
+
+
+def test_orchestrator_cannot_stand_in_for_a_model_output_producer(tmp_path):
+    evidence, campaign_path, output = _ready_contract(tmp_path)
+    campaign = yaml.safe_load(campaign_path.read_text(encoding="utf-8"))
+    campaign["datasets"]["TOFU"]["unit_producer"] = campaign["stages"][
+        "prediction"
+    ]["executor"]
+    campaign_path.write_text(
+        yaml.safe_dump(campaign, sort_keys=False), encoding="utf-8"
+    )
+
+    result = _run(evidence, campaign_path, output)
+    assert result.returncode == 2
+    report = json.loads(output.read_text(encoding="utf-8"))
+    producer = report["unit_producers"]["TOFU"]["prediction"]
+    assert not producer["ready"]
+    assert any(
+        "lacks literal PAPER_UNIT_CONTRACT" in reason
+        for reason in producer["reasons"]
+    )
+    assert not report["settings"][0]["stages"]["prediction"]["ready"]
+
+
+def test_protection_producer_requires_native_retention_and_pdf_v4_arms(tmp_path):
+    evidence, campaign_path, output = _ready_contract(tmp_path)
+    campaign = yaml.safe_load(campaign_path.read_text(encoding="utf-8"))
+    producer_path = Path(campaign["datasets"]["TOFU"]["unit_producer"])
+    marker = {
+        "schema_version": 1,
+        "adapters": ["tofu"],
+        "stages": list(campaign["stages"]),
+        "consumes_campaign_config": True,
+        "consumes_frozen_unit_identity": True,
+        "uses_adapter_registry": True,
+        "executes_model": True,
+        "emits_candidate_level_protection_raw": True,
+        "emits_selection_inputs": True,
+        "runs_parent_to_first_reaching_checkpoint": True,
+        "runs_pdf_v4_repair": True,
+    }
+    producer_path.write_text(
+        "PAPER_UNIT_CONTRACT = " + repr(marker) + "\n", encoding="utf-8"
+    )
+
+    result = _run(evidence, campaign_path, output)
+    assert result.returncode == 2
+    report = json.loads(output.read_text(encoding="utf-8"))
+    producer = report["unit_producers"]["TOFU"]["protection"]
+    assert not producer["ready"]
+    assert {
+        "dataset unit_producer marker does not certify runs_all_comparator_arms",
+        "dataset unit_producer marker does not certify emits_dataset_native_retention",
+    } <= set(producer["reasons"])
 
 
 def test_missing_one_parent_and_invalid_dtype_fail_closed(tmp_path):

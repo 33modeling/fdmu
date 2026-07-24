@@ -17,8 +17,8 @@ The checked inputs are:
 - `configs/paper/evidence.yaml`: the eight setting denominators used by the
   paper;
 - `configs/paper/campaign.yaml`: adapters, exact rosters, model sources,
-  frozen 8-setting/4-stage contract, precision, executors, and parent
-  availability;
+  frozen 8-setting/4-stage contract, precision, stage orchestrators,
+  dataset-specific unit producers, and parent availability;
 - `src/rsus/data/registry.py`: the adapters that actually exist in code.
 
 ## Why this is fail-closed
@@ -40,14 +40,20 @@ Each paper setting is checked at four stages:
 | target evaluation | `target` | `target_evaluation` |
 
 An adapter capability is necessary but not an execution claim. Each stage
-also names a real Python entrypoint. Preflight inspects its literal
+also names a real Python orchestrator. Preflight inspects its literal
 `PAPER_STAGE_CONTRACT` marker and requires campaign-config dispatch, adapter
-registry dispatch, exact-roster consumption, and stage-specific raw output.
-Prediction must emit candidate-level prediction records; protection must emit
-candidate-by-arm records, including repeated-random draw IDs and feasibility
-margins and dataset-native retention. The active executor is
+registry dispatch, exact-roster consumption, shell-free unit execution, and
+stage-specific raw validation. The active orchestrator is
 `experiments/paper/run_v4_stage.py`; legacy summary CSV/JSON aggregators do not
 satisfy this contract.
+
+The orchestrator does not itself run a model. Every dataset must separately
+name a real `unit_producer` exposing `PAPER_UNIT_CONTRACT`. Preflight requires
+adapter support and stage-specific behavior: exact-gradient fidelity for
+calibration, first-reaching parent damage for prediction, and PDF-v4 repair,
+all comparator arms, feasibility margins, and dataset-native retention for
+protection/target. A stage cannot become ready by pointing `unit_producer` at
+the orchestrator.
 Target evaluation additionally requires an exact 8-setting-by-7-parent
 prediction/protection selection freeze whose source campaign matches and whose
 `frozen_before_target` flag is true. Each protection selection also freezes
@@ -85,19 +91,20 @@ following work is real:
 
 | Dataset/model | Current status |
 |---|---|
-| TOFU + Qwen2.5-7B | adapter/executor/schema ready; model path absent on this host and selection freeze absent |
-| TOFU + Qwen2.5-1.5B | adapter/executor/schema ready; model path and selection freeze absent |
-| TOFU + Llama-3.1-8B | fp32 declared; model not yet provisioned |
+| TOFU + Qwen2.5-7B | adapter/rosters/orchestrator ready; TOFU unit producer, model path, and selection freeze absent |
+| TOFU + Qwen2.5-1.5B | adapter/rosters/orchestrator ready; TOFU unit producer, model path, and selection freeze absent |
+| TOFU + Llama-3.1-8B | TOFU unit producer absent; fp32 declared, model not yet provisioned |
 | WMDP-bio/MMLU | adapter and all four rosters unresolved |
 | MUSE-News | corpus adapter registered; independent target-request semantics and all four rosters unresolved |
 | MUSE-Books | corpus adapter registered; independent target-request semantics and all four rosters unresolved |
 | RWKU | adapter and exact pairwise-disjoint rosters ready; model path/freeze absent |
 | PISTOL | adapter and all four rosters unresolved |
 
-These are external execution blockers, not placeholders that the evidence
-layer may bypass. The v4 executor contract itself is ready; preflight still
-reports zero runnable stages on this host because model paths and the selection
-freeze are absent, with additional dataset blockers where listed.
+These are execution blockers, not placeholders that the evidence layer may
+bypass. The v4 stage orchestrator contract is ready, but no dataset-specific
+paper unit producer is currently implemented. Preflight reports zero runnable
+stages on this host and names producer, model, freeze, adapter, capability, and
+roster blockers separately.
 
 ## Adding a real adapter
 
@@ -114,11 +121,13 @@ freeze are absent, with additional dataset blockers where listed.
    repeated under four labels.
 6. Run preflight again. Only an all-green report may feed GPU launch scripts.
 
-A paper-stage executor must additionally expose a literal
+A paper-stage orchestrator must additionally expose a literal
 `PAPER_STAGE_CONTRACT` mapping with schema version 1, its supported stage IDs,
-the three input-contract flags, and the appropriate candidate-level raw-output
-flag. Adding the marker without implementing and testing those behaviors is a
-contract violation.
+the input/execution flags, and the appropriate candidate-level validation
+flags. A dataset model runner must separately expose `PAPER_UNIT_CONTRACT` with
+its adapter, supported stages, and the required model-output behaviors. Adding
+either marker without implementing and testing those behaviors is a contract
+violation.
 
 The controlled substrate is also registered because it already returns the
 same `Request` contract. It lacks `target_evaluation`, so it cannot silently

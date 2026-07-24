@@ -379,7 +379,8 @@ orchestrator that connects the frozen manifest, two profile channels, exact
 Top-Kp allocation, first-reaching parent, and this repair core.
 
 The paper campaign must remain blocked until all of the following are frozen
-and the new wrapper is wired into a `PAPER_STAGE_CONTRACT` executor:
+and the new wrapper is wired into a dataset `PAPER_UNIT_CONTRACT` producer
+behind the `PAPER_STAGE_CONTRACT` orchestrator:
 
 - the KL reduction and per-constraint reduction adopted by the paper;
 - `beta`, both `kappa` values, `m_ref`, `lambda`, both tolerances,
