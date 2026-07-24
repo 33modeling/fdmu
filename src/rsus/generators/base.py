@@ -3,8 +3,9 @@ protection baselines (Table 2).
 
 Records every candidate's NLL at theta_0 and at each saved checkpoint, so
 damage d_t(x) = ell(x; theta_t) - ell(x; theta_0) is available at every
-horizon; the terminal-budget checkpoint is the paper's primary prediction
-horizon. Writes damage.json plus a DONE marker consumed by sealing.unseal.
+horizon. Paper-facing callers stop at the first saved checkpoint satisfying
+the direct forgetting criterion. Writes damage.json plus a DONE marker
+consumed by sealing.unseal.
 Objectives never see susceptibility scores; their retain stream is passed in
 explicitly by the caller.
 """

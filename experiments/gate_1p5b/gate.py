@@ -170,6 +170,13 @@ def parse_args():
                         "(forced to 'eager' when jvp is requested: SDPA kernels "
                         "do not support forward-mode AD)")
     p.add_argument("--gen-ckpt-every", type=int, default=10)
+    p.add_argument(
+        "--gen-recall-gate",
+        type=float,
+        default=0.10,
+        help="direct forgetting threshold; T1 damage is measured at the first "
+             "saved checkpoint at or below this value",
+    )
     p.add_argument("--s1-lr", type=float, default=1e-5)
     p.add_argument("--s1-max-steps", type=int, default=600)
     p.add_argument("--partition-predictor", default="fd",
@@ -393,6 +400,8 @@ def _write_sft_cache(path: Path, contract: dict, result: dict, state: dict, log)
 
 def main():
     a = parse_args()
+    if not 0.0 <= a.gen_recall_gate <= 1.0:
+        raise ValueError("--gen-recall-gate must be in [0, 1]")
     if a.smoke:
         apply_smoke(a)
     requested_predictors = [x.strip() for x in a.predictors.split(",") if x.strip()]
@@ -703,15 +712,24 @@ def main():
             rec = run_trajectory(
                 trajectory_model, g, req, retain_gen, cfg_g,
                 out_dir=out / f"traj_{g}",
+                stop_at_recall=a.gen_recall_gate,
             )
         finally:
             del trajectory_model
             clear_cuda_cache()
         markers.append(out / f"traj_{g}" / "DONE")
         term = rec.terminal()
+        if term.forget_recall > a.gen_recall_gate:
+            raise RuntimeError(
+                f"generator {g} did not reach direct recall <= "
+                f"{a.gen_recall_gate:.3f}; refusing terminal-budget damage"
+            )
         dmg_all = rec.damage_at()
         rem = [dmg_all[c] for c in audit_ids]
-        log(f"  terminal recall={term.forget_recall:.3f} mean_audit_dmg={sum(rem)/len(rem):+.3f}")
+        log(
+            f"  first-reaching step={term.step} recall={term.forget_recall:.3f} "
+            f"mean_audit_dmg={sum(rem)/len(rem):+.3f}"
+        )
         damage_by_opt[g] = {req.request_id: {c: dmg_all[c] for c in audit_ids}}
 
     sealed = {

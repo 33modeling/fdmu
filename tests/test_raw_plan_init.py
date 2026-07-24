@@ -38,7 +38,12 @@ def _contracts():
     primary = "tofu_qwen25_1p5b"
     for parent in freeze["selections"][primary].values():
         parent["prediction"] = {"valid": True, "fallback": False, "alpha": 0.4}
-        parent["protection"] = {"valid": True, "fallback": False, "alpha": 0.6}
+        parent["protection"] = {
+            "valid": True,
+            "fallback": False,
+            "alpha": 0.6,
+            "Kp": 2,
+        }
     return evidence, campaign, freeze
 
 
@@ -130,7 +135,12 @@ def test_pending_freeze_and_unprovisioned_setting_fail_closed():
     llama = "tofu_llama31_8b"
     for parent in freeze["selections"][llama].values():
         parent["prediction"] = {"valid": True, "fallback": False, "alpha": 0.5}
-        parent["protection"] = {"valid": True, "fallback": False, "alpha": 0.5}
+        parent["protection"] = {
+            "valid": True,
+            "fallback": False,
+            "alpha": 0.5,
+            "Kp": 2,
+        }
     with pytest.raises(EvidenceValidationError, match="not provisioned"):
         build_plan(evidence, campaign, freeze, setting_ids={llama})
 

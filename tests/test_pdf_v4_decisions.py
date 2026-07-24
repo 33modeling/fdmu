@@ -68,7 +68,7 @@ def test_rq3_requires_eight_damage_and_four_native_bounds():
         common_support_units=5,
         min_forget_margin=0.1,
         min_utility_margin=0.1,
-        damage={
+        comparisons={
             comparator: {outcome: _reduction() for outcome in DAMAGE_OUTCOMES}
             for comparator in COMPARATORS
         },
@@ -100,7 +100,7 @@ def test_rq3_native_noninferiority_cannot_be_replaced_by_damage_pass():
         common_support_units=5,
         min_forget_margin=0.1,
         min_utility_margin=0.1,
-        damage={
+        comparisons={
             comparator: {outcome: _reduction() for outcome in DAMAGE_OUTCOMES}
             for comparator in COMPARATORS
         },

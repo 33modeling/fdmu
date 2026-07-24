@@ -45,11 +45,14 @@ also names a real Python entrypoint. Preflight inspects its literal
 registry dispatch, exact-roster consumption, and stage-specific raw output.
 Prediction must emit candidate-level prediction records; protection must emit
 candidate-by-arm records, including repeated-random draw IDs and feasibility
-margins. The legacy summary CSV/JSON aggregators do not satisfy this contract.
+margins and dataset-native retention. The active executor is
+`experiments/paper/run_v4_stage.py`; legacy summary CSV/JSON aggregators do not
+satisfy this contract.
 Target evaluation additionally requires an exact 8-setting-by-7-parent
 prediction/protection selection freeze whose source campaign matches and whose
-`frozen_before_target` flag is true. The repository intentionally has no such
-file until all target-free development stages finish.
+`frozen_before_target` flag is true. Each protection selection also freezes
+positive integer `Kp`. The repository intentionally has no such file until all
+target-free development stages finish.
 
 All four rosters must be nonempty, explicitly enumerated lists with no `TBD`,
 duplicates, ranges, or pairwise overlap. The report preserves every ID and a
@@ -82,19 +85,19 @@ following work is real:
 
 | Dataset/model | Current status |
 |---|---|
-| TOFU + Qwen2.5-7B | schema-ready; legacy runner does not consume the paper roster or emit candidate-level raw records |
-| TOFU + Qwen2.5-1.5B | schema-ready; same executor blocker |
+| TOFU + Qwen2.5-7B | adapter/executor/schema ready; model path absent on this host and selection freeze absent |
+| TOFU + Qwen2.5-1.5B | adapter/executor/schema ready; model path and selection freeze absent |
 | TOFU + Llama-3.1-8B | fp32 declared; model not yet provisioned |
 | WMDP-bio/MMLU | adapter and all four rosters unresolved |
-| MUSE-News | adapter and all four rosters unresolved |
-| MUSE-Books | adapter and all four rosters unresolved |
-| RWKU | adapter and all four rosters unresolved |
+| MUSE-News | corpus adapter registered; independent target-request semantics and all four rosters unresolved |
+| MUSE-Books | corpus adapter registered; independent target-request semantics and all four rosters unresolved |
+| RWKU | adapter and exact pairwise-disjoint rosters ready; model path/freeze absent |
 | PISTOL | adapter and all four rosters unresolved |
 
-These are blockers, not loaders. No synthetic/fake implementation is provided
-for the unsupported benchmarks. Consequently the repository contract currently
-reports zero executor-ready stages; this is intentional and more accurate than
-calling a setting runnable because its dataset factory exists.
+These are external execution blockers, not placeholders that the evidence
+layer may bypass. The v4 executor contract itself is ready; preflight still
+reports zero runnable stages on this host because model paths and the selection
+freeze are absent, with additional dataset blockers where listed.
 
 ## Adding a real adapter
 
@@ -106,7 +109,9 @@ calling a setting runnable because its dataset factory exists.
 4. Register a `DatasetAdapter` with only the stages the implementation truly
    supports. Never reuse the TOFU factory.
 5. Replace each dataset's four distinct `TBD_*` lists in `campaign.yaml` with
-   exact IDs and set a matching `roster_unit`.
+   exact IDs and set a matching `roster_unit`. The adapter must support
+   independent target-request rosters; a corpus-level request cannot be
+   repeated under four labels.
 6. Run preflight again. Only an all-green report may feed GPU launch scripts.
 
 A paper-stage executor must additionally expose a literal

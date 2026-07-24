@@ -116,6 +116,9 @@ class PlanUnit:
     prediction_selection: Selection
     protection_selection: Selection
     repeated_random_draws: tuple[str, ...]
+    tail_m: int
+    native_metric_orientation: str
+    native_noninferiority_margin: float
 
     @property
     def row_key(self) -> RowKey:
@@ -170,8 +173,8 @@ def load_raw_plan(path: str | Path) -> RawPlan:
 def raw_plan_from_mapping(raw: object) -> RawPlan:
     if not isinstance(raw, Mapping):
         raise EvidenceValidationError("raw plan root must be a mapping")
-    if raw.get("schema_version") != 1:
-        raise EvidenceValidationError("raw plan schema_version must be 1")
+    if raw.get("schema_version") != 2:
+        raise EvidenceValidationError("raw plan schema_version must be 2")
     settings = raw.get("bootstrap", {}) or {}
     if not isinstance(settings, Mapping):
         raise EvidenceValidationError("raw plan bootstrap must be a mapping")
@@ -217,11 +220,29 @@ def raw_plan_from_mapping(raw: object) -> RawPlan:
             raise EvidenceValidationError(
                 f"{where}.repeated_random_draws contains duplicates"
             )
+        tail_m = item.get("tail_m")
+        if isinstance(tail_m, bool) or not isinstance(tail_m, int) or tail_m < 1:
+            raise EvidenceValidationError(f"{where}.tail_m must be a positive integer")
+        native_margin = _number(
+            item, "native_noninferiority_margin", where=where
+        )
+        if native_margin < 0.0:
+            raise EvidenceValidationError(
+                f"{where}.native_noninferiority_margin must be non-negative"
+            )
+        native_orientation = item.get("native_metric_orientation")
+        if native_orientation not in {"higher", "lower"}:
+            raise EvidenceValidationError(
+                f"{where}.native_metric_orientation must be higher or lower"
+            )
         units[key] = PlanUnit(
             key=key,
             prediction_selection=prediction_selection,
             protection_selection=protection_selection,
             repeated_random_draws=draws,
+            tail_m=tail_m,
+            native_metric_orientation=native_orientation,
+            native_noninferiority_margin=native_margin,
         )
 
     # A parent-level mixture weight is frozen once and therefore cannot vary
@@ -329,6 +350,7 @@ class PredictionCandidate:
     s0: float
     s1: float
     joint: float
+    simple_control: float
     damage: float
 
 
@@ -338,7 +360,19 @@ class PredictionUnitData:
     profile_valid: bool
     reached: bool
     trajectory_completed: bool
+    parent_checkpoint_id: str
+    parent_checkpoint_first_reaching: bool
     candidates: tuple[PredictionCandidate, ...]
+
+
+@dataclass(frozen=True)
+class FidelityUnitData:
+    key: UnitKey
+    perturbations_valid: bool
+    exact_reference_valid: bool
+    common_control_support: bool
+    f_rho: float
+    f_k: float
 
 
 @dataclass(frozen=True)
@@ -348,6 +382,7 @@ class ProtectionRecord:
     arm: str
     draw_id: str | None
     damage: float
+    native_retention: float
     feasible: bool
     direct_forget_margin: float
     paraphrase_forget_margin: float
@@ -374,6 +409,11 @@ class ProtectionUnitData:
     groups: Mapping[str, str]
     damages: Mapping[str, Mapping[str, float]]
     random_draw_damages: Mapping[str, Mapping[str, float]]
+    native_retention: Mapping[str, float]
+    random_draw_native_retention: Mapping[str, float]
+    native_metric_orientation: str
+    native_noninferiority_margin: float
+    all_random_draws_complete: bool
     feasible: bool
     common: bool
     min_forget_margin: float | None
@@ -398,7 +438,7 @@ def _parse_prediction_records(
     plan: RawPlan, records: Iterable[Mapping[str, Any]]
 ) -> dict[UnitKey, PredictionUnitData]:
     grouped: dict[UnitKey, list[PredictionCandidate]] = defaultdict(list)
-    status: dict[UnitKey, tuple[bool, bool, bool]] = {}
+    status: dict[UnitKey, tuple[bool, bool, bool, str, bool]] = {}
     seen: set[tuple[UnitKey, str]] = set()
     for index, raw in enumerate(records):
         where = f"prediction[{index}]"
@@ -419,10 +459,20 @@ def _parse_prediction_records(
                 f"duplicate prediction candidate {candidate_id!r} for {key!r}"
             )
         seen.add(identity)
+        reached = _required_bool(raw, "reached", where=where)
+        first_reaching = _required_bool(
+            raw, "parent_checkpoint_first_reaching", where=where
+        )
+        if reached and not first_reaching:
+            raise EvidenceValidationError(
+                f"{where} reached damage is not from the first reaching checkpoint"
+            )
         observed_status = (
             _required_bool(raw, "profile_valid", where=where),
-            _required_bool(raw, "reached", where=where),
+            reached,
             _optional_bool(raw, "trajectory_completed", where=where, default=True),
+            _required_text(raw, "parent_checkpoint_id", where=where),
+            first_reaching,
         )
         if key in status and status[key] != observed_status:
             raise EvidenceValidationError(f"{where} has inconsistent unit status")
@@ -434,6 +484,7 @@ def _parse_prediction_records(
                 s0=_number(raw, "s0", where=where),
                 s1=_number(raw, "s1", where=where),
                 joint=_number(raw, "joint", where=where),
+                simple_control=_number(raw, "simple_control", where=where),
                 damage=_number(raw, "damage", where=where),
             )
         )
@@ -443,10 +494,46 @@ def _parse_prediction_records(
             profile_valid=status[key][0],
             reached=status[key][1],
             trajectory_completed=status[key][2],
+            parent_checkpoint_id=status[key][3],
+            parent_checkpoint_first_reaching=status[key][4],
             candidates=tuple(sorted(values, key=lambda value: value.candidate_id)),
         )
         for key, values in grouped.items()
     }
+
+
+def _parse_fidelity_records(
+    plan: RawPlan, records: Iterable[Mapping[str, Any]]
+) -> dict[UnitKey, FidelityUnitData]:
+    parsed: dict[UnitKey, FidelityUnitData] = {}
+    for index, raw in enumerate(records):
+        where = f"fidelity[{index}]"
+        key = _unit_key(raw, where=where)
+        if key not in plan.units:
+            raise EvidenceValidationError(f"{where} has unplanned unit {key!r}")
+        if key in parsed:
+            raise EvidenceValidationError(f"duplicate fidelity unit {key!r}")
+        f_rho = _number(raw, "f_rho", where=where)
+        f_k = _number(raw, "f_k", where=where)
+        if not -1.0 <= f_rho <= 1.0:
+            raise EvidenceValidationError(f"{where}.f_rho must be in [-1, 1]")
+        if not 0.0 <= f_k <= 1.0:
+            raise EvidenceValidationError(f"{where}.f_k must be in [0, 1]")
+        parsed[key] = FidelityUnitData(
+            key=key,
+            perturbations_valid=_required_bool(
+                raw, "perturbations_valid", where=where
+            ),
+            exact_reference_valid=_required_bool(
+                raw, "exact_reference_valid", where=where
+            ),
+            common_control_support=_required_bool(
+                raw, "common_control_support", where=where
+            ),
+            f_rho=f_rho,
+            f_k=f_k,
+        )
+    return parsed
 
 
 def _parse_protection_records(
@@ -533,6 +620,7 @@ def _parse_protection_records(
                 arm=arm,
                 draw_id=draw_id,
                 damage=_number(raw, "damage", where=where),
+                native_retention=_number(raw, "native_retention", where=where),
                 feasible=feasible,
                 direct_forget_margin=direct_margin,
                 paraphrase_forget_margin=paraphrase_margin,
@@ -609,6 +697,8 @@ def _normalize_protection_unit(
 
     damages: dict[str, dict[str, float]] = {}
     random_draw_damages: dict[str, dict[str, float]] = {}
+    native_retention: dict[str, float] = {}
+    random_draw_native_retention: dict[str, float] = {}
     candidates = tuple(sorted(support_sets[0])) if common else ()
     if common:
         for arm in NON_RANDOM_ARMS:
@@ -616,6 +706,16 @@ def _normalize_protection_unit(
                 candidate: arm_draws[arm][None][candidate].damage
                 for candidate in candidates
             }
+            native_values = {
+                arm_draws[arm][None][candidate].native_retention
+                for candidate in candidates
+            }
+            if len(native_values) != 1:
+                raise EvidenceValidationError(
+                    f"protection unit {unit.key!r} changes native_retention "
+                    f"within arm {arm!r}"
+                )
+            native_retention[arm] = native_values.pop()
         damages["repeated_random"] = {
             candidate: sum(
                 arm_draws["repeated_random"][draw][candidate].damage
@@ -631,6 +731,20 @@ def _normalize_protection_unit(
             }
             for draw in unit.repeated_random_draws
         }
+        for draw in unit.repeated_random_draws:
+            native_values = {
+                arm_draws["repeated_random"][draw][candidate].native_retention
+                for candidate in candidates
+            }
+            if len(native_values) != 1:
+                raise EvidenceValidationError(
+                    f"protection unit {unit.key!r} changes native_retention "
+                    f"within repeated-random draw {draw!r}"
+                )
+            random_draw_native_retention[draw] = native_values.pop()
+        native_retention["repeated_random"] = sum(
+            random_draw_native_retention.values()
+        ) / len(random_draw_native_retention)
 
     margins = all_records_expected if present and draw_complete else []
     return ProtectionUnitData(
@@ -639,6 +753,11 @@ def _normalize_protection_unit(
         groups=groups,
         damages=damages,
         random_draw_damages=random_draw_damages,
+        native_retention=native_retention,
+        random_draw_native_retention=random_draw_native_retention,
+        native_metric_orientation=unit.native_metric_orientation,
+        native_noninferiority_margin=unit.native_noninferiority_margin,
+        all_random_draws_complete=draw_complete,
         feasible=feasible,
         common=common,
         min_forget_margin=min((record.forget_margin for record in margins), default=None),
@@ -703,7 +822,7 @@ def _top_q_recall(
 
 
 def _prediction_metrics(
-    candidates: Sequence[PredictionCandidate], *, top_q: float
+    candidates: Sequence[PredictionCandidate], *, top_q: float, tail_m: int
 ) -> dict[str, float] | None:
     if len(candidates) < 2:
         return None
@@ -711,22 +830,118 @@ def _prediction_metrics(
     joint = [candidate.joint for candidate in candidates]
     s0 = [candidate.s0 for candidate in candidates]
     s1 = [candidate.s1 for candidate in candidates]
+    control = [candidate.simple_control for candidate in candidates]
     rho_joint = _spearman(joint, damage)
     rho_s0 = _spearman(s0, damage)
     rho_s1 = _spearman(s1, damage)
+    rho_control = _spearman(control, damage)
     recall = _top_q_recall(
         joint, damage, [candidate.candidate_id for candidate in candidates], top_q
     )
-    if any(value is None for value in (rho_joint, rho_s0, rho_s1, recall)):
+    if any(
+        value is None
+        for value in (rho_joint, rho_s0, rho_s1, rho_control, recall)
+    ):
         return None
     assert rho_joint is not None and rho_s0 is not None and rho_s1 is not None
-    assert recall is not None
-    return {
+    assert rho_control is not None and recall is not None
+    result = {
         "joint_rho": rho_joint,
         "top_q_recall": recall,
         "gain_s0": rho_joint - rho_s0,
         "gain_s1": rho_joint - rho_s1,
+        "gain_control": rho_joint - rho_control,
     }
+    positive = [
+        index for index, candidate in enumerate(candidates) if candidate.damage > 0.0
+    ]
+    if len(positive) >= tail_m and tail_m <= len(candidates):
+        harmful = set(
+            sorted(
+                positive,
+                key=lambda index: (
+                    -candidates[index].damage,
+                    candidates[index].candidate_id,
+                    index,
+                ),
+            )[:tail_m]
+        )
+        predicted = set(
+            sorted(
+                range(len(candidates)),
+                key=lambda index: (
+                    -candidates[index].joint,
+                    candidates[index].candidate_id,
+                    index,
+                ),
+            )[:tail_m]
+        )
+        recall_m = len(harmful & predicted) / tail_m
+        q = tail_m / len(candidates)
+        result["tail_lift"] = recall_m / q - 1.0
+    return result
+
+
+@dataclass(frozen=True)
+class RQ2UnitData:
+    prediction: PredictionUnitData
+    fidelity: FidelityUnitData
+
+    @property
+    def key(self) -> UnitKey:
+        return self.prediction.key
+
+
+def _rq2_metrics(
+    data: RQ2UnitData,
+    *,
+    top_q: float,
+    tail_m: int,
+    rng: random.Random | None = None,
+) -> dict[str, float] | None:
+    candidates = (
+        _resample_groups_prediction(data.prediction.candidates, rng)
+        if rng is not None
+        else list(data.prediction.candidates)
+    )
+    prediction = _prediction_metrics(
+        candidates, top_q=top_q, tail_m=tail_m
+    )
+    if prediction is None:
+        return None
+    return {
+        "f_rho_minus_0p80": data.fidelity.f_rho - 0.80,
+        "f_k_minus_0p70": data.fidelity.f_k - 0.70,
+        "g_h": prediction["gain_s1"],
+        "g_ctl": prediction["gain_control"],
+    }
+
+
+def _prediction_core_metrics(
+    candidates: Sequence[PredictionCandidate], *, top_q: float, tail_m: int
+) -> dict[str, float] | None:
+    metrics = _prediction_metrics(candidates, top_q=top_q, tail_m=tail_m)
+    if metrics is None:
+        return None
+    return {
+        key: metrics[key]
+        for key in (
+            "joint_rho",
+            "top_q_recall",
+            "gain_s0",
+            "gain_s1",
+            "gain_control",
+        )
+    }
+
+
+def _prediction_tail_metrics(
+    candidates: Sequence[PredictionCandidate], *, top_q: float, tail_m: int
+) -> dict[str, float] | None:
+    metrics = _prediction_metrics(candidates, top_q=top_q, tail_m=tail_m)
+    if metrics is None or "tail_lift" not in metrics:
+        return None
+    return {"tail_lift": metrics["tail_lift"]}
 
 
 def _tail_mean(values: Sequence[float], *, cvar_q: float) -> float:
@@ -770,6 +985,23 @@ def _protection_metrics(
             result[f"{comparator}.{outcome}"] = (
                 joint_outcomes[outcome] - outcomes[outcome]
             )
+        comparator_native = (
+            sum(
+                unit.random_draw_native_retention[draw]
+                for draw in sampled_draws
+            )
+            / len(sampled_draws)
+            if comparator == "repeated_random" and rng is not None
+            else unit.native_retention[comparator]
+        )
+        oriented_difference = (
+            unit.native_retention["joint"] - comparator_native
+            if unit.native_metric_orientation == "higher"
+            else comparator_native - unit.native_retention["joint"]
+        )
+        result[f"{comparator}.native_noninferiority"] = (
+            oriented_difference + unit.native_noninferiority_margin
+        )
     return result
 
 
@@ -873,21 +1105,45 @@ def _hierarchical_bootstrap(
     return draws
 
 
-def _empty_prediction() -> dict[str, object]:
+def _empty_rq1(*, selection_valid: bool = False) -> dict[str, object]:
     return {
         "paired": False,
-        "joint_rho": None,
-        "top_q_recall": None,
-        "vs_s0": {},
-        "vs_s1": {},
+        "selection_valid": selection_valid,
+        "profile_valid": False,
+        "common_support_units": 0,
+        "reached_valid_units": 0,
+        "tail_eligible_units": 0,
+        "joint_rho": {},
+        "joint_minus_s0": {},
+        "joint_minus_s1": {},
+        "tail_lift": {},
     }
 
 
-def _empty_protection() -> dict[str, object]:
+def _empty_rq2() -> dict[str, object]:
+    return {
+        "paired": False,
+        "perturbations_valid": False,
+        "exact_reference_valid": False,
+        "common_control_support": False,
+        "common_support_units": 0,
+        "f_rho_minus_0p80": {},
+        "f_k_minus_0p70": {},
+        "g_h": {},
+        "g_ctl": {},
+    }
+
+
+def _empty_rq3(*, selection_valid: bool = False) -> dict[str, object]:
     return {
         "paired": False,
         "comparisons": {},
-        "exact_norm": {},
+        "native_noninferiority": {},
+        "selection_valid": selection_valid,
+        "all_random_draws_complete": False,
+        "all_five_arms_feasible": False,
+        "common_support": False,
+        "common_support_units": 0,
         "min_forget_margin": None,
         "min_utility_margin": None,
     }
@@ -898,10 +1154,12 @@ def aggregate_raw_evidence(
     prediction_records: Iterable[Mapping[str, Any]],
     protection_records: Iterable[Mapping[str, Any]],
     *,
+    fidelity_records: Iterable[Mapping[str, Any]] = (),
     artifacts: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """Return a schema-v1 ledger mapping from candidate-level raw records."""
+    """Return a schema-v2 RQ1/RQ2/RQ3 ledger from frozen raw records."""
     prediction = _parse_prediction_records(plan, prediction_records)
+    fidelity = _parse_fidelity_records(plan, fidelity_records)
     protection, protection_attempted = _parse_protection_records(
         plan, protection_records
     )
@@ -917,7 +1175,11 @@ def aggregate_raw_evidence(
         attempted_units = {
             unit.key
             for unit in row_units
-            if unit.key in prediction or unit.key in protection_attempted
+            if (
+                unit.key in prediction
+                or unit.key in fidelity
+                or unit.key in protection_attempted
+            )
         }
         completed_units = {
             unit.key
@@ -938,14 +1200,39 @@ def aggregate_raw_evidence(
 
         prediction_common_data: list[PredictionUnitData] = []
         prediction_points: list[tuple[str, str, Mapping[str, float]]] = []
+        tail_common_data: list[PredictionUnitData] = []
+        tail_points: list[tuple[str, str, Mapping[str, float]]] = []
         for unit in row_units:
             data = prediction.get(unit.key)
             if data is None or unit.key not in reached_valid:
                 continue
-            metrics = _prediction_metrics(data.candidates, top_q=plan.top_q)
+            metrics = _prediction_core_metrics(
+                data.candidates, top_q=plan.top_q, tail_m=unit.tail_m
+            )
             if metrics is not None:
                 prediction_common_data.append(data)
                 prediction_points.append((unit.request, unit.seed, metrics))
+                tail_metrics = _prediction_tail_metrics(
+                    data.candidates, top_q=plan.top_q, tail_m=unit.tail_m
+                )
+                if tail_metrics is not None:
+                    tail_common_data.append(data)
+                    tail_points.append((unit.request, unit.seed, tail_metrics))
+
+        rq2_common_data: list[RQ2UnitData] = []
+        rq2_points: list[tuple[str, str, Mapping[str, float]]] = []
+        for unit in row_units:
+            pred = prediction.get(unit.key)
+            fid = fidelity.get(unit.key)
+            if pred is None or fid is None or unit.key not in reached_valid:
+                continue
+            data = RQ2UnitData(pred, fid)
+            metrics = _rq2_metrics(
+                data, top_q=plan.top_q, tail_m=unit.tail_m
+            )
+            if metrics is not None:
+                rq2_common_data.append(data)
+                rq2_points.append((unit.request, unit.seed, metrics))
 
         protection_feasible: list[ProtectionUnitData] = []
         protection_common_data: list[ProtectionUnitData] = []
@@ -963,7 +1250,10 @@ def aggregate_raw_evidence(
                     protection_common_data.append(data)
                     protection_points.append((unit.request, unit.seed, metrics))
 
-        prediction_evidence = _empty_prediction()
+        prediction_evidence = _empty_rq1(
+            selection_valid=prediction_selection.valid
+            and not prediction_selection.fallback
+        )
         if prediction_points:
             point = _equal_request_average(prediction_points)
             bootstrap = _hierarchical_bootstrap(
@@ -972,29 +1262,110 @@ def aggregate_raw_evidence(
                 seed=plan.bootstrap_seed + row_index * 2,
                 request_of=lambda data: data.key[2],
                 seed_of=lambda data: data.key[3],
-                resampled_metrics=lambda data, rng: _prediction_metrics(
-                    _resample_groups_prediction(data.candidates, rng), top_q=plan.top_q
+                resampled_metrics=lambda data, rng: _prediction_core_metrics(
+                    _resample_groups_prediction(data.candidates, rng),
+                    top_q=plan.top_q,
+                    tail_m=plan.units[data.key].tail_m,
                 ),
             )
+            tail_effect: dict[str, float] = {}
+            if tail_points:
+                tail_point = _equal_request_average(tail_points)
+                tail_bootstrap = _hierarchical_bootstrap(
+                    tail_common_data,
+                    replicates=plan.bootstrap_replicates,
+                    seed=plan.bootstrap_seed + row_index * 3 + 1,
+                    request_of=lambda data: data.key[2],
+                    seed_of=lambda data: data.key[3],
+                    resampled_metrics=lambda data, rng: _prediction_tail_metrics(
+                        _resample_groups_prediction(data.candidates, rng),
+                        top_q=plan.top_q,
+                        tail_m=plan.units[data.key].tail_m,
+                    ),
+                )
+                tail_effect = summarize_bootstrap_effect(
+                    tail_point["tail_lift"],
+                    [draw["tail_lift"] for draw in tail_bootstrap],
+                    beneficial="positive",
+                    alpha=plan.alpha,
+                )
             prediction_evidence = {
                 "paired": True,
-                "joint_rho": point["joint_rho"],
-                "top_q_recall": point["top_q_recall"],
-                "vs_s0": summarize_bootstrap_effect(
+                "selection_valid": prediction_selection.valid
+                and not prediction_selection.fallback,
+                "profile_valid": len(valid_profiles) == len(row_units),
+                "common_support_units": len(prediction_common_data),
+                "reached_valid_units": len(reached_valid),
+                "tail_eligible_units": len(tail_common_data),
+                "joint_rho": summarize_bootstrap_effect(
+                    point["joint_rho"],
+                    [draw["joint_rho"] for draw in bootstrap],
+                    beneficial="positive",
+                    alpha=plan.alpha,
+                ),
+                "joint_minus_s0": summarize_bootstrap_effect(
                     point["gain_s0"],
                     [draw["gain_s0"] for draw in bootstrap],
                     beneficial="positive",
                     alpha=plan.alpha,
                 ),
-                "vs_s1": summarize_bootstrap_effect(
+                "joint_minus_s1": summarize_bootstrap_effect(
                     point["gain_s1"],
                     [draw["gain_s1"] for draw in bootstrap],
                     beneficial="positive",
                     alpha=plan.alpha,
                 ),
+                "tail_lift": tail_effect,
             }
 
-        protection_evidence = _empty_protection()
+        rq2_evidence = _empty_rq2()
+        if rq2_points:
+            point = _equal_request_average(rq2_points)
+            bootstrap = _hierarchical_bootstrap(
+                rq2_common_data,
+                replicates=plan.bootstrap_replicates,
+                seed=plan.bootstrap_seed + row_index * 3 + 2,
+                request_of=lambda data: data.key[2],
+                seed_of=lambda data: data.key[3],
+                resampled_metrics=lambda data, rng: _rq2_metrics(
+                    data,
+                    top_q=plan.top_q,
+                    tail_m=plan.units[data.key].tail_m,
+                    rng=rng,
+                ),
+            )
+            rq2_evidence = {
+                "paired": True,
+                "perturbations_valid": all(
+                    data.fidelity.perturbations_valid for data in rq2_common_data
+                ),
+                "exact_reference_valid": all(
+                    data.fidelity.exact_reference_valid for data in rq2_common_data
+                ),
+                "common_control_support": all(
+                    data.fidelity.common_control_support for data in rq2_common_data
+                ),
+                "common_support_units": len(rq2_common_data),
+                **{
+                    metric: summarize_bootstrap_effect(
+                        point[metric],
+                        [draw[metric] for draw in bootstrap],
+                        beneficial="positive",
+                        alpha=plan.alpha,
+                    )
+                    for metric in (
+                        "f_rho_minus_0p80",
+                        "f_k_minus_0p70",
+                        "g_h",
+                        "g_ctl",
+                    )
+                },
+            }
+
+        protection_evidence = _empty_rq3(
+            selection_valid=protection_selection.valid
+            and not protection_selection.fallback
+        )
         if protection_points:
             point = _equal_request_average(protection_points)
             bootstrap = _hierarchical_bootstrap(
@@ -1011,6 +1382,7 @@ def aggregate_raw_evidence(
                 ),
             )
             comparisons: dict[str, dict[str, dict[str, float]]] = {}
+            native_noninferiority: dict[str, dict[str, float]] = {}
             for comparator in PROTECTION_COMPARATORS:
                 comparisons[comparator] = {}
                 for outcome in METRIC_OUTCOMES:
@@ -1021,10 +1393,28 @@ def aggregate_raw_evidence(
                         beneficial="negative",
                         alpha=plan.alpha,
                     )
+                native_metric = f"{comparator}.native_noninferiority"
+                native_noninferiority[comparator] = summarize_bootstrap_effect(
+                    point[native_metric],
+                    [draw[native_metric] for draw in bootstrap],
+                    beneficial="positive",
+                    alpha=plan.alpha,
+                )
             protection_evidence = {
                 "paired": True,
                 "comparisons": comparisons,
-                "exact_norm": {},
+                "native_noninferiority": native_noninferiority,
+                "selection_valid": protection_selection.valid
+                and not protection_selection.fallback,
+                "all_random_draws_complete": all(
+                    data.all_random_draws_complete
+                    for data in protection_common_data
+                ),
+                "all_five_arms_feasible": len(protection_feasible)
+                == len(reached_valid),
+                "common_support": len(protection_common_data)
+                == len(reached_valid),
+                "common_support_units": len(protection_common_data),
                 "min_forget_margin": min(
                     data.min_forget_margin
                     for data in protection_common_data
@@ -1048,22 +1438,33 @@ def aggregate_raw_evidence(
             "funnel": {
                 "profiles_planned": planned,
                 "profiles_valid": len(valid_profiles),
+                "fidelity_planned": planned,
+                "fidelity_valid": sum(
+                    key in fidelity
+                    and fidelity[key].perturbations_valid
+                    and fidelity[key].exact_reference_valid
+                    and fidelity[key].common_control_support
+                    for key in (unit.key for unit in row_units)
+                ),
                 "trajectories_planned": planned,
                 "trajectories_attempted": len(attempted_units),
                 "trajectories_completed": len(completed_units),
                 "trajectories_reached": len(reached_units),
                 "reached_with_valid_profile": len(reached_valid),
                 "prediction_common": len(prediction_common_data),
+                "tail_eligible": len(tail_common_data),
+                "fidelity_common": len(rq2_common_data),
                 "protection_feasible_all_arms": len(protection_feasible),
                 "protection_common": len(protection_common_data),
             },
-            "prediction": prediction_evidence,
-            "protection": protection_evidence,
+            "rq1": prediction_evidence,
+            "rq2": rq2_evidence,
+            "rq3": protection_evidence,
         }
         rows.append(row)
 
     ledger: dict[str, Any] = {
-        "schema_version": 1,
+        "schema_version": 2,
         "rows": rows,
         "artifacts": dict(artifacts or {}),
     }
@@ -1155,6 +1556,7 @@ def _tail_permutation_p(
                     s0=candidate.s0,
                     s1=candidate.s1,
                     joint=candidate.joint,
+                    simple_control=candidate.simple_control,
                     damage=candidate.damage,
                 )
                 for index, candidate in enumerate(data.candidates)

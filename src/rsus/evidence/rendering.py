@@ -16,16 +16,16 @@ PLACEHOLDERS = {
         "followed by the strongest observed boundary."
     ),
     "PredictionHeadline": (
-        "Report eligible/pass parents, least-favorable joint-over-endpoint "
-        "bound, and the strongest reversal."
+        "Report eligible/pass parents and the least-favorable RQ1 lower bound, "
+        "including tail eligibility."
     ),
     "FidelityHeadline": (
         "Report the frozen $(R,\\eta)$ operating point, exact-energy "
         "agreement, measured time/memory, and validity coverage."
     ),
     "ProtectionHeadline": (
-        "Report eligible/pass parents, the largest of eight comparator UCBs, "
-        "constraint slack, and infeasible cases."
+        "Report eligible/pass parents, the largest of eight damage UCBs, the "
+        "least native-NI lower bound, constraint slack, and infeasible cases."
     ),
     "TransferHeadline": (
         "Report planned/completed/eligible/pass settings, least-favorable "
@@ -57,12 +57,26 @@ def _effect_extrema(
     for (setting, _), row in ledger.rows.items():
         if setting not in primary_settings:
             continue
-        if claim == "prediction":
-            for effect in (row.prediction.vs_s0, row.prediction.vs_s1):
+        if claim == "rq1":
+            for effect in (
+                row.rq1.joint_rho,
+                row.rq1.joint_minus_s0,
+                row.rq1.joint_minus_s1,
+                row.rq1.tail_lift,
+            ):
                 if effect.lower_bound is not None:
                     values.append(effect.lower_bound)
-        elif claim == "protection":
-            for outcomes in row.protection.comparisons.values():
+        elif claim == "rq2":
+            for effect in (
+                row.rq2.f_rho_minus_0p80,
+                row.rq2.f_k_minus_0p70,
+                row.rq2.g_h,
+                row.rq2.g_ctl,
+            ):
+                if effect.lower_bound is not None:
+                    values.append(effect.lower_bound)
+        elif claim == "rq3":
+            for outcomes in row.rq3.comparisons.values():
                 for effect in outcomes.values():
                     if effect.upper_bound is not None:
                         values.append(effect.upper_bound)
@@ -99,20 +113,31 @@ def _primary_claim_headline(
     extrema = _effect_extrema(
         ledger, primary_settings=primary, claim=claim
     )
-    if claim == "prediction":
+    if claim in {"rq1", "rq2"}:
         if not extrema:
             return None
+        label = "RQ1 prediction" if claim == "rq1" else "RQ2 fidelity/add-value"
         return (
-            f"Prediction passes {passed}/{total} predeclared primary parent rows "
-            f"({eligible}/{total} eligible); the least-favorable endpoint-gain "
+            f"{label} passes {passed}/{total} predeclared primary parent rows "
+            f"({eligible}/{total} eligible); the least-favorable required "
             f"lower bound is {min(extrema):.3f}."
         )
     if not extrema:
         return None
+    native_bounds = [
+        effect.lower_bound
+        for (setting, _), ledger_row in ledger.rows.items()
+        if setting in primary
+        for effect in ledger_row.rq3.native_noninferiority.values()
+        if effect.lower_bound is not None
+    ]
+    if not native_bounds:
+        return None
     return (
-        f"Protection passes {passed}/{total} predeclared primary parent rows "
+        f"RQ3 protection passes {passed}/{total} predeclared primary parent rows "
         f"({eligible}/{total} eligible); the largest of the eight comparator "
-        f"upper bounds is {max(extrema):.3f}."
+        f"upper bounds is {max(extrema):.3f} and the least-favorable native "
+        f"non-inferiority lower bound is {min(native_bounds):.3f}."
     )
 
 
@@ -148,7 +173,7 @@ def _transfer_headline(
     return (
         f"The predeclared multi-setting statement is {status}: {completed}/{planned} "
         f"non-stress settings are complete and {chain}/{planned} support the full "
-        f"prediction--protection chain under the two-readout rule; stress settings "
+        f"RQ1--RQ3 chain under the two-readout rule; stress settings "
         f"cannot rescue the rule."
     )
 
@@ -164,14 +189,22 @@ def render_tex_macros(
     complete.  Otherwise the existing explicit result placeholder is kept;
     partial estimates never become a prose claim.
     """
+    rq2_headline = _primary_claim_headline(
+        contract, ledger, report, claim="rq2"
+    )
+    fidelity_artifact = _artifact_headline(ledger, "lse_fidelity_cost")
     values = {
         "TailHeadline": _artifact_headline(ledger, "tail_structure"),
         "PredictionHeadline": _primary_claim_headline(
-            contract, ledger, report, claim="prediction"
+            contract, ledger, report, claim="rq1"
         ),
-        "FidelityHeadline": _artifact_headline(ledger, "lse_fidelity_cost"),
+        "FidelityHeadline": (
+            f"{rq2_headline} {fidelity_artifact}"
+            if rq2_headline is not None and fidelity_artifact is not None
+            else None
+        ),
         "ProtectionHeadline": _primary_claim_headline(
-            contract, ledger, report, claim="protection"
+            contract, ledger, report, claim="rq3"
         ),
         "TransferHeadline": _transfer_headline(contract, report),
     }

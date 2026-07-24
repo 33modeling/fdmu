@@ -145,6 +145,21 @@ def _source_support(
     return parsed, parsed_groups
 
 
+def _native_retention(row: Mapping[str, Any], *, where: str) -> float:
+    value = row.get("native_retention")
+    try:
+        number = float(value)
+    except (TypeError, ValueError) as error:
+        raise EvidenceValidationError(
+            f"{where} lacks dataset-native retention"
+        ) from error
+    if not math.isfinite(number):
+        raise EvidenceValidationError(
+            f"{where} has non-finite dataset-native retention"
+        )
+    return number
+
+
 def export_records(
     plan: RawPlan,
     payloads: Iterable[Mapping[str, Any]],
@@ -260,6 +275,7 @@ def export_records(
             for arm, draw_id, source_row in sources:
                 where = f"{request}/{seed}/{parent}/{arm}/{draw_id or '-'}"
                 damage, groups = _source_support(source_row, where=where)
+                native_retention = _native_retention(source_row, where=where)
                 slacks = _constraint_margins(source_row, where=where)
                 checkpoint = source_row.get("parent_checkpoint")
                 if not isinstance(checkpoint, Mapping):
@@ -277,13 +293,33 @@ def export_records(
                     raise EvidenceValidationError(
                         f"{where} does not share exact candidate/group support"
                     )
-                parsed_sources.append((arm, draw_id, damage, groups, slacks, source_row, checkpoint_id))
+                parsed_sources.append(
+                    (
+                        arm,
+                        draw_id,
+                        damage,
+                        groups,
+                        native_retention,
+                        slacks,
+                        source_row,
+                        checkpoint_id,
+                    )
+                )
             if len(checkpoint_ids) != 1:
                 raise EvidenceValidationError(
                     f"{request}/{seed}/{parent} claim arms mix parent checkpoints"
                 )
 
-            for arm, draw_id, damage, groups, slacks, source_row, checkpoint_id in parsed_sources:
+            for (
+                arm,
+                draw_id,
+                damage,
+                groups,
+                native_retention,
+                slacks,
+                source_row,
+                checkpoint_id,
+            ) in parsed_sources:
                 for candidate_id in sorted(damage):
                     record: dict[str, object] = {
                         "setting": setting,
@@ -294,6 +330,7 @@ def export_records(
                         "group": groups[candidate_id],
                         "arm": arm,
                         "damage": damage[candidate_id],
+                        "native_retention": native_retention,
                         "feasible": bool(source_row["feasible"]),
                         "direct_forget_margin": slacks["direct_forgetting"],
                         "paraphrase_forget_margin": slacks["paraphrase_forgetting"],

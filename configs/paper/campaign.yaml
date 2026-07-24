@@ -64,21 +64,19 @@ stages:
   calibration:
     roster: D_cal
     adapter_capability: calibration
-    # The legacy launcher is named explicitly so the report explains the
-    # blocker. It lacks PAPER_STAGE_CONTRACT and cannot consume this roster.
-    executor: experiments/channel_matrix/run_campaign.py
+    executor: experiments/paper/run_v4_stage.py
   prediction:
     roster: D_pred
     adapter_capability: prediction
-    executor: experiments/channel_matrix/run_campaign.py
+    executor: experiments/paper/run_v4_stage.py
   protection:
     roster: D_prot
     adapter_capability: protection
-    executor: experiments/channel_matrix/alpha_protection.py
+    executor: experiments/paper/run_v4_stage.py
   target_evaluation:
     roster: target
     adapter_capability: target_evaluation
-    executor: experiments/channel_matrix/alpha_protection.py
+    executor: experiments/paper/run_v4_stage.py
 
 models:
   Qwen2.5-1.5B:
@@ -132,6 +130,10 @@ datasets:
   TOFU:
     adapter: tofu
     roster_unit: forget-author request_id
+    native_metric:
+      name: retain_qa_accuracy
+      orientation: higher
+      noninferiority_margin: 0.0
     # Exact, outcome-independent split of all forget10 authors.  Direct use of
     # the older launcher rosters is prohibited because it reused audit authors
     # across prediction and protection.
@@ -144,6 +146,10 @@ datasets:
   "WMDP-bio/MMLU":
     adapter: wmdp_bio_mmlu
     roster_unit: TBD_WMDP_REQUEST_UNIT
+    native_metric:
+      name: mmlu_accuracy
+      orientation: higher
+      noninferiority_margin: 0.0
     rosters:
       D_cal: [TBD_WMDP_D_CAL_REQUEST_IDS]
       D_pred: [TBD_WMDP_D_PRED_REQUEST_IDS]
@@ -152,7 +158,11 @@ datasets:
 
   MUSE-News:
     adapter: muse_news
-    roster_unit: TBD_MUSE_NEWS_REQUEST_UNIT
+    roster_unit: corpus deletion request_id
+    native_metric:
+      name: retain_knowledge_accuracy
+      orientation: higher
+      noninferiority_margin: 0.0
     rosters:
       D_cal: [TBD_MUSE_NEWS_D_CAL_REQUEST_IDS]
       D_pred: [TBD_MUSE_NEWS_D_PRED_REQUEST_IDS]
@@ -161,7 +171,11 @@ datasets:
 
   MUSE-Books:
     adapter: muse_books
-    roster_unit: TBD_MUSE_BOOKS_REQUEST_UNIT
+    roster_unit: corpus deletion request_id
+    native_metric:
+      name: retain_knowledge_accuracy
+      orientation: higher
+      noninferiority_margin: 0.0
     rosters:
       D_cal: [TBD_MUSE_BOOKS_D_CAL_REQUEST_IDS]
       D_pred: [TBD_MUSE_BOOKS_D_PRED_REQUEST_IDS]
@@ -171,6 +185,10 @@ datasets:
   RWKU:
     adapter: rwku
     roster_unit: forget-target request_id
+    native_metric:
+      name: neighbor_qa_accuracy
+      orientation: higher
+      noninferiority_margin: 0.0
     # Systematic, outcome-independent spacing over the 200 forget_target rows,
     # mirroring the TOFU roster shape (2 development / 4 prediction /
     # 4 protection / 10 target). Chosen by index arithmetic before any RWKU
@@ -184,6 +202,10 @@ datasets:
   PISTOL:
     adapter: pistol
     roster_unit: TBD_PISTOL_REQUEST_UNIT
+    native_metric:
+      name: retain_task_accuracy
+      orientation: higher
+      noninferiority_margin: 0.0
     rosters:
       D_cal: [TBD_PISTOL_D_CAL_REQUEST_IDS]
       D_pred: [TBD_PISTOL_D_PRED_REQUEST_IDS]

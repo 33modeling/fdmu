@@ -39,27 +39,30 @@ An incomplete evidence block remains a visible `\resph{...}` placeholder.
 
 ## Normalized row contract
 
-The ledger has `schema_version: 1`, a `rows` list, and an `artifacts` mapping.
+The ledger has `schema_version: 2`, a `rows` list, and an `artifacts` mapping.
 Each row is keyed by the predeclared `setting` and `parent`. Its funnel records:
 
 ```text
 profiles_valid <= profiles_planned
+fidelity_valid <= fidelity_planned
 trajectories_reached <= trajectories_completed
   <= trajectories_attempted <= trajectories_planned
 prediction_common <= reached_with_valid_profile <= trajectories_reached
+tail_eligible <= prediction_common
+fidelity_common <= min(fidelity_valid, prediction_common)
 protection_common <= protection_feasible_all_arms
   <= reached_with_valid_profile
 ```
 
 `completed: true` additionally requires all planned trajectories to have been
-attempted and completed. Prediction supplies paired joint-minus-`S0` and
-joint-minus-`S1` estimates, one-sided lower bounds, and corrected p-values.
-Protection supplies mixture-minus-comparator estimates, one-sided upper bounds,
-and corrected p-values for all four comparators (`no_repair`,
-`repeated_random`, `s0`, `s1`) crossed with `mean` and `cvar95`. The exact-norm
-reference may be recorded under `exact_norm`, but it is intentionally outside
-the eight-way intersection--union test. Both claim blocks must explicitly set
-`paired: true`; omitting it fails closed rather than assuming pairing.
+attempted and completed. RQ1 supplies lower bounds for absolute joint rho,
+joint-minus-`S0`, joint-minus-`S1`, and positive-damage tail lift, plus at
+least 80% tail eligibility. RQ2 supplies lower bounds for `f_rho - 0.80`,
+`f_K - 0.70`, `g_H`, and `g_ctl`, with perturbation, exact-reference, and
+common-control validity. RQ3 supplies one-sided upper bounds for all four
+comparators (`no_repair`, `repeated_random`, `s0`, `s1`) crossed with `mean`
+and `cvar95`, and one native-metric non-inferiority lower bound per comparator.
+All three blocks must explicitly set `paired: true`; omitting it fails closed.
 
 Completed non-row artifacts require `path`, `sha256`, and may provide a
 validated `headline_tex`. Relative paths are resolved against this repository.
@@ -71,18 +74,18 @@ across four physical appendix tables (budget and specificity share one float):
 
 | Registry ID | Paper label | Required evidence |
 |---|---|---|
-| `main_core_evidence` | `tab:core-evidence` | primary prediction + protection rows |
-| `main_robustness` | `tab:robustness` | all predeclared setting--parent rows |
+| `main_core_evidence` | `tab:core-evidence` | primary RQ1 + RQ2 + RQ3 rows |
+| `main_robustness` | `tab:robustness` | all predeclared RQ1/RQ2/RQ3 rows |
 | `appendix_scope_contract` | `tab:datasets` | frozen campaign manifest |
-| `appendix_tail_prediction` | `tab:tail-structure` | primary prediction + tail artifact |
+| `appendix_tail_prediction` | `tab:tail-structure` | primary RQ1 + tail artifact |
 | `appendix_lse_fidelity_cost` | `tab:bwfree` | LSE fidelity/time/memory artifact |
-| `appendix_protection_budget` | `tab:budget-sweep` | primary protection + budget sweep |
+| `appendix_protection_budget` | `tab:budget-sweep` | primary RQ3 + budget sweep |
 | `appendix_boundaries` | `tab:specificity` | all rows + negative controls |
 
 Readiness and claim success are separate. A fully observed null or failed IUT
 makes a table data-ready while correctly leaving the scientific claim failed.
 The setting-level rule is also explicit: at least one output-readout and one
-representation-readout parent must each pass both claims after a Bonferroni
+representation-readout parent must each pass all three claims after a Bonferroni
 correction within its predeclared parent group; the other parent rows remain
 reported denominators. The multi-setting statement then requires
 the primary setting, at least one of two model-transfer settings, and at least
@@ -144,6 +147,7 @@ the planned cell.
 python experiments/paper/aggregate_raw.py `
   --plan results/paper/raw_plan.json `
   --prediction-raw runs/tofu/prediction.jsonl `
+  --fidelity-raw runs/tofu/fidelity.jsonl `
   --protection-raw runs/tofu/protection.jsonl `
   --artifact-raw lse_fidelity_cost=runs/paper/lse.jsonl `
   --artifact-raw protection_budget_sweep=runs/paper/budget.jsonl `
@@ -160,20 +164,29 @@ SHA-256.
 
 ### Immutable plan and candidate records
 
-The core plan has `schema_version: 1`, bootstrap fields (`replicates`, `seed`,
+The core plan has `schema_version: 2`, bootstrap fields (`replicates`, `seed`,
 `alpha`, `top_q`, `cvar_q`), and a `units` list. Each unit contains its four
 keys, frozen prediction/protection selections, and exact
-`repeated_random_draws`. Selections cannot vary within a setting--parent row.
+`repeated_random_draws`, positive-damage tail size `tail_m`, and the dataset's
+frozen native metric orientation and non-inferiority margin. Selections cannot
+vary within a setting--parent row.
 
 Prediction JSONL has one row per candidate and unit: the four unit keys,
-`candidate_id`, semantic `group`, `s0`, `s1`, `joint`, `damage`,
+`candidate_id`, semantic `group`, `s0`, `s1`, `joint`, `simple_control`, `damage`,
 `profile_valid`, `reached`, `trajectory_completed`, and the frozen selection.
+Every row identifies its parent checkpoint, and reached rows certify that it is
+the first checkpoint satisfying the direct criterion.
 The aggregator forms all correlations on identical candidates, averages seeds
 within requests and requests equally, then bootstraps requests, seeds, and
 semantic groups. Missing support is not repaired by intersection.
 
+Fidelity JSONL has exactly one row per unit with `f_rho`, `f_k`,
+`perturbations_valid`, `exact_reference_valid`, and
+`common_control_support`. These records feed only RQ2.
+
 Protection JSONL has one row per candidate, arm, and unit, with `damage`, the
-frozen selection, and four explicit slacks: `direct_forget_margin`,
+dataset-native `native_retention`, the frozen selection, and four explicit
+slacks: `direct_forget_margin`,
 `paraphrase_forget_margin`, `extraction_generation_margin`, and
 `utility_margin`. `feasible` must equal their conjunction; a missing metric or
 an inconsistent flag is rejected. Every row also carries the same
@@ -183,41 +196,34 @@ arms omit `draw_id`; `repeated_random` supplies every planned `draw_id` and
 `draw_complete`. The five arms must have exact candidate/group support.
 Feasibility and common support remain separate funnels: fully feasible arms
 with mismatched candidates cannot enter a paired effect. The eight
-mean/CVaR95 effects are paired. Inside each bootstrap replicate, random draw
+mean/CVaR95 effects and four native-NI effects are paired. Inside each bootstrap replicate, random draw
 IDs are themselves resampled with replacement before averaging; a missing or
 incomplete draw makes the unit infeasible and non-common.
 
 ### Runner-to-ledger boundary
 
 The historical channel-matrix JSON (`results.json`) is not the candidate JSONL
-schema above and is never consumed directly by the paper gate. In particular,
-`aggregate_alpha_protection.py` is a legacy CVaR-only diagnostic. A paper GPU
-runner/exporter must map the frozen mixture to `joint`, the unrepaired entry to
-`no_repair`, every frozen random draw separately to `repeated_random`, and the
-two endpoints to `s0`/`s1`; duplicate an endpoint as `joint` when a frozen
-weight is exactly 0 or 1. It must derive each of the four slacks from the exact
-reported checkpoint and preserve the parent block hash as
-`parent_checkpoint_id`.
-
-The strict bridge is `experiments/paper/export_alpha_protection.py`:
+schema above and is never consumed directly by the paper gate. The active
+bridge is `experiments/paper/run_v4_stage.py`. A frozen stage manifest contains
+the exact `(parent, request, seed)` Cartesian roster, a shell-free argv command
+per unit, and its output shard paths:
 
 ```powershell
-python experiments/paper/export_alpha_protection.py `
-  --plan results/paper/raw_plan.json `
-  --runner-root runs/paper/tofu_qwen25_7b/alpha_protection/audit `
-  --setting tofu_qwen25_7b `
-  --out runs/paper/tofu_qwen25_7b/protection.jsonl
+python experiments/paper/run_v4_stage.py `
+  --manifest configs/paper/stages/tofu_target.yaml `
+  --output-dir runs/paper/tofu_target `
+  --action run
 ```
 
-It validates the paper model source, every planned request/seed/parent,
-protection alpha, random-draw roster, exact candidate/group support, four
-slacks, and shared first-reaching checkpoint hash, then passes its own output
-through the authoritative raw parser before writing atomically. The old 7B
-YAML's 181/186/191 audit roster differs from the immutable paper target roster
-and is rejected as missing/extra cells rather than relabeled. A remaining GPU
-execution blocker is therefore the launcher configuration itself: generate a
-paper-plan-matching target run (including `D_prot`-only weight selection)
-before this exporter can succeed on real artifacts.
+The executor resolves the configured adapter, rejects missing/extra units,
+runs every command without a shell, checks first-reaching provenance, exact
+five-arm and repeated-random support, fidelity validity, and native retention,
+then writes consolidated JSONL and SHA-256 manifests. `--action verify` seals
+already-produced shards; `--action validate` checks only the frozen denominator.
+The calibration stage emits fidelity rows, `D_pred` emits prediction rows plus
+target-free `alpha_pred` selection inputs, and `D_prot` emits protection rows
+plus target-free `alpha_prot`/`Kp` selection inputs. The target stage emits the
+three claim-facing raw streams with their frozen selection mappings.
 
 ### Schema-backed appendix artifacts
 

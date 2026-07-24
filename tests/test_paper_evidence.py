@@ -31,7 +31,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 def _config(tmp_path: Path):
     raw = {
-        "schema_version": 1,
+        "schema_version": 2,
         "ledger": "ledger.json",
         "outputs": {
             "readiness_json": "readiness.json",
@@ -40,16 +40,21 @@ def _config(tmp_path: Path):
         "decision": {
             "alpha": 0.05,
             "minimum_support_units": 2,
-            "prediction_iut": {
-                "contrasts": ["joint_minus_s0", "joint_minus_s1"],
+            "rq1_iut": {
+                "effects": ["joint_rho", "joint_minus_s0", "joint_minus_s1", "tail_lift"],
+                "favorable_sign": "positive",
+                "minimum_tail_coverage": 0.80,
+            },
+            "rq2_iut": {
+                "effects": ["f_rho_minus_0p80", "f_k_minus_0p70", "g_h", "g_ctl"],
                 "favorable_sign": "positive",
             },
-            "protection_iut": {
+            "rq3_iut": {
                 "comparators": ["no_repair", "repeated_random", "s0", "s1"],
                 "outcomes": ["mean", "cvar95"],
-                "favorable_sign": "negative",
+                "damage_favorable_sign": "negative",
+                "native_noninferiority_favorable_sign": "positive",
                 "common_arms": ["joint", "no_repair", "repeated_random", "s0", "s1"],
-                "exact_norm_role": "descriptive_same_estimand_reference_outside_iut",
             },
         },
         "settings": [
@@ -72,7 +77,7 @@ def _config(tmp_path: Path):
                 {"id": "all", "parents": ["p"], "minimum_joint_pass": 1},
             ],
             "stress_excluded": ["stress"],
-            "require_both_claims": True,
+            "require_all_claims": True,
         },
         "artifacts": [
             "campaign_manifest",
@@ -85,7 +90,7 @@ def _config(tmp_path: Path):
                 "label": "tab:core-evidence",
                 "location": "main",
                 "settings": ["primary"],
-                "claims": ["prediction", "protection"],
+                "claims": ["rq1", "rq2", "rq3"],
                 "artifacts": [],
                 "producer": "builder",
             },
@@ -96,7 +101,7 @@ def _config(tmp_path: Path):
                 "settings": [
                     "primary", "model_a", "model_b", "data_a", "data_b", "data_c", "stress"
                 ],
-                "claims": ["prediction", "protection"],
+                "claims": ["rq1", "rq2", "rq3"],
                 "artifacts": [],
                 "producer": "builder",
             },
@@ -138,23 +143,43 @@ def _row(setting: str, *, feasible: bool = True, complete: bool = True) -> dict:
         "funnel": {
             "profiles_planned": n,
             "profiles_valid": n,
+            "fidelity_planned": n,
+            "fidelity_valid": n,
             "trajectories_planned": n,
             "trajectories_attempted": attempted_n,
             "trajectories_completed": completed_n,
             "trajectories_reached": reached_n,
             "reached_with_valid_profile": reached_n,
             "prediction_common": reached_n,
+            "tail_eligible": reached_n,
+            "fidelity_common": reached_n,
             "protection_feasible_all_arms": feasible_n,
             "protection_common": feasible_n,
         },
-        "prediction": {
+        "rq1": {
             "paired": True,
-            "joint_rho": 0.5,
-            "top_q_recall": 0.7,
-            "vs_s0": _effect(gain=True),
-            "vs_s1": _effect(gain=True),
+            "selection_valid": True,
+            "profile_valid": True,
+            "common_support_units": reached_n,
+            "reached_valid_units": reached_n,
+            "tail_eligible_units": reached_n,
+            "joint_rho": _effect(gain=True),
+            "joint_minus_s0": _effect(gain=True),
+            "joint_minus_s1": _effect(gain=True),
+            "tail_lift": _effect(gain=True),
         },
-        "protection": {
+        "rq2": {
+            "paired": True,
+            "perturbations_valid": True,
+            "exact_reference_valid": True,
+            "common_control_support": True,
+            "common_support_units": reached_n,
+            "f_rho_minus_0p80": _effect(gain=True),
+            "f_k_minus_0p70": _effect(gain=True),
+            "g_h": _effect(gain=True),
+            "g_ctl": _effect(gain=True),
+        },
+        "rq3": {
             "paired": True,
             "comparisons": {
                 comparator: {
@@ -163,11 +188,15 @@ def _row(setting: str, *, feasible: bool = True, complete: bool = True) -> dict:
                 }
                 for comparator in ("no_repair", "repeated_random", "s0", "s1")
             },
-            # Deliberately adverse: exact norm is descriptive and outside IUT.
-            "exact_norm": {
-                "mean": {"estimate": 1.0, "upper_bound": 2.0, "p_one_sided": 1.0},
-                "cvar95": {"estimate": 1.0, "upper_bound": 2.0, "p_one_sided": 1.0},
+            "native_noninferiority": {
+                comparator: _effect(gain=True)
+                for comparator in ("no_repair", "repeated_random", "s0", "s1")
             },
+            "selection_valid": True,
+            "all_random_draws_complete": True,
+            "all_five_arms_feasible": feasible,
+            "common_support": feasible,
+            "common_support_units": feasible_n,
             "min_forget_margin": 0.1,
             "min_utility_margin": 0.1,
         },
@@ -176,7 +205,7 @@ def _row(setting: str, *, feasible: bool = True, complete: bool = True) -> dict:
 
 def _ledger(rows: list[dict], artifacts: dict | None = None) -> EvidenceLedger:
     return EvidenceLedger.from_mapping(
-        {"schema_version": 1, "rows": rows, "artifacts": artifacts or {}}
+        {"schema_version": 2, "rows": rows, "artifacts": artifacts or {}}
     )
 
 
@@ -209,15 +238,16 @@ def test_missing_rows_remain_in_denominator_and_cannot_pass(tmp_path):
         "missing_rows": 6,
     }
     missing = next(row for row in report["rows"] if row["setting"] == "model_a")
-    assert not missing["prediction"]["claim_pass"]
-    assert not missing["protection"]["claim_pass"]
+    assert not missing["rq1"]["claim_pass"]
+    assert not missing["rq2"]["claim_pass"]
+    assert not missing["rq3"]["claim_pass"]
     assert not report["multi_setting"]["pass"]
 
 
-def test_protection_requires_all_five_arms_but_exact_norm_is_outside_iut(tmp_path):
+def test_rq3_requires_all_five_arms_and_native_noninferiority(tmp_path):
     contract = _config(tmp_path)
     passing = evaluate_evidence(contract, _ledger([_row("primary")]))
-    decision = passing["rows"][0]["protection"]
+    decision = passing["rows"][0]["rq3"]
     assert decision["eligible"]
     assert decision["statistical_pass"]
     assert decision["claim_pass"]
@@ -225,34 +255,50 @@ def test_protection_requires_all_five_arms_but_exact_norm_is_outside_iut(tmp_pat
     infeasible = evaluate_evidence(
         contract, _ledger([_row("primary", feasible=False)])
     )
-    decision = infeasible["rows"][0]["protection"]
+    decision = infeasible["rows"][0]["rq3"]
     assert decision["statistical_pass"]
     assert not decision["eligible"]
     assert not decision["claim_pass"]
-    assert "not all five claim arms are feasible" in decision["reasons"]
+    assert "not all five arms feasible" in decision["reasons"]
 
 
 def test_incomplete_trajectory_cannot_pass_even_with_favorable_effects(tmp_path):
     contract = _config(tmp_path)
     report = evaluate_evidence(contract, _ledger([_row("primary", complete=False)]))
     row = report["rows"][0]
-    assert row["prediction"]["statistical_pass"]
-    assert not row["prediction"]["claim_pass"]
-    assert row["protection"]["statistical_pass"]
-    assert not row["protection"]["claim_pass"]
+    assert row["rq1"]["statistical_pass"]
+    assert not row["rq1"]["claim_pass"]
+    assert row["rq2"]["statistical_pass"]
+    assert not row["rq2"]["claim_pass"]
+    assert row["rq3"]["statistical_pass"]
+    assert not row["rq3"]["claim_pass"]
 
 
 def test_unpaired_summaries_fail_closed(tmp_path):
     contract = _config(tmp_path)
     raw = _row("primary")
-    raw["prediction"]["paired"] = False
-    raw["protection"]["paired"] = False
+    raw["rq1"]["paired"] = False
+    raw["rq2"]["paired"] = False
+    raw["rq3"]["paired"] = False
     report = evaluate_evidence(contract, _ledger([raw]))
     row = report["rows"][0]
-    assert not row["prediction"]["data_complete"]
-    assert not row["prediction"]["claim_pass"]
-    assert not row["protection"]["data_complete"]
-    assert not row["protection"]["claim_pass"]
+    assert not row["rq1"]["data_complete"]
+    assert not row["rq1"]["claim_pass"]
+    assert not row["rq2"]["data_complete"]
+    assert not row["rq2"]["claim_pass"]
+    assert not row["rq3"]["data_complete"]
+    assert not row["rq3"]["claim_pass"]
+
+
+def test_selection_validity_cannot_disagree_with_frozen_selection():
+    raw = _row("primary")
+    raw["prediction_selection"] = {
+        "valid": False,
+        "fallback": True,
+        "alpha": 0.5,
+    }
+    with pytest.raises(EvidenceValidationError, match="selection_valid disagrees"):
+        _ledger([raw])
 
 
 def test_explicit_multi_setting_threshold_and_stress_exclusion(tmp_path):
@@ -267,17 +313,18 @@ def test_explicit_multi_setting_threshold_and_stress_exclusion(tmp_path):
     assert report["multi_setting"]["stress_excluded"] == ["stress"]
 
 
-def test_setting_chain_requires_same_parent_to_pass_both_claims(tmp_path):
+def test_setting_chain_requires_same_parent_to_pass_all_claims(tmp_path):
     contract = _config(tmp_path)
     raw = _row("primary")
-    raw["protection"]["comparisons"]["s1"]["mean"] = {
+    raw["rq3"]["comparisons"]["s1"]["mean"] = {
         "estimate": 0.1,
         "upper_bound": 0.2,
         "p_one_sided": 0.9,
     }
     report = evaluate_evidence(contract, _ledger([raw]))
-    assert report["settings"]["primary"]["prediction"]["passed"] == 1
-    assert report["settings"]["primary"]["protection"]["passed"] == 0
+    assert report["settings"]["primary"]["rq1"]["passed"] == 1
+    assert report["settings"]["primary"]["rq2"]["passed"] == 1
+    assert report["settings"]["primary"]["rq3"]["passed"] == 0
     assert not report["settings"]["primary"]["chain"]["pass"]
 
 
@@ -354,7 +401,7 @@ def test_completed_artifact_hash_is_verified(tmp_path):
     with pytest.raises(EvidenceValidationError, match="schema/artifact_id"):
         validate_artifact_files(arbitrary_ledger, repository_root=ROOT)
     bad = json.loads(json.dumps({
-        "schema_version": 1,
+        "schema_version": 2,
         "rows": [],
         "artifacts": {
             "tail_structure": {
@@ -377,8 +424,9 @@ def test_repository_registry_covers_two_main_and_five_appendix_tables():
     assert locations.count("main") == 2
     assert locations.count("appendix") == 5
     assert contract.tables["main_core_evidence"].claims == (
-        "prediction",
-        "protection",
+        "rq1",
+        "rq2",
+        "rq3",
     )
 
 
@@ -405,9 +453,21 @@ def test_registry_rejects_silent_iut_contract_drift(tmp_path):
     assert contract.alpha == 0.05
     path = tmp_path / "config.yaml"
     raw = yaml.safe_load(path.read_text(encoding="utf-8"))
-    raw["decision"]["protection_iut"]["comparators"] = ["no_repair", "s0"]
+    raw["decision"]["rq3_iut"]["comparators"] = ["no_repair", "s0"]
     path.write_text(yaml.safe_dump(raw, sort_keys=False), encoding="utf-8")
     with pytest.raises(EvidenceValidationError, match="comparators"):
+        load_contract(path)
+
+    raw = yaml.safe_load(path.read_text(encoding="utf-8"))
+    raw["decision"]["rq3_iut"]["comparators"] = [
+        "no_repair",
+        "repeated_random",
+        "s0",
+        "s1",
+    ]
+    raw["multi_setting_rule"]["require_all_claims"] = False
+    path.write_text(yaml.safe_dump(raw, sort_keys=False), encoding="utf-8")
+    with pytest.raises(EvidenceValidationError, match="must be true"):
         load_contract(path)
 
 

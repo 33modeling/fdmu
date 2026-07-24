@@ -231,6 +231,22 @@ def _rwku_factory(**kwargs: Any) -> Request:
     return rwku_request(**values)
 
 
+def _muse_news_factory(**kwargs: Any) -> Request:
+    """Lazy wrapper for the corpus-level MUSE-News request."""
+
+    from rsus.data.muse import muse_request
+
+    return muse_request(corpus="news", **kwargs)
+
+
+def _muse_books_factory(**kwargs: Any) -> Request:
+    """Lazy wrapper for the corpus-level MUSE-Books request."""
+
+    from rsus.data.muse import muse_request
+
+    return muse_request(corpus="books", **kwargs)
+
+
 def _tofu_roster_id(value: str) -> bool:
     prefix = "tofu-a"
     if not value.startswith(prefix) or not value[len(prefix) :].isdigit():
@@ -248,6 +264,14 @@ def _rwku_roster_id(value: str) -> bool:
 def _substrate_roster_id(value: str) -> bool:
     prefix = "substrate-"
     return value.startswith(prefix) and value[len(prefix) :].isdigit()
+
+
+def _muse_news_roster_id(value: str) -> bool:
+    return value == "muse-news"
+
+
+def _muse_books_roster_id(value: str) -> bool:
+    return value == "muse-books"
 
 
 ADAPTERS = DatasetAdapterRegistry()
@@ -290,6 +314,50 @@ ADAPTERS.register(
             "forget_target row; neighbor probes are the native audit set"
         ),
         roster_id_validator=_rwku_roster_id,
+    )
+)
+
+ADAPTERS.register(
+    DatasetAdapter(
+        key="muse_news",
+        aliases=("MUSE-News", "muse-bench/MUSE-News"),
+        factory=_muse_news_factory,
+        capabilities=AdapterCapabilities(
+            stages=frozenset(
+                {"calibration", "prediction", "protection", "target_evaluation"}
+            ),
+            roster_unit="corpus deletion request_id",
+            grouped_candidates=True,
+            native_audit=False,
+            independent_target_roster=False,
+        ),
+        description=(
+            "MUSE-News knowmem corpus request; independent request-level paper "
+            "rosters remain unsupported"
+        ),
+        roster_id_validator=_muse_news_roster_id,
+    )
+)
+
+ADAPTERS.register(
+    DatasetAdapter(
+        key="muse_books",
+        aliases=("MUSE-Books", "muse-bench/MUSE-Books"),
+        factory=_muse_books_factory,
+        capabilities=AdapterCapabilities(
+            stages=frozenset(
+                {"calibration", "prediction", "protection", "target_evaluation"}
+            ),
+            roster_unit="corpus deletion request_id",
+            grouped_candidates=True,
+            native_audit=False,
+            independent_target_roster=False,
+        ),
+        description=(
+            "MUSE-Books knowmem corpus request; independent request-level paper "
+            "rosters remain unsupported"
+        ),
+        roster_id_validator=_muse_books_roster_id,
     )
 )
 

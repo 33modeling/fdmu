@@ -1,4 +1,4 @@
-schema_version: 1
+schema_version: 2
 
 # This roster, rather than the set of files that happened to finish, defines
 # every denominator in the paper. Artifact paths in the ledger are repository-
@@ -11,15 +11,19 @@ outputs:
 decision:
   alpha: 0.05
   minimum_support_units: 2
-  prediction_iut:
-    contrasts: [joint_minus_s0, joint_minus_s1]
+  rq1_iut:
+    effects: [joint_rho, joint_minus_s0, joint_minus_s1, tail_lift]
     favorable_sign: positive
-  protection_iut:
+    minimum_tail_coverage: 0.80
+  rq2_iut:
+    effects: [f_rho_minus_0p80, f_k_minus_0p70, g_h, g_ctl]
+    favorable_sign: positive
+  rq3_iut:
     comparators: [no_repair, repeated_random, s0, s1]
     outcomes: [mean, cvar95]
-    favorable_sign: negative
+    damage_favorable_sign: negative
+    native_noninferiority_favorable_sign: positive
     common_arms: [joint, no_repair, repeated_random, s0, s1]
-    exact_norm_role: descriptive_same_estimand_reference_outside_iut
 
 parents: &primary_parents
   - graddiff
@@ -73,7 +77,7 @@ settings:
     parents: *primary_parents
 
 # A setting supports the full chain only when at least one output-readout and
-# one representation-readout parent each pass both prediction and protection.
+# one representation-readout parent each pass all three RQ decisions.
 # All seven parent rows remain visible denominators. The paper-level statement
 # additionally requires primary, >=1/2 model, and >=2/3 dataset settings.
 multi_setting_rule:
@@ -99,7 +103,7 @@ multi_setting_rule:
       minimum_joint_pass: 1
       multiplicity: bonferroni
   stress_excluded: [muse_books_qwen25_7b, pistol_qwen25_7b]
-  require_both_claims: true
+  require_all_claims: true
 
 artifacts:
   - campaign_manifest
@@ -116,7 +120,7 @@ tables:
     label: tab:core-evidence
     location: main
     settings: [tofu_qwen25_1p5b]
-    claims: [prediction, protection]
+    claims: [rq1, rq2, rq3]
     artifacts: []
     producer: experiments/paper/build_evidence.py
   - id: main_robustness
@@ -131,7 +135,7 @@ tables:
       - rwku_qwen25_7b
       - muse_books_qwen25_7b
       - pistol_qwen25_7b
-    claims: [prediction, protection]
+    claims: [rq1, rq2, rq3]
     artifacts: []
     producer: experiments/paper/build_evidence.py
   - id: appendix_scope_contract
@@ -145,7 +149,7 @@ tables:
     label: tab:tail-structure
     location: appendix
     settings: [tofu_qwen25_1p5b]
-    claims: [prediction]
+    claims: [rq1]
     artifacts: [tail_structure]
     producer: experiments/paper/build_evidence.py
   - id: appendix_lse_fidelity_cost
@@ -159,7 +163,7 @@ tables:
     label: tab:budget-sweep
     location: appendix
     settings: [tofu_qwen25_1p5b]
-    claims: [protection]
+    claims: [rq3]
     artifacts: [protection_budget_sweep]
     producer: experiments/paper/build_evidence.py
   - id: appendix_boundaries
@@ -174,6 +178,6 @@ tables:
       - rwku_qwen25_7b
       - muse_books_qwen25_7b
       - pistol_qwen25_7b
-    claims: [prediction, protection]
+    claims: [rq1, rq2, rq3]
     artifacts: [specificity_negative_controls]
     producer: experiments/paper/build_evidence.py

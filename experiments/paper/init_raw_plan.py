@@ -228,7 +228,12 @@ def selection_template(evidence: Mapping[str, Any], campaign_id: str) -> dict[st
             str(setting["id"]): {
                 str(parent): {
                     "prediction": {"valid": False, "fallback": False, "alpha": None},
-                    "protection": {"valid": False, "fallback": False, "alpha": None},
+                    "protection": {
+                        "valid": False,
+                        "fallback": False,
+                        "alpha": None,
+                        "Kp": None,
+                    },
                 }
                 for parent in setting["parents"]
             }
@@ -588,6 +593,39 @@ def build_plan(
                 selection.get("protection"),
                 name=f"selections.{setting_id}.{parent}.protection",
             )
+            raw_protection = selection.get("protection")
+            assert isinstance(raw_protection, Mapping)
+            tail_m = raw_protection.get("Kp")
+            if (
+                isinstance(tail_m, bool)
+                or not isinstance(tail_m, int)
+                or tail_m < 1
+            ):
+                raise EvidenceValidationError(
+                    f"selections.{setting_id}.{parent}.protection.Kp "
+                    "must be a frozen positive integer"
+                )
+            native_metric = dataset.get("native_metric")
+            if not isinstance(native_metric, Mapping):
+                raise EvidenceValidationError(
+                    f"campaign dataset {setting['dataset']} lacks native_metric"
+                )
+            native_margin = native_metric.get("noninferiority_margin")
+            native_orientation = native_metric.get("orientation")
+            if native_orientation not in {"higher", "lower"}:
+                raise EvidenceValidationError(
+                    f"campaign dataset {setting['dataset']} native_metric.orientation "
+                    "must be higher or lower"
+                )
+            if (
+                isinstance(native_margin, bool)
+                or not isinstance(native_margin, (int, float))
+                or float(native_margin) < 0.0
+            ):
+                raise EvidenceValidationError(
+                    f"campaign dataset {setting['dataset']} needs a frozen "
+                    "non-negative native_metric.noninferiority_margin"
+                )
             for request in target:
                 for seed in seeds:
                     units.append(
@@ -599,10 +637,13 @@ def build_plan(
                             "prediction_selection": prediction,
                             "protection_selection": protection,
                             "repeated_random_draws": list(draws),
+                            "tail_m": tail_m,
+                            "native_metric_orientation": native_orientation,
+                            "native_noninferiority_margin": float(native_margin),
                         }
                     )
     plan = {
-        "schema_version": 1,
+        "schema_version": 2,
         "campaign_id": campaign.get("campaign_id"),
         "selection_freeze_id": freeze_id.strip(),
         "bootstrap": dict(bootstrap),

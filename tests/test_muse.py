@@ -5,6 +5,7 @@ import pytest
 
 from rsus.data.base import Request
 from rsus.data.muse import CORPORA, muse_request
+from rsus.data.registry import get_adapter
 from rsus.losses import IGNORE
 
 
@@ -65,3 +66,14 @@ def test_muse_rejects_unknown_corpus():
         muse_request(MockTokenizer(), corpus="wikipedia",
                      forget=fake_qa(2, "F"), retain=fake_qa(2, "R"))
     assert set(CORPORA) == {"news", "books"}
+
+
+@pytest.mark.parametrize(
+    ("name", "request_id"),
+    (("MUSE-News", "muse-news"), ("MUSE-Books", "muse-books")),
+)
+def test_muse_registry_is_explicit_about_corpus_level_scope(name, request_id):
+    adapter = get_adapter(name)
+    assert adapter.accepts_roster_id(request_id)
+    assert not adapter.capabilities.independent_target_roster
+    assert not adapter.capabilities.native_audit

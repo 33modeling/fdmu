@@ -1,17 +1,13 @@
 """Fail-closed RQ1/RQ2/RQ3 decisions for the July-24 PDF contract.
 
-The repository's historical :mod:`rsus.evidence.decisions` implements a
-two-claim schema.  This module defines the three current intersection-union
-tests without pretending that the legacy raw exporter already supplies their
-inputs.  A future paper executor must populate these structures on common
-support and then migrate the registry atomically.
+The schema-v2 raw aggregator populates these effects on common support. This
+module is the single statistical decision layer used by the paper registry.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass, field
-from typing import Mapping
+from dataclasses import dataclass
 
-from .schemas import Effect
+from .schemas import Effect, RQ1Evidence, RQ2Evidence, RQ3Evidence
 from .statistics import intersection_union_p
 
 
@@ -27,49 +23,6 @@ class V4Decision:
     claim_pass: bool
     p_iut: float | None
     reasons: tuple[str, ...]
-
-
-@dataclass(frozen=True)
-class RQ1Evidence:
-    paired: bool = False
-    selection_valid: bool = False
-    profile_valid: bool = False
-    common_support_units: int = 0
-    reached_valid_units: int = 0
-    tail_eligible_units: int = 0
-    joint_rho: Effect = field(default_factory=Effect)
-    joint_minus_s0: Effect = field(default_factory=Effect)
-    joint_minus_s1: Effect = field(default_factory=Effect)
-    tail_lift: Effect = field(default_factory=Effect)
-
-
-@dataclass(frozen=True)
-class RQ2Evidence:
-    paired: bool = False
-    perturbations_valid: bool = False
-    exact_reference_valid: bool = False
-    common_control_support: bool = False
-    common_support_units: int = 0
-    f_rho_minus_0p80: Effect = field(default_factory=Effect)
-    f_k_minus_0p70: Effect = field(default_factory=Effect)
-    g_h: Effect = field(default_factory=Effect)
-    g_ctl: Effect = field(default_factory=Effect)
-
-
-@dataclass(frozen=True)
-class RQ3Evidence:
-    paired: bool = False
-    selection_valid: bool = False
-    all_random_draws_complete: bool = False
-    all_five_arms_feasible: bool = False
-    common_support: bool = False
-    common_support_units: int = 0
-    min_forget_margin: float | None = None
-    min_utility_margin: float | None = None
-    damage: Mapping[str, Mapping[str, Effect]] = field(default_factory=dict)
-    # Each effect is oriented as joint native retention minus comparator native
-    # retention plus the frozen non-inferiority margin; positive is favorable.
-    native_noninferiority: Mapping[str, Effect] = field(default_factory=dict)
 
 
 def _gain_complete(effect: Effect) -> bool:
@@ -193,10 +146,10 @@ def decide_rq3(
     minimum_support: int = 2,
 ) -> V4Decision:
     damage_effects: list[Effect] = []
-    complete_shape = set(evidence.damage) == set(COMPARATORS)
+    complete_shape = set(evidence.comparisons) == set(COMPARATORS)
     if complete_shape:
         for comparator in COMPARATORS:
-            outcomes = evidence.damage[comparator]
+            outcomes = evidence.comparisons[comparator]
             if set(outcomes) != set(DAMAGE_OUTCOMES):
                 complete_shape = False
                 break

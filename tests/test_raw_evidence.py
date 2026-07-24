@@ -28,11 +28,16 @@ def _selection(alpha: float = 0.5) -> dict:
     return {"valid": True, "fallback": False, "alpha": alpha}
 
 
-def _plan(*, units: list[tuple[str, str]] | None = None, replicates: int = 39):
+def _plan(
+    *,
+    units: list[tuple[str, str]] | None = None,
+    replicates: int = 39,
+    native_orientation: str = "higher",
+):
     request_seeds = units or [("r1", "1"), ("r2", "1")]
     return raw_plan_from_mapping(
         {
-            "schema_version": 1,
+            "schema_version": 2,
             "bootstrap": {
                 "replicates": replicates,
                 "seed": 19,
@@ -49,6 +54,9 @@ def _plan(*, units: list[tuple[str, str]] | None = None, replicates: int = 39):
                     "prediction_selection": _selection(0.4),
                     "protection_selection": _selection(0.6),
                     "repeated_random_draws": ["d0", "d1"],
+                    "tail_m": 2,
+                    "native_metric_orientation": native_orientation,
+                    "native_noninferiority_margin": 0.05,
                 }
                 for request, seed in request_seeds
             ],
@@ -73,14 +81,31 @@ def _prediction(request: str, seed: str = "1") -> list[dict]:
                 "s0": -value,
                 "s1": float(index % 3),
                 "joint": value,
+                "simple_control": -float((index + 1) % 3),
                 "damage": value,
                 "profile_valid": True,
                 "reached": True,
                 "trajectory_completed": True,
+                "parent_checkpoint_id": f"checkpoint-{request}-{seed}",
+                "parent_checkpoint_first_reaching": True,
                 "prediction_selection": _selection(0.4),
             }
         )
     return result
+
+
+def _fidelity(request: str, seed: str = "1") -> dict:
+    return {
+        "setting": "primary",
+        "parent": "npo",
+        "request": request,
+        "seed": seed,
+        "perturbations_valid": True,
+        "exact_reference_valid": True,
+        "common_control_support": True,
+        "f_rho": 0.95,
+        "f_k": 0.90,
+    }
 
 
 def _protection(request: str, seed: str = "1") -> list[dict]:
@@ -104,6 +129,7 @@ def _protection(request: str, seed: str = "1") -> list[dict]:
                     "group": "g0" if index < 3 else "g1",
                     "arm": arm,
                     "damage": value + offset,
+                    "native_retention": 0.9 if arm == "joint" else 0.8,
                     "feasible": True,
                     "direct_forget_margin": 0.2,
                     "paraphrase_forget_margin": 0.3,
@@ -128,6 +154,7 @@ def _protection(request: str, seed: str = "1") -> list[dict]:
                     "draw_id": draw,
                     "draw_complete": True,
                     "damage": value + offset,
+                    "native_retention": 0.8,
                     "feasible": True,
                     "direct_forget_margin": 0.2,
                     "paraphrase_forget_margin": 0.3,
@@ -144,8 +171,11 @@ def _protection(request: str, seed: str = "1") -> list[dict]:
 def test_full_raw_campaign_produces_schema_valid_paired_ledger():
     plan = _plan()
     predictions = _prediction("r1") + _prediction("r2")
+    fidelity = [_fidelity("r1"), _fidelity("r2")]
     protections = _protection("r1") + _protection("r2")
-    raw = aggregate_raw_evidence(plan, predictions, protections)
+    raw = aggregate_raw_evidence(
+        plan, predictions, protections, fidelity_records=fidelity
+    )
     ledger = EvidenceLedger.from_mapping(raw)
     row = ledger.rows[("primary", "npo")]
 
@@ -154,16 +184,22 @@ def test_full_raw_campaign_produces_schema_valid_paired_ledger():
     assert row.funnel.prediction_common == 2
     assert row.funnel.protection_feasible_all_arms == 2
     assert row.funnel.protection_common == 2
-    assert row.prediction.paired
-    assert row.prediction.joint_rho == pytest.approx(1.0)
-    assert row.prediction.vs_s0.estimate == pytest.approx(2.0)
-    assert row.prediction.vs_s0.lower_bound > 0
-    assert row.protection.paired
-    assert row.protection.comparisons["no_repair"]["mean"].estimate == pytest.approx(-0.5)
-    assert row.protection.comparisons["repeated_random"]["mean"].estimate == pytest.approx(-0.3)
-    assert row.protection.comparisons["s1"]["cvar95"].upper_bound < 0
-    assert row.protection.min_forget_margin == pytest.approx(0.2)
-    assert row.protection.min_utility_margin == pytest.approx(0.1)
+    assert row.funnel.fidelity_common == 2
+    assert row.rq1.paired
+    assert row.rq1.joint_rho.estimate == pytest.approx(1.0)
+    assert row.rq1.joint_minus_s0.estimate == pytest.approx(2.0)
+    assert row.rq1.joint_minus_s0.lower_bound > 0
+    assert row.rq1.tail_lift.estimate == pytest.approx(2.0)
+    assert row.rq2.paired
+    assert row.rq2.f_rho_minus_0p80.estimate == pytest.approx(0.15)
+    assert row.rq2.f_k_minus_0p70.estimate == pytest.approx(0.20)
+    assert row.rq3.paired
+    assert row.rq3.comparisons["no_repair"]["mean"].estimate == pytest.approx(-0.5)
+    assert row.rq3.comparisons["repeated_random"]["mean"].estimate == pytest.approx(-0.3)
+    assert row.rq3.comparisons["s1"]["cvar95"].upper_bound < 0
+    assert row.rq3.native_noninferiority["s1"].lower_bound > 0
+    assert row.rq3.min_forget_margin == pytest.approx(0.2)
+    assert row.rq3.min_utility_margin == pytest.approx(0.1)
 
 
 def test_missing_planned_unit_stays_in_funnel_and_row_is_incomplete():
@@ -183,6 +219,16 @@ def test_missing_planned_unit_stays_in_funnel_and_row_is_incomplete():
     assert row.funnel.protection_common == 1
 
 
+def test_native_noninferiority_respects_lower_is_better_orientation():
+    plan = _plan(units=[("r1", "1")], native_orientation="lower")
+    protection = _protection("r1")
+    for row in protection:
+        row["native_retention"] = 0.1 if row["arm"] == "joint" else 0.2
+    raw = aggregate_raw_evidence(plan, _prediction("r1"), protection)
+    row = EvidenceLedger.from_mapping(raw).rows[("primary", "npo")]
+    assert row.rq3.native_noninferiority["s0"].estimate == pytest.approx(0.15)
+
+
 def test_missing_arm_is_not_silently_intersected():
     plan = _plan(units=[("r1", "1")])
     protection = [row for row in _protection("r1") if row["arm"] != "s1"]
@@ -191,8 +237,8 @@ def test_missing_arm_is_not_silently_intersected():
     assert row.funnel.reached_with_valid_profile == 1
     assert row.funnel.protection_feasible_all_arms == 0
     assert row.funnel.protection_common == 0
-    assert not row.protection.paired
-    assert row.protection.comparisons == {}
+    assert not row.rq3.paired
+    assert row.rq3.comparisons == {}
 
 
 def test_feasibility_and_common_support_are_separate_funnels():
@@ -208,7 +254,7 @@ def test_feasibility_and_common_support_are_separate_funnels():
     row = EvidenceLedger.from_mapping(raw).rows[("primary", "npo")]
     assert row.funnel.protection_feasible_all_arms == 1
     assert row.funnel.protection_common == 0
-    assert not row.protection.paired
+    assert not row.rq3.paired
 
 
 def test_extraction_generation_margin_is_mandatory_and_fail_closed():
@@ -274,7 +320,7 @@ def test_unequal_seed_counts_are_averaged_within_request_then_equally():
         row["joint"] = -row["joint"]
     raw = aggregate_raw_evidence(plan, first + second + third, [])
     row = EvidenceLedger.from_mapping(raw).rows[("primary", "npo")]
-    assert row.prediction.joint_rho == pytest.approx(0.0)
+    assert row.rq1.joint_rho.estimate == pytest.approx(0.0)
 
 
 def test_cli_writes_incomplete_rows_when_raw_shards_are_absent(tmp_path):
@@ -283,7 +329,7 @@ def test_cli_writes_incomplete_rows_when_raw_shards_are_absent(tmp_path):
     plan_path.write_text(
         json.dumps(
             {
-                "schema_version": 1,
+                "schema_version": 2,
                 "bootstrap": {"replicates": 21, "seed": 1},
                 "units": [
                     {
@@ -294,6 +340,9 @@ def test_cli_writes_incomplete_rows_when_raw_shards_are_absent(tmp_path):
                         "prediction_selection": _selection(),
                         "protection_selection": _selection(),
                         "repeated_random_draws": ["d0"],
+                        "tail_m": 2,
+                        "native_metric_orientation": "higher",
+                        "native_noninferiority_margin": 0.05,
                     }
                 ],
             }

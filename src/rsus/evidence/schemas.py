@@ -120,12 +120,16 @@ class Selection:
 class Funnel:
     profiles_planned: int = 0
     profiles_valid: int = 0
+    fidelity_planned: int = 0
+    fidelity_valid: int = 0
     trajectories_planned: int = 0
     trajectories_attempted: int = 0
     trajectories_completed: int = 0
     trajectories_reached: int = 0
     reached_with_valid_profile: int = 0
     prediction_common: int = 0
+    tail_eligible: int = 0
+    fidelity_common: int = 0
     protection_feasible_all_arms: int = 0
     protection_common: int = 0
 
@@ -149,6 +153,10 @@ class Funnel:
             raise EvidenceValidationError(
                 f"{name}: profiles_valid exceeds profiles_planned"
             )
+        if self.fidelity_valid > self.fidelity_planned:
+            raise EvidenceValidationError(
+                f"{name}: fidelity_valid exceeds fidelity_planned"
+            )
         if not (
             self.trajectories_reached
             <= self.trajectories_completed
@@ -166,6 +174,16 @@ class Funnel:
             raise EvidenceValidationError(
                 f"{name}: prediction_common exceeds reached_with_valid_profile"
             )
+        if self.tail_eligible > self.prediction_common:
+            raise EvidenceValidationError(
+                f"{name}: tail_eligible exceeds prediction_common"
+            )
+        if self.fidelity_common > min(
+            self.fidelity_valid, self.prediction_common
+        ):
+            raise EvidenceValidationError(
+                f"{name}: fidelity_common exceeds valid/common support"
+            )
         if self.protection_feasible_all_arms > self.reached_with_valid_profile:
             raise EvidenceValidationError(
                 f"{name}: protection feasible count exceeds reached/valid count"
@@ -177,38 +195,110 @@ class Funnel:
 
 
 @dataclass(frozen=True)
-class PredictionEvidence:
+class RQ1Evidence:
     paired: bool = False
-    joint_rho: float | None = None
-    top_q_recall: float | None = None
-    vs_s0: Effect = field(default_factory=Effect)
-    vs_s1: Effect = field(default_factory=Effect)
+    selection_valid: bool = False
+    profile_valid: bool = False
+    common_support_units: int = 0
+    reached_valid_units: int = 0
+    tail_eligible_units: int = 0
+    joint_rho: Effect = field(default_factory=Effect)
+    joint_minus_s0: Effect = field(default_factory=Effect)
+    joint_minus_s1: Effect = field(default_factory=Effect)
+    tail_lift: Effect = field(default_factory=Effect)
 
     @classmethod
     def from_mapping(
         cls, raw: Mapping[str, Any] | None, *, name: str
-    ) -> "PredictionEvidence":
+    ) -> "RQ1Evidence":
         data = raw or {}
         if not isinstance(data, Mapping):
             raise EvidenceValidationError(f"{name} must be a mapping")
-        evidence = cls(
-            paired=_as_bool(
-                data.get("paired", False), field_name=f"{name}.paired"
+        return cls(
+            paired=_as_bool(data.get("paired", False), field_name=f"{name}.paired"),
+            selection_valid=_as_bool(
+                data.get("selection_valid", False),
+                field_name=f"{name}.selection_valid",
             ),
-            joint_rho=_optional_number(
-                data.get("joint_rho"), field_name=f"{name}.joint_rho"
+            profile_valid=_as_bool(
+                data.get("profile_valid", False),
+                field_name=f"{name}.profile_valid",
             ),
-            top_q_recall=_optional_number(
-                data.get("top_q_recall"), field_name=f"{name}.top_q_recall"
+            common_support_units=_as_count(
+                data.get("common_support_units", 0),
+                field_name=f"{name}.common_support_units",
             ),
-            vs_s0=Effect.from_mapping(data.get("vs_s0"), name=f"{name}.vs_s0"),
-            vs_s1=Effect.from_mapping(data.get("vs_s1"), name=f"{name}.vs_s1"),
+            reached_valid_units=_as_count(
+                data.get("reached_valid_units", 0),
+                field_name=f"{name}.reached_valid_units",
+            ),
+            tail_eligible_units=_as_count(
+                data.get("tail_eligible_units", 0),
+                field_name=f"{name}.tail_eligible_units",
+            ),
+            joint_rho=Effect.from_mapping(
+                data.get("joint_rho"), name=f"{name}.joint_rho"
+            ),
+            joint_minus_s0=Effect.from_mapping(
+                data.get("joint_minus_s0"), name=f"{name}.joint_minus_s0"
+            ),
+            joint_minus_s1=Effect.from_mapping(
+                data.get("joint_minus_s1"), name=f"{name}.joint_minus_s1"
+            ),
+            tail_lift=Effect.from_mapping(
+                data.get("tail_lift"), name=f"{name}.tail_lift"
+            ),
         )
-        if evidence.joint_rho is not None and not -1.0 <= evidence.joint_rho <= 1.0:
-            raise EvidenceValidationError(f"{name}.joint_rho must be in [-1, 1]")
-        if evidence.top_q_recall is not None and not 0.0 <= evidence.top_q_recall <= 1.0:
-            raise EvidenceValidationError(f"{name}.top_q_recall must be in [0, 1]")
-        return evidence
+
+
+@dataclass(frozen=True)
+class RQ2Evidence:
+    paired: bool = False
+    perturbations_valid: bool = False
+    exact_reference_valid: bool = False
+    common_control_support: bool = False
+    common_support_units: int = 0
+    f_rho_minus_0p80: Effect = field(default_factory=Effect)
+    f_k_minus_0p70: Effect = field(default_factory=Effect)
+    g_h: Effect = field(default_factory=Effect)
+    g_ctl: Effect = field(default_factory=Effect)
+
+    @classmethod
+    def from_mapping(
+        cls, raw: Mapping[str, Any] | None, *, name: str
+    ) -> "RQ2Evidence":
+        data = raw or {}
+        if not isinstance(data, Mapping):
+            raise EvidenceValidationError(f"{name} must be a mapping")
+        return cls(
+            paired=_as_bool(data.get("paired", False), field_name=f"{name}.paired"),
+            perturbations_valid=_as_bool(
+                data.get("perturbations_valid", False),
+                field_name=f"{name}.perturbations_valid",
+            ),
+            exact_reference_valid=_as_bool(
+                data.get("exact_reference_valid", False),
+                field_name=f"{name}.exact_reference_valid",
+            ),
+            common_control_support=_as_bool(
+                data.get("common_control_support", False),
+                field_name=f"{name}.common_control_support",
+            ),
+            common_support_units=_as_count(
+                data.get("common_support_units", 0),
+                field_name=f"{name}.common_support_units",
+            ),
+            f_rho_minus_0p80=Effect.from_mapping(
+                data.get("f_rho_minus_0p80"),
+                name=f"{name}.f_rho_minus_0p80",
+            ),
+            f_k_minus_0p70=Effect.from_mapping(
+                data.get("f_k_minus_0p70"),
+                name=f"{name}.f_k_minus_0p70",
+            ),
+            g_h=Effect.from_mapping(data.get("g_h"), name=f"{name}.g_h"),
+            g_ctl=Effect.from_mapping(data.get("g_ctl"), name=f"{name}.g_ctl"),
+        )
 
 
 PROTECTION_COMPARATORS = ("no_repair", "repeated_random", "s0", "s1")
@@ -216,17 +306,22 @@ PROTECTION_OUTCOMES = ("mean", "cvar95")
 
 
 @dataclass(frozen=True)
-class ProtectionEvidence:
+class RQ3Evidence:
     paired: bool = False
     comparisons: Mapping[str, Mapping[str, Effect]] = field(default_factory=dict)
-    exact_norm: Mapping[str, Effect] = field(default_factory=dict)
+    native_noninferiority: Mapping[str, Effect] = field(default_factory=dict)
+    selection_valid: bool = False
+    all_random_draws_complete: bool = False
+    all_five_arms_feasible: bool = False
+    common_support: bool = False
+    common_support_units: int = 0
     min_forget_margin: float | None = None
     min_utility_margin: float | None = None
 
     @classmethod
     def from_mapping(
         cls, raw: Mapping[str, Any] | None, *, name: str
-    ) -> "ProtectionEvidence":
+    ) -> "RQ3Evidence":
         data = raw or {}
         if not isinstance(data, Mapping):
             raise EvidenceValidationError(f"{name} must be a mapping")
@@ -255,27 +350,51 @@ class ProtectionEvidence:
                 )
                 for outcome in PROTECTION_OUTCOMES
             }
-        raw_exact = data.get("exact_norm", {}) or {}
-        if not isinstance(raw_exact, Mapping):
-            raise EvidenceValidationError(f"{name}.exact_norm must be a mapping")
-        unknown_exact = set(raw_exact) - set(PROTECTION_OUTCOMES)
-        if unknown_exact:
+        raw_native = data.get("native_noninferiority", {}) or {}
+        if not isinstance(raw_native, Mapping):
             raise EvidenceValidationError(
-                f"{name}.exact_norm has unknown outcomes {sorted(unknown_exact)}"
+                f"{name}.native_noninferiority must be a mapping"
             )
-        exact = {
-            outcome: Effect.from_mapping(
-                raw_exact.get(outcome), name=f"{name}.exact_norm.{outcome}"
+        unknown_native = set(raw_native) - set(PROTECTION_COMPARATORS)
+        if unknown_native:
+            raise EvidenceValidationError(
+                f"{name}.native_noninferiority has unknown comparators "
+                f"{sorted(unknown_native)}"
             )
-            for outcome in PROTECTION_OUTCOMES
-            if outcome in raw_exact
+        native = {
+            comparator: Effect.from_mapping(
+                raw_native.get(comparator),
+                name=f"{name}.native_noninferiority.{comparator}",
+            )
+            for comparator in PROTECTION_COMPARATORS
+            if comparator in raw_native
         }
         return cls(
             paired=_as_bool(
                 data.get("paired", False), field_name=f"{name}.paired"
             ),
             comparisons=comparisons,
-            exact_norm=exact,
+            native_noninferiority=native,
+            selection_valid=_as_bool(
+                data.get("selection_valid", False),
+                field_name=f"{name}.selection_valid",
+            ),
+            all_random_draws_complete=_as_bool(
+                data.get("all_random_draws_complete", False),
+                field_name=f"{name}.all_random_draws_complete",
+            ),
+            all_five_arms_feasible=_as_bool(
+                data.get("all_five_arms_feasible", False),
+                field_name=f"{name}.all_five_arms_feasible",
+            ),
+            common_support=_as_bool(
+                data.get("common_support", False),
+                field_name=f"{name}.common_support",
+            ),
+            common_support_units=_as_count(
+                data.get("common_support_units", 0),
+                field_name=f"{name}.common_support_units",
+            ),
             min_forget_margin=_optional_number(
                 data.get("min_forget_margin"),
                 field_name=f"{name}.min_forget_margin",
@@ -296,8 +415,9 @@ class EvidenceRow:
     prediction_selection: Selection
     protection_selection: Selection
     funnel: Funnel
-    prediction: PredictionEvidence
-    protection: ProtectionEvidence
+    rq1: RQ1Evidence
+    rq2: RQ2Evidence
+    rq3: RQ3Evidence
 
     @property
     def key(self) -> tuple[str, str]:
@@ -336,26 +456,71 @@ class EvidenceRow:
                 f"rows[{index}]: completed requires every planned trajectory to be "
                 "attempted and completed"
             )
+        prediction_selection = Selection.from_mapping(
+            raw.get("prediction_selection"),
+            name=f"rows[{index}].prediction_selection",
+        )
+        protection_selection = Selection.from_mapping(
+            raw.get("protection_selection"),
+            name=f"rows[{index}].protection_selection",
+        )
+        rq1 = RQ1Evidence.from_mapping(
+            raw.get("rq1"), name=f"rows[{index}].rq1"
+        )
+        rq2 = RQ2Evidence.from_mapping(
+            raw.get("rq2"), name=f"rows[{index}].rq2"
+        )
+        rq3 = RQ3Evidence.from_mapping(
+            raw.get("rq3"), name=f"rows[{index}].rq3"
+        )
+        if rq1.selection_valid != (
+            prediction_selection.valid and not prediction_selection.fallback
+        ):
+            raise EvidenceValidationError(
+                f"rows[{index}]: rq1.selection_valid disagrees with frozen selection"
+            )
+        if rq3.selection_valid != (
+            protection_selection.valid and not protection_selection.fallback
+        ):
+            raise EvidenceValidationError(
+                f"rows[{index}]: rq3.selection_valid disagrees with frozen selection"
+            )
+        if rq1.paired and (
+            rq1.common_support_units != funnel.prediction_common
+            or rq1.reached_valid_units != funnel.reached_with_valid_profile
+            or rq1.tail_eligible_units != funnel.tail_eligible
+        ):
+            raise EvidenceValidationError(
+                f"rows[{index}]: RQ1 support disagrees with funnel"
+            )
+        if rq2.paired and rq2.common_support_units != funnel.fidelity_common:
+            raise EvidenceValidationError(
+                f"rows[{index}]: RQ2 support disagrees with funnel"
+            )
+        if rq3.paired and (
+            rq3.common_support_units != funnel.protection_common
+            or rq3.common_support != (
+                funnel.protection_common == funnel.reached_with_valid_profile
+            )
+            or rq3.all_five_arms_feasible != (
+                funnel.protection_feasible_all_arms
+                == funnel.reached_with_valid_profile
+            )
+        ):
+            raise EvidenceValidationError(
+                f"rows[{index}]: RQ3 support disagrees with funnel"
+            )
         return cls(
             setting=setting,
             parent=parent,
             attempted=attempted,
             completed=completed,
-            prediction_selection=Selection.from_mapping(
-                raw.get("prediction_selection"),
-                name=f"rows[{index}].prediction_selection",
-            ),
-            protection_selection=Selection.from_mapping(
-                raw.get("protection_selection"),
-                name=f"rows[{index}].protection_selection",
-            ),
+            prediction_selection=prediction_selection,
+            protection_selection=protection_selection,
             funnel=funnel,
-            prediction=PredictionEvidence.from_mapping(
-                raw.get("prediction"), name=f"rows[{index}].prediction"
-            ),
-            protection=ProtectionEvidence.from_mapping(
-                raw.get("protection"), name=f"rows[{index}].protection"
-            ),
+            rq1=rq1,
+            rq2=rq2,
+            rq3=rq3,
         )
 
 
@@ -413,16 +578,16 @@ class EvidenceLedger:
 
     @classmethod
     def empty(cls) -> "EvidenceLedger":
-        return cls(schema_version=1, rows={}, artifacts={})
+        return cls(schema_version=2, rows={}, artifacts={})
 
     @classmethod
     def from_mapping(cls, raw: Mapping[str, Any]) -> "EvidenceLedger":
         if not isinstance(raw, Mapping):
             raise EvidenceValidationError("ledger root must be a mapping")
         version = raw.get("schema_version")
-        if version != 1:
+        if version != 2:
             raise EvidenceValidationError(
-                f"unsupported ledger schema_version {version!r}; expected 1"
+                f"unsupported ledger schema_version {version!r}; expected 2"
             )
         rows: dict[tuple[str, str], EvidenceRow] = {}
         raw_rows = raw.get("rows", [])
@@ -440,7 +605,7 @@ class EvidenceLedger:
             str(name): ArtifactStatus.from_mapping(value, name=str(name))
             for name, value in raw_artifacts.items()
         }
-        return cls(schema_version=1, rows=rows, artifacts=artifacts)
+        return cls(schema_version=2, rows=rows, artifacts=artifacts)
 
     @classmethod
     def read(cls, path: str | Path) -> "EvidenceLedger":

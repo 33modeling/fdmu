@@ -10,7 +10,7 @@ import yaml
 from .schemas import EvidenceValidationError
 
 
-CLAIMS = ("prediction", "protection")
+CLAIMS = ("rq1", "rq2", "rq3")
 
 
 def _nonempty_string(value: object, *, name: str) -> str:
@@ -71,7 +71,7 @@ class MultiSettingRule:
     groups: tuple[RuleGroup, ...]
     parent_groups: tuple[ParentGroupRule, ...]
     stress_excluded: tuple[str, ...]
-    require_both_claims: bool
+    require_all_claims: bool
 
 
 @dataclass(frozen=True)
@@ -308,10 +308,14 @@ def _parse_multi_setting(
         )
     if set(primary) & set(stress):
         raise EvidenceValidationError("primary_required cannot contain stress settings")
-    both = raw.get("require_both_claims", True)
-    if type(both) is not bool:
+    require_all = raw.get("require_all_claims", True)
+    if type(require_all) is not bool:
         raise EvidenceValidationError(
-            "multi_setting_rule.require_both_claims must be a boolean"
+            "multi_setting_rule.require_all_claims must be a boolean"
+        )
+    if require_all is not True:
+        raise EvidenceValidationError(
+            "multi_setting_rule.require_all_claims must be true for PDF v4"
         )
     return MultiSettingRule(
         rule_id=_nonempty_string(raw.get("id"), name="multi_setting_rule.id"),
@@ -319,7 +323,7 @@ def _parse_multi_setting(
         groups=tuple(groups),
         parent_groups=tuple(parent_groups),
         stress_excluded=stress,
-        require_both_claims=both,
+        require_all_claims=require_all,
     )
 
 
@@ -331,8 +335,8 @@ def load_contract(path: str | Path) -> EvidenceContract:
         raise EvidenceValidationError(f"cannot read evidence config {source}: {error}") from error
     if not isinstance(raw, Mapping):
         raise EvidenceValidationError("evidence config root must be a mapping")
-    if raw.get("schema_version") != 1:
-        raise EvidenceValidationError("config schema_version must be 1")
+    if raw.get("schema_version") != 2:
+        raise EvidenceValidationError("config schema_version must be 2")
     decision = raw.get("decision", {})
     if not isinstance(decision, Mapping):
         raise EvidenceValidationError("decision must be a mapping")
@@ -347,30 +351,35 @@ def load_contract(path: str | Path) -> EvidenceContract:
         raise EvidenceValidationError(
             "decision.minimum_support_units must be a positive integer"
         )
-    prediction_iut = decision.get("prediction_iut")
-    if not isinstance(prediction_iut, Mapping):
-        raise EvidenceValidationError("decision.prediction_iut must be a mapping")
-    if prediction_iut.get("contrasts") != ["joint_minus_s0", "joint_minus_s1"]:
-        raise EvidenceValidationError(
-            "prediction IUT must contain paired joint_minus_s0 and joint_minus_s1"
-        )
-    if prediction_iut.get("favorable_sign") != "positive":
-        raise EvidenceValidationError("prediction IUT favorable_sign must be positive")
-    protection_iut = decision.get("protection_iut")
-    if not isinstance(protection_iut, Mapping):
-        raise EvidenceValidationError("decision.protection_iut must be a mapping")
-    expected_protection = {
+    expected_rq1 = {
+        "effects": ["joint_rho", "joint_minus_s0", "joint_minus_s1", "tail_lift"],
+        "favorable_sign": "positive",
+        "minimum_tail_coverage": 0.80,
+    }
+    expected_rq2 = {
+        "effects": ["f_rho_minus_0p80", "f_k_minus_0p70", "g_h", "g_ctl"],
+        "favorable_sign": "positive",
+    }
+    expected_rq3 = {
         "comparators": ["no_repair", "repeated_random", "s0", "s1"],
         "outcomes": ["mean", "cvar95"],
-        "favorable_sign": "negative",
+        "damage_favorable_sign": "negative",
+        "native_noninferiority_favorable_sign": "positive",
         "common_arms": ["joint", "no_repair", "repeated_random", "s0", "s1"],
-        "exact_norm_role": "descriptive_same_estimand_reference_outside_iut",
     }
-    for key, expected in expected_protection.items():
-        if protection_iut.get(key) != expected:
-            raise EvidenceValidationError(
-                f"decision.protection_iut.{key} must equal {expected!r}"
-            )
+    for block_name, expected_block in (
+        ("rq1_iut", expected_rq1),
+        ("rq2_iut", expected_rq2),
+        ("rq3_iut", expected_rq3),
+    ):
+        block = decision.get(block_name)
+        if not isinstance(block, Mapping):
+            raise EvidenceValidationError(f"decision.{block_name} must be a mapping")
+        for key, expected in expected_block.items():
+            if block.get(key) != expected:
+                raise EvidenceValidationError(
+                    f"decision.{block_name}.{key} must equal {expected!r}"
+                )
     settings = _parse_settings(raw.get("settings"))
     artifacts = _string_list(raw.get("artifacts"), name="artifacts")
     tables = _parse_tables(
@@ -381,7 +390,7 @@ def load_contract(path: str | Path) -> EvidenceContract:
     if not isinstance(outputs, Mapping):
         raise EvidenceValidationError("outputs must be a mapping")
     return EvidenceContract(
-        schema_version=1,
+        schema_version=2,
         alpha=alpha,
         minimum_support_units=support,
         ledger_path=_nonempty_string(raw.get("ledger"), name="ledger"),

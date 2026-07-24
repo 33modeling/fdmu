@@ -59,13 +59,13 @@ class PreflightConfigError(ValueError):
     """A malformed evidence or campaign contract cannot be audited."""
 
 
-def _load_yaml(path: Path) -> dict[str, Any]:
+def _load_yaml(path: Path, *, schema_version: int) -> dict[str, Any]:
     if not path.is_file():
         raise PreflightConfigError(f"missing config: {path}")
     raw = yaml.safe_load(path.read_text(encoding="utf-8"))
     if not isinstance(raw, dict):
         raise PreflightConfigError(f"config must be a mapping: {path}")
-    if raw.get("schema_version") != 1:
+    if raw.get("schema_version") != schema_version:
         raise PreflightConfigError(f"unsupported schema_version in {path}")
     return raw
 
@@ -273,6 +273,17 @@ def _selection_freeze_report(
                         if not resolved or (valid is True and not numeric_alpha):
                             reasons.append(f"selection freeze has unresolved {where}")
                             continue
+                        if claim == "protection":
+                            pool_size = selection.get("Kp")
+                            if (
+                                isinstance(pool_size, bool)
+                                or not isinstance(pool_size, int)
+                                or pool_size < 1
+                            ):
+                                reasons.append(
+                                    f"selection freeze has unresolved {where}.Kp"
+                                )
+                                continue
                         completed += 1
     elif raw is not None:
         reasons.append("selection freeze root must be a mapping")
@@ -341,6 +352,30 @@ def _dataset_report(
             f"roster_unit {roster_unit!r} disagrees with adapter contract "
             f"{adapter.capabilities.roster_unit!r}"
         )
+    if adapter is not None and not adapter.capabilities.grouped_candidates:
+        reasons.append("adapter lacks grouped candidates for score-independent folds")
+    if adapter is not None and not adapter.capabilities.independent_target_roster:
+        reasons.append("adapter lacks independent target-request rosters")
+
+    native_metric = raw.get("native_metric")
+    if not isinstance(native_metric, dict):
+        reasons.append("native_metric contract is missing")
+    else:
+        name = native_metric.get("name")
+        orientation = native_metric.get("orientation")
+        margin = native_metric.get("noninferiority_margin")
+        if not _nonempty_string(name) or _is_tbd(name):
+            reasons.append("native_metric.name is unresolved")
+        if orientation not in {"higher", "lower"}:
+            reasons.append("native_metric.orientation must be higher or lower")
+        if (
+            isinstance(margin, bool)
+            or not isinstance(margin, (int, float))
+            or float(margin) < 0.0
+        ):
+            reasons.append(
+                "native_metric.noninferiority_margin must be frozen and non-negative"
+            )
 
     raw_rosters = raw.get("rosters")
     if not isinstance(raw_rosters, dict):
@@ -757,8 +792,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
     try:
-        evidence = _load_yaml(args.evidence_config.resolve())
-        campaign = _load_yaml(args.campaign_config.resolve())
+        evidence = _load_yaml(args.evidence_config.resolve(), schema_version=2)
+        campaign = _load_yaml(args.campaign_config.resolve(), schema_version=1)
         report = build_preflight_report(evidence, campaign)
         output = args.out
         if output is None:

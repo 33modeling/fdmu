@@ -27,7 +27,7 @@ def _selection(alpha: float = 0.5) -> dict:
 def _plan(request: str = "tofu-a188"):
     return raw_plan_from_mapping(
         {
-            "schema_version": 1,
+            "schema_version": 2,
             "bootstrap": {"replicates": 5, "seed": 1},
             "units": [
                 {
@@ -38,6 +38,9 @@ def _plan(request: str = "tofu-a188"):
                     "prediction_selection": _selection(0.4),
                     "protection_selection": _selection(0.5),
                     "repeated_random_draws": ["rand-000", "rand-001"],
+                    "tail_m": 1,
+                    "native_metric_orientation": "higher",
+                    "native_noninferiority_margin": 0.0,
                 }
             ],
         }
@@ -69,6 +72,7 @@ def _row(selector: str, *, alpha=None, deployed=False, draw_id=None, offset=0.0)
         "selected_checkpoint_step": 20,
         "candidate_damage": {"c0": 0.1 + offset, "c1": 0.2 + offset},
         "candidate_groups": {"c0": "g0", "c1": "g1"},
+        "native_retention": 0.9 - offset,
         "parent_checkpoint": {
             "first_direct_reaching": True,
             "step": 10,
@@ -146,6 +150,7 @@ def test_exporter_emits_exact_five_arm_candidate_schema():
     assert {record["draw_id"] for record in random} == {"rand-000", "rand-001"}
     assert all(record["draw_complete"] for record in random)
     assert all(record["parent_checkpoint_id"] == "a" * 64 for record in records)
+    assert all("native_retention" in record for record in records)
     assert all(record["extraction_generation_margin"] == pytest.approx(0.03) for record in records)
 
 

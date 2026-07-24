@@ -67,7 +67,12 @@ def _ready_contract(tmp_path: Path) -> tuple[Path, Path, Path]:
             setting["id"]: {
                 parent: {
                     "prediction": {"valid": True, "fallback": False, "alpha": 0.5},
-                    "protection": {"valid": True, "fallback": False, "alpha": 0.5},
+                    "protection": {
+                        "valid": True,
+                        "fallback": False,
+                        "alpha": 0.5,
+                        "Kp": 2,
+                    },
                 }
                 for parent in setting["parents"]
             }
@@ -160,8 +165,11 @@ def test_tbd_missing_adapter_and_unprovisioned_model_are_explicit(tmp_path):
     assert result.returncode == 2
     report = json.loads(output.read_text(encoding="utf-8"))
     assert "WMDP-bio/MMLU" in report["summary"]["missing_adapter_datasets"]
-    assert "MUSE-News" in report["summary"]["missing_adapter_datasets"]
-    assert "MUSE-Books" in report["summary"]["missing_adapter_datasets"]
+    assert "MUSE-News" not in report["summary"]["missing_adapter_datasets"]
+    assert "MUSE-Books" not in report["summary"]["missing_adapter_datasets"]
+    assert "adapter lacks independent target-request rosters" in report["datasets"][
+        "MUSE-News"
+    ]["reasons"]
     assert "PISTOL" in report["summary"]["missing_adapter_datasets"]
     # RWKU graduated from this list on 2026-07-23: the adapter is registered
     # and its rosters are concrete, pairwise-disjoint request ids.

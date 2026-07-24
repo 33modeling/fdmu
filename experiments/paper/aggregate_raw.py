@@ -67,6 +67,13 @@ def build_parser() -> argparse.ArgumentParser:
         help="prediction JSONL/JSON shard; repeat for multiple datasets",
     )
     parser.add_argument(
+        "--fidelity-raw",
+        action="append",
+        default=[],
+        metavar="PATH",
+        help="per-target-unit PDF-v4 fidelity JSONL/JSON shard; repeatable",
+    )
+    parser.add_argument(
         "--protection-raw",
         action="append",
         default=[],
@@ -121,6 +128,7 @@ def main(argv: list[str] | None = None) -> int:
     try:
         plan = load_raw_plan(_path(args.plan))
         prediction = read_raw_records(_path(path) for path in args.prediction_raw)
+        fidelity = read_raw_records(_path(path) for path in args.fidelity_raw)
         protection = read_raw_records(_path(path) for path in args.protection_raw)
         artifacts = dict(_artifact_mapping(args.artifacts_from))
         measurements = _measurement_inputs(args.artifact_raw)
@@ -147,6 +155,7 @@ def main(argv: list[str] | None = None) -> int:
             plan,
             prediction,
             protection,
+            fidelity_records=fidelity,
             artifacts=artifacts,
         )
         output = write_ledger(ledger, _path(args.out))

@@ -1,17 +1,15 @@
 # fdmu — Update-Conditioned Retain Susceptibility (FD probe + guarded repair)
 
-> **2026-07-24 protocol warning:** `KDD_UnlearningFail.pdf` contains a newer
-> Chapter 4 than this README, the checked-in LaTeX, and parts of the code. The
-> repository is not yet claim-compatible with that PDF, especially for
-> Equations (7)--(8), RQ1--RQ3 decisions, fractional CVaR, and native-metric
-> non-inferiority. See
+> **2026-07-25 protocol status:** the active paper execution and evidence paths
+> now implement the `KDD_UnlearningFail.pdf` v4 contract: first-reaching
+> damage, Equations (7)--(8), exact `Kp`, fractional CVaR, and separate
+> RQ1/RQ2/RQ3 IUTs including native-metric non-inferiority. See
 > [`docs/PDF_V4_CODE_AUDIT.md`](docs/PDF_V4_CODE_AUDIT.md) and
 > [`docs/NEW_MODEL_CALIBRATION_GUIDE.md`](docs/NEW_MODEL_CALIBRATION_GUIDE.md)
-> before running or porting the method. The sections below describe the legacy
-> implementation and must not be treated as the July 24 paper contract.
-> The staged v4 mechanics live in `src/rsus/repair.py` and the explicitly named
-> `run_pdf_repair_from_reached` wrapper; they fail closed when `B_tok` or other
-> required repair settings are not frozen.
+> before running or porting the method. This does not mean results are
+> available: model paths, the target-free selection freeze, WMDP/PISTOL
+> adapters, and several exact rosters remain unresolved, so preflight correctly
+> exits nonzero on this host.
 
 > LLM **언러닝(삭제)** 시 어떤 *보존 데이터*가 부수적으로 망가지는지를
 > **미리 예측**하고(Finite-Difference 프로브), 그 예측을 이용해 **보호적 복구**를
@@ -34,10 +32,12 @@
 damage  d(x) = ℓ(x; θ_T) − ℓ(x; θ_0)      # 양수 = 손상
 ```
 
-핵심 질문 두 가지:
+핵심 질문 세 가지:
 - **RQ1 (예측):** 실제로 언러닝을 돌리기 *전에*, 어떤 `x∈C(q)`가 손상될지
   값싸게 예측할 수 있는가?
-- **RQ2 (보호):** 그 예측(susceptibility profile)을 이용해 손상을 **미리 막는**
+- **RQ2 (충실도/부가가치):** loss-shake가 정확 기준을 충분히 보존하며,
+  hidden/simple control을 넘어서는가?
+- **RQ3 (보호):** 그 예측(susceptibility profile)을 이용해 손상을 **미리 막는**
   복구(repair)를 할 수 있는가?
 
 ## 2. 핵심 아이디어 — FD(finite-difference) susceptibility probe
@@ -56,8 +56,9 @@ damage  d(x) = ℓ(x; θ_T) − ℓ(x; θ_0)      # 양수 = 손상
 
 ## 3. 어떤 실험인가 (파이프라인)
 
-메인 실행 드라이버: **`experiments/gate_1p5b/gate.py`**. 단일 삭제 요청에 대해
-아래를 순서대로 수행하고 `runs/<...>/table1.json`, `table2.json`, 봉인 원장을 남긴다.
+논문 실행 경로는 **`experiments/paper/run_v4_stage.py`**이며, 정확한
+`D_cal/D_pred/D_prot/target` roster를 소비하고 후보 원자료를 봉인한다.
+`experiments/gate_1p5b/gate.py`는 단일 요청 진단 드라이버로 아래 산출물을 남긴다.
 
 ```
 1. floor 보정      : 사전주입 forgetting floor m 계산 (reference 모델)
@@ -118,14 +119,14 @@ fdmu/  (retain-susceptibility 포크)
 │   │
 │   ├── data/                    ── 데이터셋 어댑터 (fail-closed 레지스트리)
 │   │   ├── base.py               Request · CandidateUniverse · Example
-│   │   ├── registry.py           등록: tofu · rwku · substrate
+│   │   ├── registry.py           등록: tofu · rwku · muse_news/books · substrate
 │   │   ├── tofu.py       ✅       TOFU forget10 (저자별 삭제)
 │   │   ├── rwku.py       ✅       RWKU 실세계 지식 삭제 (타겟별)
 │   │   ├── substrate.py  ✅       합성 substrate (ground-truth adjacency)
 │   │   ├── muse.py       ✅       MUSE-News/Books knowmem (forget_qa→Df, retain_qa→C(q)) — 이 포크 추가
 │   │   └── (wmdp / pistol ❌ 미구현 — 논문엔 있음)
 │   │
-│   └── evidence/                 raw · registry · schemas · statistics · decisions · rendering
+│   └── evidence/                 v4 RQ1/RQ2/RQ3 raw · schemas · decisions · rendering
 │
 ├── experiments/
 │   ├── gate_1p5b/                ★ gate.py — 메인 게이트 실험 + RUNBOOK
@@ -167,14 +168,17 @@ fdmu/  (retain-susceptibility 포크)
 | FD 프로브(fd/fd_norm/fd_constrained) + jvp/vmap/streaming 비교기 | ✅ 구현·테스트 |
 | 베이스라인 스코어러(knn_*, grad_norm/cosine, last_layer, random_*) | ✅ |
 | 언러닝 objectives (ga/graddiff/npo/simnpo/idkdpo/rmu/gru/circuit_breakers/repnoise) | ✅ |
-| **repair (Stage1 + Stage2 guarded, "ours") / repaired / s2s** | ✅ **구현·단위테스트** (test_stages/guards/alpha) |
+| **PDF v4 Eq. (7)--(8) repair + first-reaching wrapper** | ✅ **구현·단위테스트** (`repair.py`, `generators/repaired.py`) |
+| **RQ1/RQ2/RQ3 raw aggregation + 4/4/12-way IUT** | ✅ schema v2, fail-closed |
+| **정확 roster paper-stage executor** | ✅ 구현; 실제 GPU shard와 selection freeze는 아직 없음 |
 | Table 1 예측 분석 / Table 2 보호 / Table 3 ablation / Table 4 cost | ✅ |
 | 데이터셋 **TOFU, RWKU, substrate** | ✅ 어댑터 구현 |
-| 데이터셋 **MUSE (News/Books)** | ✅ **어댑터 구현 (이 포크)** — `data/muse.py` + `gate.py --dataset muse_news\|muse_books` + `test_muse.py`. (paper 캠페인 registry graduation은 roster_unit TBD라 미포함) |
+| 데이터셋 **MUSE (News/Books)** | ✅ corpus-level 어댑터와 registry 구현; 독립 target-request roster는 미지원이라 paper preflight 차단 |
 | 데이터셋 **WMDP / PISTOL / KnowUnDo** | ❌ **미구현** (논문엔 있음) |
 
-> 요약: **프로브·repair·분석·TOFU/RWKU까지는 구현 완료**. 데이터셋 확장(MUSE 등)은
-> 어댑터(`src/rsus/data/<name>.py` + registry 등록 + gate.py 연동)를 추가해야 함.
+> 요약: **v4 프로브·repair·증거 계약과 TOFU/RWKU/MUSE 로더는 구현됨**.
+> claim-ready 여부는 `experiments/paper/preflight.py`만 판단하며, 현재는 외부
+> 모델/roster/freeze가 없어서 준비되지 않은 상태다.
 
 ## 6. 설치 & 실행
 
@@ -184,7 +188,7 @@ uv venv --python 3.11 .venv && source .venv/bin/activate
 uv pip install "torch==2.7.1" transformers datasets pyyaml pytest sentence-transformers accelerate
 uv pip install -e .
 
-python -m pytest                 # CPU 단위 배터리 (195 passed)
+python -m pytest                 # CPU 단위 배터리
 
 # CPU smoke (tiny 랜덤 모델로 파이프라인 검증)
 python experiments/gate_1p5b/gate.py --smoke --model <로컬 모델 경로>
@@ -223,14 +227,14 @@ GPU=0,1 DMAP=split:8 bash local_run/run_one.sh 7b_fp32 Qwen2.5-7B-Instruct float
 논문·설계에는 있으나 **아직 코드에 없거나, 있어도 현 환경에서 못 돌리는 것**과
 그것을 채우기 위해 필요한 작업.
 
-### 9.1 데이터셋 확장 (어댑터 미구현)
-- **MUSE(News/Books), WMDP, PISTOL, KnowUnDo** — 논문엔 등장하나 `data/`에 어댑터
-  없음(registry 미등록). `gate.py --dataset muse` 등 불가.
+### 9.1 데이터셋 확장
+- **WMDP, PISTOL, KnowUnDo** — 논문엔 등장하나 `data/`와 registry에 어댑터 없음.
+- **MUSE(News/Books)** — corpus-level 로더는 등록됐지만, 현재 knowmem 구조는
+  독립적인 `D_cal/D_pred/D_prot/target` 삭제 요청 roster를 제공하지 않는다.
 - 필요 작업: 데이터셋별 `src/rsus/data/<name>.py`(forget→`Df`, retain→`C(q)` 매핑 +
   fold/native-audit) → `registry.py`에 `register_adapter` → `gate.py --dataset` choices 추가.
-  - MUSE는 `knowmem`이 QA 쌍(forget_qa/retain_qa)이라 TOFU 방식으로 매핑 쉬움
-    (데이터는 이미 `/rdata/minsoo3.kim/hf_home`에 다운로드됨). "삭제 요청 1건"의
-    단위(문서/토픽)만 동결하면 됨 — `campaign.yaml`의 `roster_unit`이 아직 TBD.
+  - MUSE는 요청 단위를 문서/토픽 수준으로 정의하고 결과와 무관하게 네 roster를
+    동결하기 전까지 corpus 하나를 여러 요청으로 가장하면 안 된다.
   - WMDP는 MMLU와 함께 MCQA 언러닝 세팅, PISTOL은 구조적 삭제 — 요청 의미 설계 필요.
 
 ### 9.2 repair(Stage2)를 24GB에서 실행 (구현은 됨, 메모리 이슈)
