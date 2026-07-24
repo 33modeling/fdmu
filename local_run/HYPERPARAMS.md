@@ -1,5 +1,11 @@
 # 실험 하이퍼파라미터 정리 (로컬 RTX 4090 캠페인)
 
+> **LEGACY 주의:** 이 문서의 Stage1/Stage2와 `s2-eta2`, `delta-seq`,
+> `delta-tok` 값은 July-24 PDF Equation (7)--(8)의 파라미터가 아니다.
+> 새 실행은 `configs/local/pdf_v4.local.yaml`과 `local_run.sh`를 사용하고,
+> 새 값은 `docs/NEW_MODEL_CALIBRATION_GUIDE.md`의 D_cal/D_prot 절차로 별도
+> 보정한다. 아래 표는 과거 gate 결과 재현용으로만 남아 있다.
+
 `experiments/gate_1p5b/gate.py` 게이트 실험의 모델별·방법별 설정. 값 출처: 7B는
 `configs/channel_matrix/objective_freeze.yaml`(동결됨), 1.5B는 그 값을 **레퍼런스로
 전용**(1.5B freeze는 미보정=draft/null). repair 튜닝값 근거는 CLAUDE.md 캠페인 메모.

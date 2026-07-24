@@ -15,7 +15,7 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = ["pytest>=7.4"]
-campaign = ["sentence-transformers>=3.0"]
+campaign = ["datasets>=2.19", "sentence-transformers>=3.0"]
 
 [tool.setuptools.packages.find]
 where = ["src"]
