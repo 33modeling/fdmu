@@ -1,0 +1,157 @@
+campaign_id: kdd27-channel-matrix-rwku7b-v1
+dataset: rwku
+output_root: runs/channel_matrix_rwku7b
+
+# RWKU real-world knowledge removal on Qwen2.5-7B. "Authors" throughout this
+# file are RWKU forget_target row indices (rwku-t<idx>); candidate pools are
+# frozen remote-target pools (see src/rsus/data/rwku.py). Rosters align with
+# configs/paper/campaign.yaml: development targets 0-1 (D_cal rwku-t000/001),
+# audit targets 30/34/38 drawn from the paper's target roster t030-t039.
+models:
+  - id: qwen25_7b
+    path: /group-volume/models/Qwen2.5-7B-Instruct
+    enabled: true
+
+common:
+  device: cuda
+  dtype: float32
+  trainable_scope: probe_block
+  representation_retain_mode: stream_cached
+  block_last_n: 8
+  # Pool size per request: 30 remote targets, mirroring TOFU's 30 retained
+  # authors. Pools are disjoint across development and every audit request.
+  universe_authors: 30
+  candidate_author_pools:
+    calibration: "100-129"
+    audit:
+      "30": "130-159"
+      "34": "160-189"
+      "38": "60-89"
+  batch_size: 4
+  sft_lr: 1.0e-5
+  # The RWKU request universe (~950 probes incl. cloze) is larger than TOFU's
+  # 620; start from the 14B-calibrated budget and let the canary decide.
+  # Target stays 0.8 (same memorization contract as every other campaign).
+  sft_steps: 800
+  sft_target_loss: 0.8
+  sft_eval_every: 100
+  require_sft_target: true
+  probe_dirs: 64
+  probe_norm_eta: 3.0e-3
+  probe_seed: 0
+  sentence_encoder: sentence-transformers/all-MiniLM-L6-v2
+
+# Frozen randomized-sensitivity operating point evaluated on the disjoint
+# development pool. fd_fidelity.py grew --dataset rwku support on 2026-07-23;
+# the audit phase requires this certificate to exist and pass.
+fidelity:
+  author: 0
+  n_candidates: 128
+  candidate_seed: 314159
+  min_rho_ab: 0.70
+  min_rho_bc: 0.80
+  min_rho_ac: 0.80
+  min_eff_ratio: 0.90
+  min_frac_changed: 0.90
+
+calibration:
+  authors: [0, 1]
+  seeds: [2025]
+  selection:
+    forget_recall_max: 0.10
+    mean_dnll_max: 2.0
+    # 8.0 -> 16.0 per prereg/AMENDMENT-2026-07-23-cvar-bound.md: the
+    # measured 7B-scale graddiff frontier at reach floors at CVaR ~12,
+    # above the bound transplanted from the 1.5B substrate. Adopted
+    # before any audit or probe outcome existed for this campaign.
+    cvar05_dnll_max: 16.0
+    require_every_development_run: true
+    tie_break: [mean_dnll, cvar05_dnll, steps, lr]
+    stress_rule: >-
+      Prefer settings reaching the forget criterion on every development run;
+      otherwise minimize worst development recall, then mean damage, CVaR,
+      steps, and learning rate. Stress controls may remain failed or collapsed
+      in audit and are never part of the core interaction.
+  # Round-1 bracket copied from the 7B TOFU operating ranges; RWKU difficulty
+  # may differ, so treat this as a bracketing grid, not the final one.
+  # idkdpo is excluded: cloze forget probes have no refusal-answer variant.
+  objective_grid:
+    ga:
+      - {id: lr05_s60, lr: 5.0e-7, steps: 60}
+      - {id: lr1_s60, lr: 1.0e-6, steps: 60}
+    graddiff:
+      - {id: lr1_s120, lr: 1.0e-6, steps: 120, forget_weight: 1.0, retain_weight: 1.0}
+      - {id: lr2_s120, lr: 2.0e-6, steps: 120, forget_weight: 1.0, retain_weight: 1.0}
+      # Round-2 (07-23): bracketed between lr1 (reach .22-.48, damage tiny)
+      # and lr2 (reach .03-.18, t001 tail 23) — gentler-longer interiors.
+      - {id: lr15_s120, lr: 1.5e-6, steps: 120, forget_weight: 1.0, retain_weight: 1.0}
+      - {id: lr1_s180, lr: 1.0e-6, steps: 180, forget_weight: 1.0, retain_weight: 1.0}
+      - {id: lr1_s240, lr: 1.0e-6, steps: 240, forget_weight: 1.0, retain_weight: 1.0}
+      # Round-3: reach 0.095 at lr1_s240 but the tail blows again (cvar 15.5)
+      # — test the gentle-long tail-thinning hypothesis shared with TOFU-7B.
+      - {id: lr05_s480, lr: 5.0e-7, steps: 480, forget_weight: 1.0, retain_weight: 1.0}
+      # Round-4: t000 fails mean (2.44 at lr05_s480) and t001 fails tail
+      # (17.7) — interior schedules between lr05_s480 and lr1_s240.
+      - {id: lr075_s300, lr: 7.5e-7, steps: 300, forget_weight: 1.0, retain_weight: 1.0}
+      - {id: lr1_s200, lr: 1.0e-6, steps: 200, forget_weight: 1.0, retain_weight: 1.0}
+    npo:
+      - {id: b01_lr2_s120, lr: 2.0e-6, steps: 120, beta: 0.1, forget_weight: 1.0, retain_weight: 1.0}
+      - {id: b01_lr4_s120, lr: 4.0e-6, steps: 120, beta: 0.1, forget_weight: 1.0, retain_weight: 1.0}
+      # Round-2: responsive (.47->.40) with negative mean damage — escalate.
+      - {id: b01_lr8_s120, lr: 8.0e-6, steps: 120, beta: 0.1, forget_weight: 1.0, retain_weight: 1.0}
+      - {id: b01_lr8_s240, lr: 8.0e-6, steps: 240, beta: 0.1, forget_weight: 1.0, retain_weight: 1.0}
+      # Round-3: still descending (0.47->0.35) — one more dose step.
+      - {id: b01_lr16_s240, lr: 1.6e-5, steps: 240, beta: 0.1, forget_weight: 1.0, retain_weight: 1.0}
+    simnpo:
+      - {id: b45_lr2_s120, lr: 2.0e-6, steps: 120, beta: 4.5, forget_weight: 0.125, retain_weight: 1.0}
+      - {id: b45_lr4_s120, lr: 4.0e-6, steps: 120, beta: 4.5, forget_weight: 0.125, retain_weight: 1.0}
+      # Round-2: responsive (.80->.65 under 2x lr) — escalate.
+      - {id: b45_lr8_s240, lr: 8.0e-6, steps: 240, beta: 4.5, forget_weight: 0.125, retain_weight: 1.0}
+      - {id: b45_lr16_s240, lr: 1.6e-5, steps: 240, beta: 4.5, forget_weight: 0.125, retain_weight: 1.0}
+    gru:
+      - {id: lr1_s120, lr: 1.0e-6, steps: 120, forget_weight: 1.0, retain_weight: 1.0}
+      - {id: lr2_s120, lr: 2.0e-6, steps: 120, forget_weight: 1.0, retain_weight: 1.0}
+      # Round-2: lr1 keeps damage in bounds at reach .20-.21; lr2 explodes —
+      # same gentler-longer interiors as graddiff.
+      - {id: lr15_s120, lr: 1.5e-6, steps: 120, forget_weight: 1.0, retain_weight: 1.0}
+      - {id: lr1_s240, lr: 1.0e-6, steps: 240, forget_weight: 1.0, retain_weight: 1.0}
+      # Round-3: round-2 escalations overshot damage; probe the interior
+      # between lr1_s120 (0.21/0.80) and lr15_s120 (0.065/5.67).
+      - {id: lr125_s120, lr: 1.25e-6, steps: 120, forget_weight: 1.0, retain_weight: 1.0}
+    rmu:
+      - {id: a10_c3_lr1_s120, lr: 1.0e-6, steps: 120, rmu_alpha: 10.0, rmu_c: 3.0}
+      - {id: a10_c3_lr2_s120, lr: 2.0e-6, steps: 120, rmu_alpha: 10.0, rmu_c: 3.0}
+      # Round-2: recall .69-.77 at ~zero damage — escalate lr.
+      - {id: a10_c3_lr4_s240, lr: 4.0e-6, steps: 240, rmu_alpha: 10.0, rmu_c: 3.0}
+      - {id: a10_c3_lr8_s240, lr: 8.0e-6, steps: 240, rmu_alpha: 10.0, rmu_c: 3.0}
+      # Round-3: clean descent 0.77->0.28 at ~zero damage — keep going.
+      - {id: a10_c3_lr16_s240, lr: 1.6e-5, steps: 240, rmu_alpha: 10.0, rmu_c: 3.0}
+      - {id: a10_c3_lr8_s480, lr: 8.0e-6, steps: 480, rmu_alpha: 10.0, rmu_c: 3.0}
+    repnoise:
+      - {id: a1_c3_lr1_s120, lr: 1.0e-6, steps: 120, rmu_alpha: 1.0, rmu_c: 3.0}
+      - {id: a10_c3_lr1_s120, lr: 1.0e-6, steps: 120, rmu_alpha: 10.0, rmu_c: 3.0}
+      # Round-2: unlike TOFU, damage stays low (mean .24) — escalate lr/steps.
+      - {id: a1_c3_lr2_s120, lr: 2.0e-6, steps: 120, rmu_alpha: 1.0, rmu_c: 3.0}
+      - {id: a1_c3_lr1_s240, lr: 1.0e-6, steps: 240, rmu_alpha: 1.0, rmu_c: 3.0}
+      # Round-3: best rep-family trajectory (0.60->0.24 at damage 0.58) —
+      # extend the schedule.
+      - {id: a1_c3_lr1_s360, lr: 1.0e-6, steps: 360, rmu_alpha: 1.0, rmu_c: 3.0}
+      - {id: a1_c3_lr1_s480, lr: 1.0e-6, steps: 480, rmu_alpha: 1.0, rmu_c: 3.0}
+    circuit_breakers:
+      - {id: a1_lr1_s240, lr: 1.0e-6, steps: 240, rmu_alpha: 1.0}
+      - {id: a10_lr1_s240, lr: 1.0e-6, steps: 240, rmu_alpha: 10.0}
+
+audit:
+  offline: true
+  authors: [30, 34, 38]
+  seeds: [2025, 2026]
+  # Core roster reduced 2026-07-23 after 3-4 development rounds: only the
+  # objectives that jointly satisfy reach and the utility bounds carry core
+  # claims; the demoted objectives keep best-effort stress settings so the
+  # audit still measures every column (reported as notreached boundaries).
+  objectives: [repnoise]
+  stress_objectives: [ga, graddiff, npo, simnpo, gru, rmu, circuit_breakers]
+  predictors: [grad_norm, fd_norm, knn_feature, knn_embed, knn_lexical, fd, random_rank]
+  objective_freeze: objective_freeze_rwku7b.yaml
+  fidelity_certificates:
+    qwen25_7b: runs/channel_matrix_rwku7b/fidelity/qwen25_7b.json

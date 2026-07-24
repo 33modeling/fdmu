@@ -1,0 +1,155 @@
+# Preregistered constants — DRAFT (freeze_id pending; a freeze adds a dated
+# block below and never edits or deletes an existing one).
+freeze_id: DRAFT-2026-07-19
+probe:
+  eta_grid: [1.0e-4, 3.0e-4, 1.0e-3]     # rank stability across this grid audits O(eta^2)
+  block: mlp_down_last_layers             # n_last set per model family below
+  n_last_layers: {qwen25_7b: 8, tiny_test: 1}
+  loss: seq_mean_answer_nll
+partition:
+  pool_size: 64                           # P = largest K eligible positive scores
+  min_pool_size: 8                        # frozen fallback floor (below -> reject request)
+  tau_rem_abs_quantile: 0.50              # |s| near-zero band for the remote stream R0
+stage1:
+  floor_clamp_min_nats: 2.5
+  clip_offset: 1.0                        # c = m + 1, sensitivity grid {3,5,7} via configs
+  rho: 10.0
+  remote_cap: 512
+  probe_pin_cap: 256
+  exit_remote_recall: 0.90
+stage2:
+  guard: one_sided                        # primary; symmetric/sorted are ablation arms
+  eps_slack: 0.0                          # DRAFT — D4 open decision
+  delta_seq_sq: null                      # DRAFT — D4 open decision
+  delta_tok_sq: null                      # DRAFT — D4 open decision
+  refresh_k: [1, 4]
+  mu_v: 0.7
+  eta2_shrink: 0.5
+contract:
+  forget_recall_max: 0.10
+  paraphrase_recall_max: 0.20
+  adjacent_retention_min: 0.80
+  remote_retention_min: 0.90
+  utility_retention_min: 0.90
+seeds: [2025, 2026, 2027]
+
+---
+# FREEZE-2026-07-21-channel-interaction
+# Frozen while the balanced channel-matrix run (gate chanbal, 1.5B fp32) and the
+# crossed-protection run (xprot3) are IN FLIGHT and unblinded to no one; endpoints
+# below are fixed before any result from those runs is read.
+freeze_id: FREEZE-2026-07-21-channel-interaction
+declared_channels:                      # declared from each loss definition, not results
+  loss_gradient: [ga, graddiff, npo, simnpo, idkdpo, gru]
+  representation: [rmu, repnoise, circuit_breakers]
+predictor_families:
+  gradient: [grad_norm, fd_norm]
+  representation: [knn_feature, knn_embed, knn_lexical]
+  alignment_rejected: [fd, one_sided, last_layer]   # rejected pre-freeze (D1 evidence)
+  control: [random_rank, random_dir]
+headline_probes: {gradient: fd_norm, representation: knn_feature}
+primary_endpoints:
+  prediction_interaction:
+    statistic: difference_in_differences    # (rho_g - rho_r | LG obj) - (rho_g - rho_r | REP obj)
+    probes: [fd_norm, knn_feature]
+    success: delta > 0 with candidate-bootstrap 95% CI excluding 0
+    aggregation: report every (LG obj, REP obj) pair; headline = mean over pairs
+  protection_interaction:
+    design: parents {graddiff, rmu} x selectors {none, random, fd_norm, knn_feature}
+    metric: audit dNLL CVaR(0.05) at matched forgetting (forget_recall <= 0.10)
+    success: matched-channel selector CVaR < each of {mismatched, random, none}, per parent
+secondary_endpoints: [mean_dnll, auroc, overlap_at_k, tail_rho, para_recall_no_loss]
+fd_norm_probe: {norm_eta: 3.0e-3, n_dirs: 64}       # fixed by the A/B/C fidelity gate, pre-unblinding
+dataset_roster:                         # channel labels and endpoints identical across datasets
+  primary: tofu
+  replication: [wmdp_bio, muse_news, rwku]
+  stress: [muse_books, pistol]
+  reduced_roster_rule: replication/stress tiers may use {graddiff, npo} x {rmu, repnoise}
+    with selectors {none, random, fd_norm, knn_feature}; primary tier uses the full roster
+
+---
+# FREEZE-2026-07-21-alpha-mixture
+# Channel-mixture score s_alpha = alpha*rank01(grad probe) + (1-alpha)*rank01(rep probe),
+# the continuous embedding of the discrete channel router (alpha in {0,1} recovers the
+# headline probes exactly). Frozen BEFORE any rho(s_alpha, damage) curve or protection
+# alpha-response is computed from a confirmatory run: alpha_sweep has not been executed
+# on chanbal2 (or any confirmatory) seals as of this freeze. Status: EXPLORATORY -- the
+# primary endpoints of FREEZE-2026-07-21-channel-interaction are unchanged; nothing here
+# supersedes or reweights them.
+freeze_id: FREEZE-2026-07-21-alpha-mixture
+alpha_mixture:
+  probes: {grad: fd_norm, rep: knn_feature}   # headline probes, unchanged
+  normalization: rank01                       # per-probe rank -> [0,1]; ties broken by candidate id
+  normalization_sensitivity: zscore           # appendix-only sensitivity check, not a second endpoint
+  alpha_grid: [0, 0.125, 0.25, 0.375, 0.5, 0.625, 0.75, 0.875, 1]
+  declared_mapping:                           # STRICT -- the deployed router is unchanged
+    loss_gradient: 1.0
+    representation: 0.0
+    hybrid: 0.5                               # none in current roster; forget-suppression term decides
+  alpha_selection:
+    primary: declared_mapping, fixed a priori; interior-alpha sweeps are descriptive instrumentation
+    adaptive_variant: alpha_hat fit on the discovery fold only
+    prohibited: selecting or tuning alpha on the sealed audit, under any framing
+  endpoints_exploratory:
+    prediction: per-objective rho(s_alpha, damage) curves on the frozen grid; argmax alpha*
+      per objective; separation mean alpha*(loss_gradient objs) - mean alpha*(representation objs)
+      expected > 0 (continuous analogue of the primary interaction); reach flags carried over
+    protection: crossed arms with selectors s_alpha in {0.25, 0.5, 0.75} (grid endpoints =
+      existing fd_norm / knn_feature headline arms, not re-run); alpha-response of sealed-audit
+      dNLL CVaR(0.05) per parent at matched forgetting; report prediction-optimal vs
+      protection-optimal alpha discrepancy explicitly, whichever direction it points
+
+---
+# AMENDMENT-2026-07-22-alpha-orientation
+# Presentation-only coordinate flip: alpha_new = 1 - alpha_old. This changes no
+# endpoint selector, interior grid, ranking, or outcome; it makes 0 denote the
+# output/loss-gradient route and 1 denote the hidden-representation route.
+amendment_id: AMENDMENT-2026-07-22-alpha-orientation
+supersedes_orientation_only: FREEZE-2026-07-21-alpha-mixture
+alpha_orientation:
+  score: (1-alpha)*rank01(grad probe) + alpha*rank01(rep probe)
+  declared_mapping: {loss_gradient: 0.0, representation: 1.0}
+  diagnostic_separation: mean alpha*(representation objs) - mean alpha*(loss_gradient objs)
+
+---
+# FREEZE-2026-07-22-7b-alpha-protection
+# Prospective adaptive-method extension, added after the 1.5B prediction curves
+# were visible but BEFORE any 7B objective-calibration trajectory, protection
+# curve, or protection audit was run. It does not revise the original 1.5B
+# confirmatory endpoints. The purpose is to test whether an alpha selected
+# without audit access can improve guarded protection at larger scale.
+freeze_id: FREEZE-2026-07-22-7b-alpha-protection
+status: prospective_before_7b_protection
+channel_mixture_protection:
+  score: (1-alpha)*rank01_discovery(fd_norm) + alpha*rank01_discovery(knn_feature)
+  orientation: {loss_gradient_endpoint: 0.0, representation_endpoint: 1.0}
+  protection_grid: [0, 0.25, 0.5, 0.75, 1]
+  parents: [graddiff, npo, rmu, repnoise]
+  development:
+    deletion_requests: [tofu-a198, tofu-a199]
+    seeds: [2025]
+    candidate_authors: even authors 0--58 (30 authors), group-split before allocation
+  ordinary_utility:
+    authors: 150--179, disjoint from deletion and every damage-candidate pool
+    examples: first 4 canonical QA per author (n=120), fixed by example id
+    minimum_retention: 0.90
+  alpha_selection:
+    unit: one alpha per model x parent objective
+    feasibility: every development run reaches forget recall <= 0.10 and utility retention >= 0.90
+    objective: minimize worst development audit-fold dNLL CVaR(0.05)
+    tie_break: [mean development CVaR, distance to declared channel prior, alpha]
+    no_feasible_value: unresolved; do not launch that audit cell
+    output: immutable alpha freeze reviewed and committed before alpha-protection audit
+    prohibited: reading, fitting, revising, or choosing alpha from any sealed audit outcome
+  audit:
+    deletion_requests: [tofu-a181, tofu-a186, tofu-a191]
+    seeds: [2025, 2026]
+    deployed_method: frozen development-selected alpha only
+    descriptive_curve: full five-point grid may be run only after the deployed alpha is frozen
+    primary_metric: paired audit dNLL CVaR(0.05) at forget recall <= 0.10 and utility retention >= 0.90
+  comparators:
+    [none, random allocation, alpha=0, alpha=1, declared channel prior, exact gradient norm ceiling]
+  success:
+    primary: frozen adaptive alpha has lower paired CVaR than the declared-prior allocation
+    strong: upper 95% hierarchical-bootstrap bound is below zero versus the best non-adaptive comparator
+    reporting: reach and utility counts accompany every conditional CVaR; all failed/floor/opposite-endpoint curves remain visible

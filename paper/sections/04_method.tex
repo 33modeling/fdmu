@@ -1,0 +1,185 @@
+% 4.method.tex
+% When Does LLM Unlearning Fail?
+% Channel-conditioned susceptibility: probes, routing, guarded protection.
+
+\section{Method}
+\label{sec:method}
+
+Section~\ref{sec:setup-channels} identified two objective readouts and their
+candidate-side exposure signals. We now give the paper's central estimator:
+random loss-shake energy recovers candidate gradient energy without a
+candidate backward pass. We then specify hidden-state proximity, the fixed
+endpoint router, and guarded repair. A continuous channel mixture appears
+only as a secondary diagnostic; it is not a routing rule or a second
+methodological contribution.
+
+\subsection{Gradient-Channel Probe: Randomized Sensitivity}
+\label{sec:method-gradient}
+
+Let $B$ be a declared $d_B$-dimensional parameter block,
+$\ell_x(\theta)=\ell(x;\theta)$, and draw shared seeded directions
+$v_r\sim\operatorname{Unif}(\mathbb S^{d_B-1})$. Write
+$\ell^\pm_{x,r}=\ell_x(\theta_0\pm\eta v_r)$. One identity is the
+mathematical core of the method:
+\begin{equation}
+\boxed{
+\begin{aligned}
+    \widehat q_G(x)
+    &=
+    \frac{d_B}{R}\sum_{r=1}^{R}
+    \left(\frac{\ell^+_{x,r}-\ell^-_{x,r}}{2\eta}\right)^2,\\[-1mm]
+    \mathbb E_v[\widehat q_G(x)]
+    &=
+    \lVert\nabla_B\ell_x(\theta_0)\rVert_2^2+O(\eta^2).
+\end{aligned}
+}
+\label{eq:loss-shake-identity}
+\end{equation}
+The central difference observes how much a candidate's loss shakes along a
+random parameter direction; squaring removes its sign, and averaging over
+isotropic directions converts response energy into gradient energy. Thus
+we never try to infer the unlearner's update direction. We use
+\emph{loss-shake energy} and \emph{randomized sensitivity} interchangeably
+for $\widehat q_G$. The known factor
+$d_B$ and the square root are rank-invariant and may be omitted in code.
+The exact gradient norm remains an expensive reference, requiring one
+candidate backward evaluation. In contrast, shared directions profile the
+entire candidate universe in $2R$ batched forward sweeps, at inference
+memory, without materializing a per-example gradient. Algorithm~\ref{alg:profile} states the resulting backward-free profiler.
+
+\input{figures/alg_profile}
+
+\paragraph{Fidelity gate.}
+The identity is asymptotic in $\eta$, so the estimator is used only after a
+pre-outcome gate verifies that the perturbation is numerically realized and
+that finite-difference rankings agree with exact projections on a diagnostic
+subset. This separates underflow or cancellation at small radii from
+higher-order contamination at large radii. The complete perturbation report,
+finite-dimensional Monte Carlo variance, and $A/B/C$ decomposition are in
+Appendix~\ref{app:fidelity-gate}; $\eta$ and $R$ are frozen before target
+trajectories are unsealed.
+
+\paragraph{Direction is a baseline, not our target.}
+For comparison, one can replace the random directions by the normalized
+initial forget gradient and estimate the signed alignment
+$\langle\nabla_B\ell_x,\hat g_f\rangle$. This single-direction hypothesis
+is reported as a prespecified cautionary baseline. Its preregistered
+failure mode is rotation: the score is anchored to the initial forget
+gradient, from which a multi-step trajectory rotates away, whereas the
+isotropic energy average is invariant to that rotation. Its numerical
+validation and trajectory analysis are in
+Appendix~\ref{app:alignment-impl}.
+
+\subsection{Representation-Channel Probe: Hidden-State Proximity}
+\label{sec:method-representation}
+
+The representation channel damages candidates whose hidden states occupy
+the displaced region, so its matched probe is proximity, not gradient
+magnitude. Candidate and forget examples are embedded with mean-pooled
+final hidden states of the pre-unlearning model; each candidate is scored
+by $\widehat q_H(x)$, its mean cosine similarity to its $k$ nearest forget
+examples. The
+score is forward-only and needs no parameter perturbation. Its overlap with
+the gradient-energy profile is measured rather than assumed. External
+sentence embeddings and lexical overlap provide additional members of the
+same family and are reported as comparators.
+
+\subsection{Channel Routing and Profile Construction}
+\label{sec:method-routing}
+
+Given a deletion request and a declared parent objective, the router reads
+the objective's channel from its loss definition
+(Section~\ref{sec:setup-channels}) and selects the matched probe family:
+loss-shake gradient energy for output-channel parents, hidden-state
+proximity for representation-channel parents. Equivalently, the
+confirmatory rule is
+$\alpha_{\mathrm{fixed}}(\mathcal U)=
+\mathbb 1[c(\mathcal U)=\mathrm{representation}]$: output maps to endpoint $0$
+and representation to endpoint $1$. Nothing in the router depends on candidate
+damage or downstream outcomes; it is an objective-level lookup on the
+frozen channel table.
+
+The selected scorer assigns one value to every candidate in the declared
+universe. For a fixed budget $K_p$, the protect pool is
+$\mathcal P_{K_p}(r)=\operatorname{TopK}_{x\in\mathcal C_{\mathrm{disc}}}\,r(x)$,
+with deterministic tie-breaking; a size-matched low-score pool
+$\mathcal R_0(r)$ is sampled from a frozen near-zero quantile of the
+discovery fold and serves as the repair-time reference stream. Pool size,
+quantile, group-disjoint folds, seed, and fallback rules are fixed before
+target outcomes are observed, and no audit candidate can enter either
+pool.
+
+\subsection{Secondary Diagnostic: Continuous Channel Mixture}
+\label{sec:method-mixture}
+
+The endpoint router above is the method. To diagnose cross-channel signal
+without changing it, we place the two headline profiles on a common rank
+scale. Let $\widetilde q_G$ and $\widetilde q_H$ be candidate-ID-tie-broken
+rank transforms of $\widehat q_G$ and $\widehat q_H$ onto $[0,1]$ and
+define
+\begin{equation}
+    s_\alpha(x)
+    =
+    (1-\alpha)\,\widetilde q_G(x)
+    +
+    \alpha\,\widetilde q_H(x),
+    \qquad
+    \alpha\in[0,1].
+    \label{eq:mixture}
+\end{equation}
+Rank normalization is fixed because the two scores have different units; a
+z-score variant is appendix-only. Under the deterministic tie rule,
+$\alpha=0$ recovers the loss-shake allocation and $\alpha=1$ recovers the
+hidden-state allocation, exactly so whenever the raw scores are tie-free.
+
+\paragraph{Diagnostic discipline.}
+Interior $\alpha$ values are never deployed, tuned, or used to revise the
+declared channel. This exploratory extension was appended after the primary
+design, then frozen before any mixture curve was computed on sealed
+outcomes. Prediction and
+protection curves show whether the two signals combine or interfere; their
+argmax values are descriptive summaries observed after outcomes, not router
+choices. The primary interaction is unchanged.
+Section~\ref{sec:exp-alpha} states the frozen grids, and
+Appendix~\ref{app:alpha-diagnostic} reports the full curves.
+
+\subsection{Guarded Channel-Matched Repair}
+\label{sec:method-protection}
+
+The budget is spent by an engine-then-repair pipeline that leaves the
+parent unlearner untouched. The parent runs from $\theta_0$ until its
+first saved checkpoint satisfying the common forget criterion; a parent
+that never reaches remains a reach failure and is not repaired. At the
+reaching state we cache per-sequence and per-token forget losses as paired
+references, then minimize answer-token NLL on $\mathcal P_{K_p}$.
+
+Repair must not silently undo forgetting. At fixed refresh intervals we
+compute mean forget and reference-stream gradients and project the repair
+update away from their span, making those mean losses locally invariant to
+first order up to the ridge regularization of the projection
+(Appendix~\ref{app:guard-proof}). An identity-paired one-sided guard also penalizes sequence- or
+token-level forgetting regression beyond a fixed tolerance. At audited
+refreshes, a violating step is rejected, the last accepted parameters are
+restored, and the step size is reduced. The exact guard and its tail bound
+are given in Appendix~\ref{app:guard-proof}. The output is the final saved
+checkpoint that still satisfies the forget criterion; retention is then evaluated only on the sealed audit. Algorithm~\ref{alg:repair} summarizes this engine-then-repair pipeline.
+
+\input{figures/alg_repair}
+
+In the crossed design of Section~\ref{sec:setup-protection}, every
+selector arm -- matched, mismatched, random -- runs this identical
+pipeline with the identical budget. The frozen score-specific construction
+changes the protect pool and its matched low-score reference stream together;
+the crossed comparison therefore evaluates the complete allocation policy,
+not a candidate-level causal effect of swapping only Top-$K_p$ membership.
+
+\subsection{Scope of the Method}
+\label{sec:method-scope}
+
+The profile is a prospective risk measure, not a deletion certificate:
+forgetting efficacy must still be established by direct, paraphrase, and
+adversarial audits. The channel table covers where current objectives read
+the model; an objective reading a third quantity would require a third
+probe family, and hybrid objectives inherit partial signal from both. The
+backward-free claim is scoped to candidate-side profiling: parents and
+repair still backpropagate, as they must.

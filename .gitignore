@@ -1,0 +1,16 @@
+.DS_Store
+
+# Python environments and generated files
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+*.egg-info/
+
+# Local experiment artifacts and checkpoints
+runs/
+checkpoints/
+
+# Local paper reference; do not publish
+KDD_UnlearningFail.pdf

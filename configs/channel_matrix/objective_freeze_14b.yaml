@@ -1,0 +1,30 @@
+# Core roster {graddiff, gru} passes under the ORIGINAL bounds
+# (cvar05<=8.0): graddiff lr1_s120 0.038/0.46/1.69, gru lr1_s120
+# 0.029/0.95/2.43. rmu is dose-flat at 14B (0.74->0.65->fail at lr32)
+# and stays a stress column with the strongest measured setting.
+
+# Values transcribed 2026-07-23 from the selector recommendation
+# (runs/*/objective_freeze.recommended.yaml) with unresolved: [].
+freeze_id: FREEZE-2026-07-23-14B-DEV3ROUNDS
+status: frozen
+frozen_before_audit: true
+frozen_at_utc: "2026-07-23T09:48Z"
+source_campaign: kdd27-channel-matrix-14b-v1
+selection_rule: >-
+  Core objectives must satisfy forget_recall <= 0.10 and the fixed mean/CVaR
+  utility bounds on both development requests. Stress controls prefer settings
+  reaching the forget criterion; if none do, they minimize worst development
+  recall. All ties use retained damage, steps, then learning rate; no predictor
+  score or correlation is read.
+models:
+  qwen25_14b:
+    graddiff: {beta: 1.0, forget_weight: 1.0, retain_weight: 1.0, rmu_alpha: 10.0, rmu_c: 3.0, lr: 1e-06, steps: 120}
+    gru: {beta: 1.0, forget_weight: 1.0, retain_weight: 1.0, rmu_alpha: 10.0, rmu_c: 3.0, lr: 1e-06, steps: 120}
+    ga: {beta: 1.0, forget_weight: 1.0, retain_weight: 1.0, rmu_alpha: 10.0, rmu_c: 3.0, lr: 1e-06, steps: 60}
+    idkdpo: {beta: 0.1, forget_weight: 1.0, retain_weight: 1.0, rmu_alpha: 10.0, rmu_c: 3.0, lr: 4e-06, steps: 120}
+    npo: {beta: 0.1, forget_weight: 1.0, retain_weight: 1.0, rmu_alpha: 10.0, rmu_c: 3.0, lr: 8e-06, steps: 240}
+    simnpo: {beta: 4.5, forget_weight: 0.125, retain_weight: 1.0, rmu_alpha: 10.0, rmu_c: 3.0, lr: 1.6e-05, steps: 240}
+    rmu: {beta: 1.0, forget_weight: 1.0, retain_weight: 1.0, rmu_alpha: 10.0, rmu_c: 3.0, lr: 3.2e-05, steps: 240}
+    repnoise: {beta: 1.0, forget_weight: 1.0, retain_weight: 1.0, rmu_alpha: 1.0, rmu_c: 3.0, lr: 1e-06, steps: 240}
+    circuit_breakers: {beta: 1.0, forget_weight: 1.0, retain_weight: 1.0, rmu_alpha: 1.0, rmu_c: 3.0, lr: 1e-06, steps: 240}
+unresolved: []
