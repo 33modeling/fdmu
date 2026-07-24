@@ -151,6 +151,9 @@ def test_spearman_auroc_cvar_hand_cases():
     assert auroc([0.9, 0.8, 0.1, 0.2], [True, True, False, False]) == 1.0
     assert auroc([0.1, 0.2, 0.9, 0.8], [True, True, False, False]) == 0.0
     assert cvar_upper([1.0, 2.0, 10.0], 0.05) == 10.0
+    # 30 values at 5% use one full observation and half of the next.
+    values = [float(value) for value in range(1, 31)]
+    assert cvar_upper(values, 0.05) == pytest.approx((30.0 + 0.5 * 29.0) / 1.5)
     assert top_k_ids({"a": 3.0, "b": 2.0, "c": 1.0}, 2) == {"a", "b"}
 
 

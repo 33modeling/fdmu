@@ -154,9 +154,12 @@ def score_knn_feature(model: torch.nn.Module, request: Request, spec: ProbeSpec)
             pooling=spec.representation_pooling,
         )
         F = torch.nn.functional.normalize(torch.stack(list(f_reps.values())), dim=1)
-        if spec.representation_k < 1:
-            raise ValueError("representation_k must be positive")
-        k = min(spec.representation_k, F.shape[0])
+        if not 1 <= spec.representation_k <= F.shape[0]:
+            raise ValueError(
+                "representation_k must satisfy "
+                f"1 <= k <= |Df|={F.shape[0]}; got {spec.representation_k}"
+            )
+        k = spec.representation_k
         scores: dict[str, float] = {}
         for eid, v in c_reps.items():
             sims = F @ torch.nn.functional.normalize(v, dim=0)

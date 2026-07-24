@@ -14,7 +14,12 @@ def _auc(scores: dict[str, float], truth: dict[str, str]) -> float:
 
 
 def _spec(model) -> ProbeSpec:
-    return ProbeSpec(block=mlp_down_last_layers(model, 1), eta=1e-4, batch_size=6)
+    return ProbeSpec(
+        block=mlp_down_last_layers(model, 1),
+        eta=1e-4,
+        batch_size=6,
+        representation_k=4,
+    )
 
 
 def test_fd_separates_planted_adjacency(tiny_model):

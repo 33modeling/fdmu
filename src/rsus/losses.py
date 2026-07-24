@@ -90,3 +90,45 @@ def token_answer_nll(
         flat.append(row)
         index.extend((eid, k) for k in range(row.numel()))
     return torch.cat(flat), index
+
+
+def answer_token_log_probs(
+    model: torch.nn.Module, batch: dict
+) -> tuple[torch.Tensor, torch.Tensor, list[tuple[str, int]], tuple[int, ...]]:
+    """Teacher-forced answer-token distributions and gold-token NLLs.
+
+    Returns ``(log_probs, nll, token_index, counts)`` where ``log_probs`` has
+    shape ``[N_answer, vocab]`` and rows follow ``token_index``.  The
+    distribution is accumulated in fp32 for half-precision models.  This is
+    the canonical reduction used by the July-24 repair contract's
+    entry-anchored KL; callers that persist it should normally move it to CPU.
+    """
+    batch = batch_to_model_device(model, batch)
+    out = model(input_ids=batch["input_ids"], attention_mask=batch["attention_mask"])
+    logits = out.logits[:, :-1, :]
+    if logits.dtype in (torch.float16, torch.bfloat16):
+        logits = logits.float()
+    targets = batch["labels"][:, 1:]
+    mask = targets != IGNORE
+    counts_tensor = mask.sum(dim=1)
+    if (counts_tensor == 0).any():
+        bad = [
+            batch["example_ids"][i]
+            for i in torch.nonzero(counts_tensor == 0).flatten().tolist()
+        ]
+        raise ValueError(f"examples with no answer tokens: {bad}")
+
+    logp_all = F.log_softmax(logits, dim=-1)
+    rows: list[torch.Tensor] = []
+    losses: list[torch.Tensor] = []
+    index: list[tuple[str, int]] = []
+    counts: list[int] = []
+    for i, eid in enumerate(batch["example_ids"]):
+        row_logp = logp_all[i][mask[i]]
+        row_targets = targets[i][mask[i]]
+        rows.append(row_logp)
+        losses.append(-row_logp.gather(-1, row_targets.unsqueeze(-1)).squeeze(-1))
+        count = int(row_logp.shape[0])
+        counts.append(count)
+        index.extend((eid, position) for position in range(count))
+    return torch.cat(rows), torch.cat(losses), index, tuple(counts)

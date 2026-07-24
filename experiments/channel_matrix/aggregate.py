@@ -149,8 +149,17 @@ def _quantile(sorted_values: list[float], q: float) -> float:
 
 
 def _cvar(values: list[float], frac: float) -> float:
-    count = max(1, math.ceil(frac * len(values)))
-    return _mean(sorted(values, reverse=True)[:count])
+    if not values or not 0.0 < frac <= 1.0:
+        raise ValueError("CVaR needs values and frac in (0, 1]")
+    ordered = sorted(values, reverse=True)
+    mass = frac * len(ordered)
+    if mass < 1.0:
+        return ordered[0]
+    whole = math.floor(mass)
+    total = sum(ordered[:whole])
+    if mass > whole:
+        total += (mass - whole) * ordered[whole]
+    return total / mass
 
 
 def _hierarchical_sample(runs: list[Run], rng: random.Random) -> list[Run]:

@@ -18,6 +18,7 @@ from __future__ import annotations
 import hashlib
 import json
 from dataclasses import asdict, dataclass
+from typing import Sequence
 
 import torch
 
@@ -172,4 +173,102 @@ def build_partition(
     sha = hashlib.sha256(body.encode()).hexdigest()
     return Partition(
         request.request_id, profile.scorer, tuple(protect), tuple(remote), fallback, params, sha
+    )
+
+
+def build_pdf_protection_partition(
+    profile: ScoreProfile,
+    request: Request,
+    folds: dict[str, str],
+    params: PartitionParams,
+    *,
+    neutral_ids: Sequence[str],
+    repair_eligible_ids: set[str] | frozenset[str],
+) -> Partition:
+    """Build the exact Top-``Kp`` allocation required by the July-24 PDF.
+
+    Unlike :func:`build_partition`, this paper-facing constructor does not
+    require positive scores, does not shrink the pool, and never derives the
+    neutral stream from score quantiles.  Neutral IDs and the repair-
+    eligibility mask must already have been frozen independently of scores.
+    Candidate ID is used only to resolve membership/order at a tied final
+    allocation boundary.
+    """
+    group_of = {example.example_id: example.group for example in request.universe.examples}
+    scores = profile.scores
+    if set(scores) != set(group_of):
+        raise PartitionError("profile does not cover the candidate universe exactly")
+    if params.pool_size <= 0:
+        raise PartitionError("pool_size must be positive")
+
+    neutral = tuple(neutral_ids)
+    if not neutral or len(neutral) != len(set(neutral)):
+        raise PartitionError("neutral stream must be non-empty and unique")
+    unknown_neutral = set(neutral) - set(group_of)
+    if unknown_neutral:
+        raise PartitionError(f"neutral ids outside universe: {sorted(unknown_neutral)[:5]}")
+    if any(folds.get(group_of[candidate]) != "discovery" for candidate in neutral):
+        raise PartitionError("neutral stream must be entirely in the discovery fold")
+    neutral_set = set(neutral)
+
+    unknown_eligibility = set(repair_eligible_ids) - set(group_of)
+    if unknown_eligibility:
+        raise PartitionError(
+            f"repair eligibility references unknown ids: {sorted(unknown_eligibility)[:5]}"
+        )
+    nondiscovery_eligibility = {
+        candidate
+        for candidate in repair_eligible_ids
+        if folds.get(group_of[candidate]) != "discovery"
+    }
+    if nondiscovery_eligibility:
+        raise PartitionError(
+            "repair eligibility must exclude audit candidates: "
+            f"{sorted(nondiscovery_eligibility)[:5]}"
+        )
+    eligible = [
+        candidate
+        for candidate in scores
+        if folds.get(group_of[candidate]) == "discovery"
+        and candidate in repair_eligible_ids
+        and candidate not in neutral_set
+    ]
+    if len(eligible) < params.pool_size:
+        raise PartitionError(
+            f"need exactly Kp={params.pool_size} repair-eligible discovery candidates; "
+            f"found {len(eligible)}"
+        )
+    protect = tuple(
+        sorted(eligible, key=lambda candidate: (-scores[candidate], candidate))[
+            : params.pool_size
+        ]
+    )
+    if set(protect) & neutral_set:
+        raise AssertionError("paper protection and neutral streams overlap")
+
+    eligibility_sha = hashlib.sha256(
+        json.dumps(sorted(repair_eligible_ids), separators=(",", ":")).encode()
+    ).hexdigest()
+    body = json.dumps(
+        {
+            "contract": "pdf-v4-exact-top-k-score-independent-neutral",
+            "request": request.request_id,
+            "scorer": profile.scorer,
+            "protect": protect,
+            "neutral": neutral,
+            "eligibility_sha256": eligibility_sha,
+            "params": asdict(params),
+            "universe_sha": request.universe.sha,
+        },
+        sort_keys=True,
+    )
+    sha = hashlib.sha256(body.encode()).hexdigest()
+    return Partition(
+        request.request_id,
+        profile.scorer,
+        protect,
+        neutral,
+        False,
+        params,
+        sha,
     )

@@ -49,10 +49,26 @@ def top_k_ids(values: dict[str, float], k: int) -> set[str]:
 
 
 def cvar_upper(values: list[float], frac: float = 0.05) -> float:
+    """Empirical upper-tail CVaR with fractional quantile-boundary mass.
+
+    ``frac`` is the tail probability (``0.05`` for CVaR.95).  When the tail
+    contains less than one empirical observation, the July-24 paper contract
+    defines the statistic as the maximum and flags the support separately.
+    """
     if not values:
         raise ValueError("empty values")
-    n = max(1, math.ceil(frac * len(values)))
-    return sum(sorted(values, reverse=True)[:n]) / n
+    if not 0.0 < frac <= 1.0:
+        raise ValueError("frac must be in (0, 1]")
+    ordered = sorted(values, reverse=True)
+    mass = frac * len(ordered)
+    if mass < 1.0:
+        return ordered[0]
+    whole = math.floor(mass)
+    fractional = mass - whole
+    total = sum(ordered[:whole])
+    if fractional > 0.0:
+        total += fractional * ordered[whole]
+    return total / mass
 
 
 def per_cell_metrics(

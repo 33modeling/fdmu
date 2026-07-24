@@ -13,6 +13,7 @@ exactly like the other two-stage arms.
 from __future__ import annotations
 
 from dataclasses import dataclass
+import dataclasses as dc
 
 import torch
 
@@ -27,6 +28,7 @@ from rsus.generators.base import (
     run_trajectory,
 )
 from rsus.refcache import build_ref_cache
+from rsus.repair import RepairConfig, run_repair
 from rsus.stage2 import Stage2Config, run_stage2
 
 
@@ -37,6 +39,19 @@ class RepairedConfig:
     recall_max: float = 0.10
     batch_size: int = 8
     stage2_snapshots: int = 4
+
+
+@dataclass
+class PDFRepairedConfig:
+    """High-level wrapper for the July-24 PDF repair operator.
+
+    It is separate from :class:`RepairedConfig` so a legacy mean-hinge config
+    cannot be interpreted as Equation (7)--(8) by field-name coincidence.
+    """
+
+    repair: RepairConfig
+    recall_max: float = 0.10
+    batch_size: int = 8
 
 
 def run_engine_repaired(
@@ -169,4 +184,97 @@ def run_repair_from_reached(
     }
     if not rec.snapshots or rec.snapshots[-1].step != step_base + cfg.stage2.max_steps:
         _snapshot(cfg.stage2.max_steps)
+    return rec
+
+
+def run_pdf_repair_from_reached(
+    model: torch.nn.Module,
+    block: BlockSpec,
+    request: Request,
+    protect: list[Example],
+    neutral: list[Example],
+    utility_guard: list[Example],
+    engine: str,
+    cfg: PDFRepairedConfig,
+    engine_record: TrajectoryRecord,
+    extra_eval=None,
+    log=None,
+) -> TrajectoryRecord:
+    """Apply the PDF v4 repair from an already first-reaching parent state.
+
+    Every model call performed by ``extra_eval`` is charged automatically by
+    :func:`rsus.repair.run_repair`; therefore non-differentiable checkpoint
+    evaluation remains inside the same processed-token budget.
+    """
+    if engine_record.request_id != request.request_id:
+        raise ValueError(
+            f"engine record request {engine_record.request_id!r} does not match "
+            f"{request.request_id!r}"
+        )
+    rec = TrajectoryRecord(
+        f"{engine}_pdf_v4_repaired",
+        request.request_id,
+        dict(engine_record.nll0),
+        list(engine_record.snapshots),
+        engine_record.cost,
+        dict(engine_record.metadata),
+    )
+    if not engine_record.snapshots:
+        return rec
+    entry = engine_record.snapshots[-1]
+    if entry.forget_recall > cfg.recall_max:
+        return rec
+
+    step_base = entry.step
+    protect_ids = [example.example_id for example in protect]
+
+    def _snapshot(accepted_steps: int) -> None:
+        rec.snapshots.append(
+            Snapshot(
+                step_base + accepted_steps,
+                _candidate_nll(model, request, cfg.batch_size),
+                _forget_recall(model, request),
+                extra_eval(model) if extra_eval else {},
+            )
+        )
+        if log is not None:
+            current = rec.snapshots[-1]
+            protected = [candidate for candidate in protect_ids if candidate in rec.nll0]
+            mean_damage = (
+                sum(current.nll[candidate] - rec.nll0[candidate] for candidate in protected)
+                / len(protected)
+                if protected
+                else float("nan")
+            )
+            log(
+                f"  pdf-v4 repair checkpoint: step={current.step} "
+                f"forget_recall={current.forget_recall:.3f} "
+                f"mean_dnll_protect={mean_damage:+.3f}"
+            )
+
+    result = run_repair(
+        model,
+        block,
+        protect=protect,
+        forget_guard=list(request.forget),
+        neutral=neutral,
+        utility_guard=utility_guard,
+        cfg=cfg.repair,
+        snapshot_hook=_snapshot,
+    )
+    rec.cost = engine_record.cost.merge(result.cost)
+    rec.metadata["pdf_v4_repair"] = {
+        "contract": "KDD_UnlearningFail.pdf:4.4:eq7-eq8",
+        "n_accepted": result.n_accepted,
+        "n_rejected": result.n_rejected,
+        "step_size_final": result.step_size_final,
+        "stopped_reason": result.stopped_reason,
+        "reference_sha256": result.reference_sha256,
+        "saved_steps": result.saved_steps,
+        "events": [dc.asdict(event) for event in result.events],
+        "cost": dc.asdict(result.cost),
+        "protect_ids": protect_ids,
+        "neutral_ids": [example.example_id for example in neutral],
+        "utility_guard_ids": [example.example_id for example in utility_guard],
+    }
     return rec

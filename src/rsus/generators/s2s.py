@@ -27,6 +27,7 @@ class S2SConfig:
     stage2: Stage2Config          # guard_kind/token_level are overridden below
     partition: PartitionParams
     batch_size: int = 8
+    representation_k: int = 5
 
 
 def run_s2s_trajectory(
@@ -48,7 +49,12 @@ def run_s2s_trajectory(
     rec.nll0 = _candidate_nll(model, request, cfg.batch_size)
 
     # Similarity partition front-end (its native construction).
-    spec = probe_spec or ProbeSpec(block=block, eta=1e-4, batch_size=cfg.batch_size)
+    spec = probe_spec or ProbeSpec(
+        block=block,
+        eta=1e-4,
+        batch_size=cfg.batch_size,
+        representation_k=cfg.representation_k,
+    )
     prof = get_scorer("knn_feature")(model, request, spec)
     part = build_partition(prof, request, folds, cfg.partition)
     by_id = {e.example_id: e for e in request.universe.examples}

@@ -21,6 +21,7 @@ from pathlib import Path
 import random
 from typing import Any, Callable, Iterable, Mapping, Sequence
 
+from ..analysis.prediction import cvar_upper
 from .schemas import (
     PROTECTION_COMPARATORS,
     EvidenceLedger,
@@ -729,8 +730,7 @@ def _prediction_metrics(
 
 
 def _tail_mean(values: Sequence[float], *, cvar_q: float) -> float:
-    count = max(1, math.ceil((1.0 - cvar_q) * len(values)))
-    return sum(sorted(values, reverse=True)[:count]) / count
+    return cvar_upper(list(values), 1.0 - cvar_q)
 
 
 def _protection_metrics(

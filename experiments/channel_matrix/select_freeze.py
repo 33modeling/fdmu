@@ -21,8 +21,17 @@ def _load_yaml(path: Path) -> dict:
 
 
 def _cvar(values: list[float], frac: float = 0.05) -> float:
-    count = max(1, math.ceil(frac * len(values)))
-    return sum(sorted(values, reverse=True)[:count]) / count
+    if not values or not 0.0 < frac <= 1.0:
+        raise ValueError("CVaR needs values and frac in (0, 1]")
+    ordered = sorted(values, reverse=True)
+    mass = frac * len(ordered)
+    if mass < 1.0:
+        return ordered[0]
+    whole = math.floor(mass)
+    total = sum(ordered[:whole])
+    if mass > whole:
+        total += (mass - whole) * ordered[whole]
+    return total / mass
 
 
 def _run_summary(run_dir: Path) -> dict:

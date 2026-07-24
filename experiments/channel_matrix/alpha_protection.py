@@ -611,7 +611,11 @@ def _run_worker(
     from rsus.evalx.metrics import greedy_generation_recall, mean_recall
     from rsus.generators import TrajectoryConfig, run_trajectory
     from rsus.generators.repaired import RepairedConfig, run_repair_from_reached
-    from rsus.partition import Partition, PartitionParams, build_partition, make_folds
+    from rsus.partition import (
+        PartitionParams,
+        build_pdf_protection_partition,
+        make_folds,
+    )
     from rsus.probe.base import ProbeSpec, ScoreProfile, get_scorer
     from rsus.stage1 import calibrate_floor
     from rsus.stage2 import Stage2Config
@@ -686,6 +690,24 @@ def _run_worker(
             f"expected 300/300 group split, got {len(discovery_ids)}/{len(audit_ids)}"
         )
     retain = [by_id[cid] for cid in sorted(discovery_ids)]
+
+    # Freeze R0 before any profile is computed.  It is removed from repair
+    # eligibility, so changing a score or alpha can never change the neutral
+    # stream.  Duplicate/paraphrase/template eligibility still needs a frozen
+    # external manifest before this legacy worker can be claim-bearing.
+    neutral_count = int(phase["partition"]["pool_size"])
+    neutral_candidates = sorted(discovery_ids)
+    if len(neutral_candidates) < 2 * neutral_count:
+        raise ValueError(
+            f"need at least 2*Kp discovery candidates for disjoint P/R0; "
+            f"got {len(neutral_candidates)} for Kp={neutral_count}"
+        )
+    neutral_gen = torch.Generator().manual_seed(seed + 104729)
+    neutral_order = torch.randperm(len(neutral_candidates), generator=neutral_gen).tolist()
+    shared_neutral = tuple(
+        sorted(neutral_candidates[index] for index in neutral_order[:neutral_count])
+    )
+    repair_eligible_ids = frozenset(discovery_ids - set(shared_neutral))
     scoring_request = Request.build(
         req.request_id,
         list(req.forget),
@@ -928,42 +950,15 @@ def _run_worker(
     partitions = {}
     for selector, selector_score in selector_scores.items():
         profile = ScoreProfile(req.request_id, selector, selector_score, probe_spec, CostRecord())
-        partition = build_partition(profile, req, folds, partition_params)
+        partition = build_pdf_protection_partition(
+            profile,
+            req,
+            folds,
+            partition_params,
+            neutral_ids=shared_neutral,
+            repair_eligible_ids=repair_eligible_ids,
+        )
         partitions[selector] = partition
-
-    # The neutral reference stream is part of the common repair operator, not
-    # an output of a selector.  Draw it once from candidates outside every
-    # protect pool and reuse the identical IDs for all arms.
-    protected_union = set().union(*(set(partition.protect) for partition in partitions.values()))
-    neutral_candidates = sorted(set(discovery_ids) - protected_union)
-    neutral_count = max(len(partition.protect) for partition in partitions.values())
-    if len(neutral_candidates) < neutral_count:
-        raise RuntimeError(
-            "cannot construct selector-independent neutral stream: "
-            f"need {neutral_count}, have {len(neutral_candidates)} outside all protect pools"
-        )
-    neutral_gen = torch.Generator().manual_seed(seed + 104729)
-    neutral_order = torch.randperm(len(neutral_candidates), generator=neutral_gen).tolist()
-    shared_neutral = tuple(sorted(neutral_candidates[index] for index in neutral_order[:neutral_count]))
-    for selector, partition in list(partitions.items()):
-        body = {
-            "request": req.request_id,
-            "scorer": selector,
-            "protect": list(partition.protect),
-            "neutral": list(shared_neutral),
-            "fallback": partition.fallback,
-            "params": dc.asdict(partition.params),
-            "universe_sha": req.universe.sha,
-        }
-        partitions[selector] = Partition(
-            partition.request_id,
-            partition.scorer,
-            partition.protect,
-            shared_neutral,
-            partition.fallback,
-            partition.params,
-            _json_sha(body),
-        )
 
     partition_manifest = {}
     for selector, partition in partitions.items():
@@ -985,6 +980,11 @@ def _run_worker(
         candidate_id: {
             "group": by_id[candidate_id].group,
             "fold": "audit" if candidate_id in audit_ids else "discovery",
+            "repair_eligible": candidate_id in repair_eligible_ids,
+            "ineligibility_reason": (
+                "neutral_stream" if candidate_id in shared_neutral else
+                "audit_fold" if candidate_id in audit_ids else None
+            ),
         }
         for candidate_id in sorted(by_id)
     }
@@ -1001,7 +1001,7 @@ def _run_worker(
         )
 
     manifest = {
-        "schema": "channel-mixture-protection-run-v1",
+        "schema": "channel-mixture-protection-run-v2-prefrozen-neutral",
         "campaign_id": phase["campaign_id"],
         "campaign_phase": phase_name,
         "host": platform.node(),
@@ -1055,6 +1055,8 @@ def _run_worker(
         "exact_energy_partition_by_parent": exact_key_by_parent,
         "shared_neutral_ids_sha256": _json_sha(list(shared_neutral)),
         "shared_neutral_ids": list(shared_neutral),
+        "repair_eligible_ids_sha256": _json_sha(sorted(repair_eligible_ids)),
+        "repair_eligibility_status": "provisional_missing_semantic_exclusion_manifest",
         **_git_state(),
     }
     manifest_path = out / "run_manifest.json"
@@ -1066,6 +1068,7 @@ def _run_worker(
             "fidelity_certificate_sha256", "alpha_freeze_sha256",
             "campaign_config_sha256", "partitions", "repeated_random",
             "exact_energy_partition_by_parent", "shared_neutral_ids_sha256",
+            "repair_eligible_ids_sha256", "repair_eligibility_status",
             "code_commit",
         )
         mismatched = [key for key in immutable_keys if old.get(key) != manifest.get(key)]

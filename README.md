@@ -1,5 +1,18 @@
 # fdmu — Update-Conditioned Retain Susceptibility (FD probe + guarded repair)
 
+> **2026-07-24 protocol warning:** `KDD_UnlearningFail.pdf` contains a newer
+> Chapter 4 than this README, the checked-in LaTeX, and parts of the code. The
+> repository is not yet claim-compatible with that PDF, especially for
+> Equations (7)--(8), RQ1--RQ3 decisions, fractional CVaR, and native-metric
+> non-inferiority. See
+> [`docs/PDF_V4_CODE_AUDIT.md`](docs/PDF_V4_CODE_AUDIT.md) and
+> [`docs/NEW_MODEL_CALIBRATION_GUIDE.md`](docs/NEW_MODEL_CALIBRATION_GUIDE.md)
+> before running or porting the method. The sections below describe the legacy
+> implementation and must not be treated as the July 24 paper contract.
+> The staged v4 mechanics live in `src/rsus/repair.py` and the explicitly named
+> `run_pdf_repair_from_reached` wrapper; they fail closed when `B_tok` or other
+> required repair settings are not frozen.
+
 > LLM **언러닝(삭제)** 시 어떤 *보존 데이터*가 부수적으로 망가지는지를
 > **미리 예측**하고(Finite-Difference 프로브), 그 예측을 이용해 **보호적 복구**를
 > 수행하는 연구 코드. 논문 *"When Does LLM Unlearning Fail? Probing

@@ -152,6 +152,7 @@ def test_s2s_baseline_runs_two_stages(world):
         stage1=Stage1Config(lr=5e-3, max_steps=800, eval_every=20, seed=0),
         stage2=Stage2Config(max_steps=10, refresh_k=1, delta_seq_sq=1e-2),
         partition=PartitionParams(pool_size=4, min_pool_size=3, tau_rem_abs_quantile=0.8),
+        representation_k=4,
     )
     from rsus.blocks import mlp_down_last_layers as blk
 
@@ -266,7 +267,14 @@ def test_crossed_sweep_labels_and_runs():
     folds = make_folds({e.example_id: e.group for e in cands}, 0.5, 0)
     audit_ids = {e.example_id for e in cands if folds[e.group] == "audit"}
     block = mlp_down_last_layers(model, 1)
-    spec = ProbeSpec(block=block, eta=1e-4, batch_size=4, n_dirs=8, norm_eta=1e-3)
+    spec = ProbeSpec(
+        block=block,
+        eta=1e-4,
+        batch_size=4,
+        n_dirs=8,
+        norm_eta=1e-3,
+        representation_k=4,
+    )
 
     state0 = {k: v.clone() for k, v in model.state_dict().items()}
 

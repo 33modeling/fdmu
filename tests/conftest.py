@@ -54,4 +54,9 @@ def req() -> Request:
 
 @pytest.fixture()
 def spec(tiny_model) -> ProbeSpec:
-    return ProbeSpec(block=mlp_down_last_layers(tiny_model, 1), eta=1e-4, batch_size=5)
+    return ProbeSpec(
+        block=mlp_down_last_layers(tiny_model, 1),
+        eta=1e-4,
+        batch_size=5,
+        representation_k=4,
+    )

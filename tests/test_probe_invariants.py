@@ -122,6 +122,14 @@ def test_knn_embed_needs_encoder_or_text(tiny_model, req, spec):
         get_scorer("knn_embed")(tiny_model, req, spec)
 
 
+def test_knn_feature_rejects_k_larger_than_forget_set(tiny_model, req, spec):
+    import pytest
+
+    invalid = dataclasses.replace(spec, representation_k=len(req.forget) + 1)
+    with pytest.raises(ValueError, match=r"1 <= k <= \|Df\|"):
+        get_scorer("knn_feature")(tiny_model, req, invalid)
+
+
 def test_knn_embed_with_injected_encoder(tiny_model, req, spec):
     import torch
 

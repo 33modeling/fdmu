@@ -12,6 +12,7 @@ from rsus.partition import (
     PartitionError,
     PartitionParams,
     build_partition,
+    build_pdf_protection_partition,
     group_disjoint_split,
     make_folds,
 )
@@ -158,4 +159,41 @@ def test_native_audit_ids_validated():
     with pytest.raises(ValueError):
         Request.build(
             "r", [_example("f00", "gf")], CandidateUniverse.freeze(cands), {"missing"}
+        )
+
+
+def test_pdf_partition_uses_exact_top_k_and_prefrozen_neutral():
+    req = _request()
+    folds = {group: "discovery" for group in {e.group for e in req.universe.examples}}
+    profile = _profile(req, n_positive=1)  # PDF Top-K does not require positivity.
+    neutral = ("c00", "c01", "c02", "c03")
+    eligible = {example.example_id for example in req.universe.examples} - set(neutral)
+    part = build_pdf_protection_partition(
+        profile,
+        req,
+        folds,
+        PARAMS,
+        neutral_ids=neutral,
+        repair_eligible_ids=eligible,
+    )
+    expected = sorted(eligible, key=lambda cid: (-profile.scores[cid], cid))[:4]
+    assert list(part.protect) == expected
+    assert part.remote_stream == neutral
+    assert not part.fallback
+    assert len(part.protect) == PARAMS.pool_size
+
+
+def test_pdf_partition_fails_instead_of_shrinking_k():
+    req = _request(10)
+    folds = {group: "discovery" for group in {e.group for e in req.universe.examples}}
+    profile = _profile(req)
+    neutral = ("c00", "c01", "c02", "c03")
+    with pytest.raises(PartitionError):
+        build_pdf_protection_partition(
+            profile,
+            req,
+            folds,
+            dataclasses.replace(PARAMS, pool_size=7),
+            neutral_ids=neutral,
+            repair_eligible_ids={"c04", "c05", "c06", "c07", "c08", "c09"},
         )

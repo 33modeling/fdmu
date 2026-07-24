@@ -1,0 +1,163 @@
+# Machine-followable handoff template for a new environment/model.
+#
+# This file is NOT an executable selection freeze. Copy it to a development
+# artifact, replace every null/TBD from the correct target-free fold, validate
+# the hashes, and only then generate configs/paper/selection_freeze.yaml.
+schema_version: 1
+contract: kdd-unlearning-fail-pdf-v4
+status: template_not_target_ready
+
+provenance:
+  git_commit: null
+  clean_worktree: null
+  python: null
+  torch: null
+  transformers: null
+  cuda: null
+  driver: null
+  gpu: null
+  dependency_freeze_sha256: null
+
+model:
+  setting_id: TBD
+  source: TBD
+  source_revision_or_sha256: null
+  tokenizer_source: TBD
+  tokenizer_revision_or_sha256: null
+  vocab_size: null
+  token_ids: {bos: null, eos: null, pad: null}
+  chat_template_sha256: null
+  dtype: float32
+  attention_implementation: null
+  deterministic_algorithms: true
+  block:
+    parameter_regex: TBD
+    parameter_names_sha256: null
+    parameter_count_d_B: null
+    layer_indices: []
+    role: mlp_down_projection
+
+data:
+  dataset_revision_or_sha256: null
+  rosters:
+    D_cal: {ids: [], sha256: null}
+    D_pred: {ids: [], sha256: null}
+    D_prot: {ids: [], sha256: null}
+    target: {ids: [], sha256: null}
+  require_pairwise_disjoint_rosters: true
+  candidate_manifest_sha256: null
+  repair_eligibility_manifest_sha256: null
+  neutral_manifest_sha256: null
+  guard_manifest_sha256: null
+  utility_manifest_sha256: null
+  native_audit_manifest_sha256: null
+  random_draw_manifest_sha256: null
+
+theta0:
+  construction: TBD
+  training_data_manifest_sha256: null
+  recipe_sha256: null
+  checkpoint_sha256: null
+  shared_across_requests: null
+
+calibration_D_cal:
+  loss:
+    reduction: mean_teacher_forced_answer_token_nll
+    prompt_masked: true
+  probe:
+    R_grid: []
+    eta_grid: []
+    selected_R: null
+    selected_eta: null
+    direction_bank_sha256: null
+    confirmatory_accumulation: float32
+    fidelity_floors:
+      lower_bound_spearman_minus_0p80_gt: 0.0
+      lower_bound_top_Kp_overlap_minus_0p70_gt: 0.0
+    direction_split_floor: null
+    perturbation_survival_floor: null
+    certificate_sha256: null
+  proximity:
+    layer: final_hidden
+    pooling: mean_answer_tokens
+    k: null
+  parents:
+    required: [graddiff, npo, simnpo, gru, rmu, repnoise, circuit_breakers]
+    operating_points: {}
+    checkpoint_grid_T_save: []
+    direct_forgetting_metric: TBD
+    direct_forgetting_threshold: null
+
+prediction_D_pred:
+  alpha_grid: []
+  alpha_pred: null
+  normalization: empirical_midrank_discovery_only
+  fallback_allowed: false
+  selection_artifact_sha256: null
+
+protection_D_prot:
+  alpha_grid: []
+  alpha_prot: null
+  Kp: null
+  objective:
+    neutral_kl_reduction: mean_teacher_forced_answer_token_conditional_kl
+    beta: null
+  constraints:
+    scalar_reduction: per_token_and_per_example
+    kappa_tok: null
+    kappa_ex: null
+    epsilon_tok: null
+    epsilon_ex: null
+    m_ref_accepted_steps: null
+    ridge_lambda: null
+  optimizer:
+    step_size: null
+    momentum: null
+    max_steps: null
+    J_retry: null
+    retry_shrink: 0.5
+    save_every_accepted_steps: null
+  budget:
+    B_tok: null
+    accounting: forward_tokens_plus_backward_token_equivalents
+  final_contract:
+    direct_forgetting: {metric: TBD, favorable: TBD, threshold: null}
+    paraphrase_forgetting: {metric: TBD, favorable: TBD, threshold: null}
+    extraction_generation:
+      metric: greedy_autoregressive_gold_token_recall
+      favorable: lower
+      threshold: null
+    utility: {metric: TBD, favorable: TBD, threshold: null}
+  native_metrics_by_dataset: {}
+  selection_artifact_sha256: null
+
+evidence:
+  RQ1:
+    require_lower_bounds_gt_zero: [joint_rho, joint_minus_S0, joint_minus_S1, tail_lift]
+    tail_eligibility_coverage_min: 0.80
+  RQ2:
+    require_lower_bounds_gt_zero: [f_rho_minus_0p80, f_K_minus_0p70, g_H, g_ctl]
+    require_valid_perturbations: true
+    require_exact_reference: true
+    require_common_control_support: true
+  RQ3:
+    damage_ucb_lt_zero:
+      comparators: [no_repair, repeated_random, S0, S1]
+      outcomes: [mean, CVaR95]
+    native_noninferiority_lb_gt_zero_for_all_comparators: true
+    require_all_five_arms_feasible_on_common_support: true
+  CVaR95:
+    empirical_tail_mass: 0.05
+    fractional_boundary_weight: true
+    n_lt_20_convention: maximum_and_low_tail_support_flag
+
+freeze:
+  frozen_before_target: false
+  resolved_no_null_or_TBD: false
+  all_manifest_hashes_verified: false
+  cpu_tests_passed: false
+  tiny_model_integration_passed: false
+  gpu_fidelity_passed: false
+  target_free_dry_campaign_passed: false
+  reviewer: null
+  frozen_utc: null
