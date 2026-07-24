@@ -83,8 +83,22 @@ def test_primary_plan_is_complete_and_fidelity_keys_match_cost_rows():
         "R",
         "repeat",
     ]
-    # Two provisioned models x (exact + three R values) x three repeats.
-    assert len(fidelity["planned"]) == 24
+    # Provisioned models x (exact + each R value) x repeats; derived from the
+    # campaign contract so provisioning a new model cannot silently shrink or
+    # inflate the frozen fidelity denominator without failing here.
+    protocol = campaign["execution"]["fidelity"]
+    provisioned = [
+        name
+        for name, model in campaign["models"].items()
+        if model.get("provisioned") is True
+    ]
+    expected_rows = (
+        len(provisioned)
+        * (1 + len(protocol["directions"]))
+        * protocol["repeats"]
+    )
+    assert len(fidelity["planned"]) == expected_rows
+    assert {row["model"] for row in fidelity["planned"]} == set(provisioned)
     planned = next(
         row
         for row in fidelity["planned"]
@@ -93,7 +107,6 @@ def test_primary_plan_is_complete_and_fidelity_keys_match_cost_rows():
         and row["R"] == 16
         and row["repeat"] == 0
     )
-    protocol = campaign["execution"]["fidelity"]
     runner_args = argparse.Namespace(
         **{
             **protocol,
@@ -136,8 +149,11 @@ def test_pending_freeze_and_unprovisioned_setting_fail_closed():
         )
 
     # Filling a selection file cannot silently turn an unavailable model into
-    # an executable denominator.
+    # an executable denominator.  The repository campaign now provisions every
+    # model, so the unprovisioned state is injected here rather than assumed.
     llama = "tofu_llama31_8b"
+    unprovisioned = copy.deepcopy(campaign)
+    unprovisioned["models"]["Llama-3.1-8B"]["provisioned"] = False
     for parent in freeze["selections"][llama].values():
         parent["prediction"] = {
             "valid": True,
@@ -152,7 +168,7 @@ def test_pending_freeze_and_unprovisioned_setting_fail_closed():
             "Kp": 2,
         }
     with pytest.raises(EvidenceValidationError, match="not provisioned"):
-        build_plan(evidence, campaign, freeze, setting_ids={llama})
+        build_plan(evidence, unprovisioned, freeze, setting_ids={llama})
 
 
 def test_execution_protocol_rejects_cost_runner_drift():

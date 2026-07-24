@@ -364,7 +364,7 @@ FAILURE_FLAGS = (
     ("not all five claim arms are feasible", "infeasible arm"),
     ("forgetting or utility constraint failed", "constraint fail"),
     ("tail lift bound or eligible coverage failed", "tail miss"),
-    ("one-sided IUT failed", "IUT fail"),
+    ("IUT failed", "IUT fail"),
     ("effects incomplete", "incomplete"),
     ("bounds incomplete", "incomplete"),
     ("weight unresolved or fallback", "fallback weight"),
@@ -421,7 +421,7 @@ def render_robustness_table(
         r"\toprule",
         r"Axis & Setting & Plan/done & RQ1 E/P & RQ2 E/P & RQ3 E/P &"
         r" valid/reach & tail/common $n$ & all-arm feasible &"
-        r" worst RQ1/RQ3 bounds & Failure modes \\",
+        r" worst RQ1/RQ2/RQ3 bounds & Failure modes \\",
         r"\midrule",
     ]
     previous_axis: str | None = None
@@ -450,17 +450,34 @@ def render_robustness_table(
             row.rq1.tail_eligible_units for row in rows if row is not None
         )
 
-        joint_bounds = [
-            row.rq1.joint_rho.lower_bound
-            for row in rows
-            if row is not None and row.rq1.joint_rho.lower_bound is not None
-        ]
-        gain_bounds = [
-            effect.lower_bound
+        # Least-favorable descriptive extrema per research question.  RQ1 and
+        # RQ2 members are one-sided lower bounds (worst = min); the RQ3 damage
+        # contrasts are one-sided upper bounds (worst = max).  The four native
+        # non-inferiority lower bounds live on a different scale and stay out
+        # of the single RQ3 scalar.
+        rq1_bounds = [
+            bound
             for row in rows
             if row is not None
-            for effect in (row.rq1.joint_minus_s0, row.rq1.joint_minus_s1)
-            if effect.lower_bound is not None
+            for bound in (
+                row.rq1.joint_rho.lower_bound,
+                row.rq1.joint_minus_s0.lower_bound,
+                row.rq1.joint_minus_s1.lower_bound,
+                row.rq1.tail_lift.lower_bound,
+            )
+            if bound is not None
+        ]
+        rq2_bounds = [
+            bound
+            for row in rows
+            if row is not None
+            for bound in (
+                row.rq2.f_rho_minus_0p80.lower_bound,
+                row.rq2.f_k_minus_0p70.lower_bound,
+                row.rq2.g_h.lower_bound,
+                row.rq2.g_ctl.lower_bound,
+            )
+            if bound is not None
         ]
         protection_bounds = [
             effect.upper_bound
@@ -470,14 +487,15 @@ def render_robustness_table(
             for effect in outcomes.values()
             if effect.upper_bound is not None
         ]
-        worst_rq1 = min(joint_bounds + gain_bounds) if joint_bounds or gain_bounds else None
+        worst_rq1 = min(rq1_bounds) if rq1_bounds else None
+        worst_rq2 = min(rq2_bounds) if rq2_bounds else None
         worst_rq3 = max(protection_bounds) if protection_bounds else None
-        if worst_rq1 is None and worst_rq3 is None:
+        if worst_rq1 is None and worst_rq2 is None and worst_rq3 is None:
             worst_cell = PLACEHOLDER
         else:
-            worst_cell = (
-                f"{_fmt(worst_rq1, sign=True) if worst_rq1 is not None else PLACEHOLDER}"
-                f" / {_fmt(worst_rq3, sign=True) if worst_rq3 is not None else PLACEHOLDER}"
+            worst_cell = " / ".join(
+                _fmt(value, sign=True) if value is not None else PLACEHOLDER
+                for value in (worst_rq1, worst_rq2, worst_rq3)
             )
 
         attempted_any = any(row is not None for row in rows)
