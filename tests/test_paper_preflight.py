@@ -191,7 +191,7 @@ def test_roster_overlap_fails_every_stage(tmp_path):
     )
 
 
-def test_tbd_missing_adapter_and_unprovisioned_model_are_explicit(tmp_path):
+def test_unresolved_rosters_and_missing_adapters_are_explicit(tmp_path):
     output = tmp_path / "repository-report.json"
     result = _run(
         ROOT / "configs/paper/evidence.yaml",
@@ -200,7 +200,7 @@ def test_tbd_missing_adapter_and_unprovisioned_model_are_explicit(tmp_path):
     )
     assert result.returncode == 2
     report = json.loads(output.read_text(encoding="utf-8"))
-    assert "WMDP-bio/MMLU" in report["summary"]["missing_adapter_datasets"]
+    assert "WMDP-bio/MMLU" not in report["summary"]["missing_adapter_datasets"]
     assert "MUSE-News" not in report["summary"]["missing_adapter_datasets"]
     assert "MUSE-Books" not in report["summary"]["missing_adapter_datasets"]
     assert "adapter lacks independent target-request rosters" in report["datasets"][
@@ -218,7 +218,9 @@ def test_tbd_missing_adapter_and_unprovisioned_model_are_explicit(tmp_path):
     assert report["datasets"]["WMDP-bio/MMLU"]["rosters"]["D_cal"][
         "reasons"
     ] == ["contains unresolved ids: TBD_WMDP_D_CAL_REQUEST_IDS"]
-    assert "Llama-3.1-8B" in report["summary"]["unprovisioned_models"]
+    # Llama-3.1-8B graduated on 2026-07-24 after provisioning the mirrored
+    # checkpoint recorded in the campaign contract.
+    assert "Llama-3.1-8B" not in report["summary"]["unprovisioned_models"]
     assert report["unit_producers"]["TOFU"]["prediction"]["ready"]
     assert report["unit_producers"]["TOFU"]["prediction"]["reasons"] == []
     assert report["unit_producers"]["TOFU"]["prediction"]["entrypoint"] == (
