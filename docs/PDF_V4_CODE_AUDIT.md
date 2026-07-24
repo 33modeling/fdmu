@@ -2,12 +2,12 @@
 
 Audit date: 2026-07-24
 Normative specification: `KDD_UnlearningFail.pdf` (13 pages)
-Audited repository revision: `98db4b2` plus the clean working tree present at audit start
+Audited repository revision: `98db4b2`; remediation updated through the current working tree
 
 Remediation status: the working tree now contains a tested PDF-v4 repair core
 and several unambiguous fixes listed below. These changes do **not** by
 themselves make the campaign claim-ready because the PDF's open constants and
-the RQ1--RQ3 evidence/executor integration remain unresolved.
+the full cross-request RQ1--RQ3 paper executor/evidence integration remain unresolved.
 
 ## Bottom line
 
@@ -16,10 +16,11 @@ LaTeX, the preregistration constants, and the top-level README. The repository
 is **not yet capable of producing a claim-valid run under the PDF contract**.
 
 The numerical loss-shake estimator in Sections 4.1--4.2 is largely aligned.
-The first-reaching parent path exists in the alpha-protection runner. At audit
+The first-reaching parent path exists in the alpha-protection and v4 local runners. At audit
 start the main break began at Section 4.4: its repair objective and guard were
 the old mean-loss/one-sided-drift design. A separate v4 core now implements the
-new mechanics, but the active campaign still uses the legacy path. The
+new mechanics, and a non-claim-bearing local runner now connects it end to end,
+but the active paper campaign still uses the legacy path. The
 paper-facing statistics also implement an older two-claim contract and cannot
 decide the new RQ1--RQ3 requirements.
 
@@ -32,12 +33,12 @@ outputs must not be labeled as evidence for the current PDF.
 | PDF section | Required behavior | Current status | Main evidence |
 |---|---|---|---|
 | 4.1 loss-shake | normalized shared Gaussian directions, symmetric response, `d_B/R` squared aggregation, signed responses saved, fp32 confirmatory path | **mostly aligned** | `src/rsus/probe/finite_diff.py:105-191`, `src/rsus/probe/fidelity.py:54-136` |
-| 4.2 proximity and mixture | answer-token mean final hidden state, top-k forget cosine, discovery-fitted empirical midranks, separate `alpha_pred` and `alpha_prot` | **core functions aligned; end-to-end path incomplete** | `src/rsus/probe/baselines.py:92-164`, `src/rsus/analysis/mixture.py:43-135`, `:154-390` |
+| 4.2 proximity and mixture | answer-token mean final hidden state, top-k forget cosine, discovery-fitted empirical midranks, separate `alpha_pred` and `alpha_prot` | **core functions aligned; local protection diagnostic connected** | `src/rsus/probe/baselines.py:92-164`, `src/rsus/analysis/mixture.py:43-135`, `src/rsus/local_pdf_v4.py` |
 | 4.3 conditional prediction | damage at the first saved checkpoint satisfying the external direct-forgetting gate; non-reaching excluded from conditional outcomes | **one runner aligned, legacy runner violates it** | aligned: `experiments/channel_matrix/alpha_protection.py:1286-1322`; violation: `experiments/gate_1p5b/gate.py:696-715`, stale declaration in `src/rsus/generators/base.py:1-8` |
-| 4.4 Eq. (7) repair | `L_P + beta KL(p_entry || p_theta)` on a selector-independent neutral stream | **implemented in new core; legacy runner not migrated** | `src/rsus/repair.py` caches full fp32 entry distributions and computes teacher-forced answer-token KL; `src/rsus/stage2.py` remains explicitly legacy |
-| 4.4 Eq. (8) filter | columns of `G` are gradients of active oriented constraints `c_j`; refresh every accepted `m_ref` steps; fixed ridge `lambda` | **implemented under an explicit conservative reduction; not campaign-integrated** | `src/rsus/repair.py` uses one `c_j` per frozen token and example-average margin; this convention must be confirmed in the paper |
+| 4.4 Eq. (7) repair | `L_P + beta KL(p_entry || p_theta)` on a selector-independent neutral stream | **implemented and locally orchestrated; legacy/paper campaigns not migrated** | `src/rsus/repair.py` caches full fp32 entry distributions and computes teacher-forced answer-token KL; `experiments/local_pdf_v4.py` connects the frozen stream; `src/rsus/stage2.py` remains explicitly legacy |
+| 4.4 Eq. (8) filter | columns of `G` are gradients of active oriented constraints `c_j`; refresh every accepted `m_ref` steps; fixed ridge `lambda` | **implemented under an explicit conservative reduction; local diagnostic integrated** | `src/rsus/repair.py` uses one `c_j` per frozen token and example-average margin; `src/rsus/local_pdf_v4.py` invokes it after first reach; this convention must be confirmed in the paper |
 | 4.4 acceptance | every forget/neutral/utility token and every example-average margin; rollback, halve, retry up to `J_retry`; stop on exhaustion | **implemented and unit-tested in new core** | `src/rsus/repair.py`, `tests/test_repair_v4.py` |
-| 4.4 budget/final output | charge all repair-time model tokens; last saved checkpoint satisfying direct, paraphrase, extraction/generation, and utility contract | **repair token meter/wrapper implemented; paper executor and frozen values absent** | `src/rsus/repair.py` meters root-model forwards plus backward token equivalents; `src/rsus/generators/repaired.py` exposes a separate PDF-v4 wrapper |
+| 4.4 budget/final output | charge all repair-time model tokens; last saved checkpoint satisfying direct, paraphrase, extraction/generation, and utility contract | **repair token meter/local wrapper implemented; full final gate and frozen values absent** | `src/rsus/repair.py` meters root-model forwards plus backward token equivalents; `src/rsus/generators/repaired.py` exposes a separate PDF-v4 wrapper; the local runner is explicitly non-claim-bearing |
 | 4.5 sealed protocol | three mutually disjoint target-free folds `D_cal`, `D_pred`, `D_prot`; immutable target freeze; score-independent random/neutral stream; eligibility filtering | **not executable as specified** | paper config declares folds but executors do not consume it; `configs/paper/campaign.yaml:63-81`; protection runner requires its development roster to equal old calibration roster at `alpha_protection.py:474-481` |
 | 4.6 RQ1 | LBs for absolute joint rho, gains over S0/S1, positive-damage tail lift, at least 80% tail eligibility coverage | **v4 decision implemented; raw exporter/registry not migrated** | `src/rsus/evidence/pdf_v4.py` fails closed on all four LBs and coverage; legacy `schemas.py`/`raw.py` still omit inputs |
 | 4.7 RQ2 | fidelity-floor LBs plus `g_H` and strongest frozen simple-control gain, with validity/common support | **v4 decision implemented; evidence producer absent** | `src/rsus/evidence/pdf_v4.py` defines the separate four-way IUT; fidelity runner remains diagnostic and does not populate it |
@@ -48,30 +49,32 @@ outputs must not be labeled as evidence for the current PDF.
 
 ### P0 — results would answer a different question
 
-1. **Equation (7) is absent from the active campaign path.** Legacy
+1. **Equation (7) is absent from the active paper campaign path.** Legacy
    `run_stage2` never computes the entry-anchored neutral KL. The new
-   `repair.py` core does, but no paper-stage executor selects that path yet.
+   `repair.py` core and `local_run.sh` diagnostic do, but no full paper-stage
+   executor selects that path yet.
 
-2. **The active campaign's Equation (8) basis is wrong.** Its legacy basis is
+2. **The active paper campaign's Equation (8) basis is wrong.** Its legacy basis is
    `{grad(-L_forget), grad(-L_remote)}`. The new core uses every active token
    and example constraint, but the PDF must confirm that scalar reduction.
 
-3. **The active campaign's hard guard has different semantics.** Legacy code
+3. **The active paper campaign's hard guard has different semantics.** Legacy code
    accepts a mean squared one-sided forget penalty at periodic refreshes. The
    new core implements the PDF's maximum-style token/example checks and
-   same-step rollback/retry, but is not yet wired into the executor.
+   same-step rollback/retry and is wired into the local diagnostic, but not the
+   full paper executor.
 
-4. **No processed-token budget is enforced by the active campaign.** The new
+4. **No processed-token budget is enforced by the active paper campaign.** The new
    core meters actual root-model forwards (including checkpoint callbacks),
    backward token equivalents, and stops before exceeding `B_tok`. The legacy
    runner and parent objective telemetry remain incomplete.
 
-5. **The neutral stream was score-dependent in construction.** This has been
-   corrected in the working tree: `R0` is now sampled before profile scoring,
-   removed from repair eligibility, and passed unchanged to an exact-Top-`Kp`
-   constructor. The broader duplicate/paraphrase/template exclusion manifest
-   is still missing, so the worker records its eligibility status as
-   provisional and remains non-claim-bearing.
+5. **The neutral stream was score-dependent in construction.** The v4 local
+   path now freezes `R0` before profile scoring, removes it from eligibility,
+   hashes the manifest, and passes it unchanged to exact Top-`Kp`. Semantic
+   duplicate/paraphrase/template exclusions can be listed with a review hash;
+   absent that review the manifest records provisional eligibility and the
+   output remains non-claim-bearing.
 
 6. **The primary gate driver uses terminal damage.** `gate.py` calls
    `rec.damage_at()` without selecting the first reaching checkpoint. This is
@@ -108,11 +111,11 @@ outputs must not be labeled as evidence for the current PDF.
     campaign require seven primary parents. It also scores discovery only, so
     it cannot emit the sealed audit profile needed by RQ1.
 
-13. **Semantic repair eligibility is not implemented.** The new exact-Top-`Kp`
-    constructor accepts and hashes an explicit eligibility set, but no frozen
-    generator yet excludes direct duplicates, paraphrases, and template-derived
-    restatements. The alpha worker therefore labels its provisional mask as
-    non-claim-bearing.
+13. **Semantic repair eligibility is not automated.** The exact-Top-`Kp`
+    constructor and local manifest accept explicit reviewed exclusions, but no
+    trusted generator yet detects direct duplicates, paraphrases, and
+    template-derived restatements. Unreviewed local manifests are explicitly
+    provisional and non-claim-bearing.
 
 14. **The checked-in paper source describes the superseded method.** In
     `paper/sections/04_method.tex:87-144`, endpoint channel routing remains the
@@ -123,8 +126,8 @@ outputs must not be labeled as evidence for the current PDF.
 
 ### P1 — important validity or reproducibility gaps
 
-- `knn_feature` silently clips `k` to the forget-set size. A frozen contract
-  should reject an invalid `k` instead of changing the estimand.
+- `knn_feature` now rejects `k > |Df|`; old results created by a clipping build
+  need to disclose that they used a different estimand.
 - The production random direction is sampled in parameter dtype. This is safe
   only because confirmatory configs currently require fp32; a new low-precision
   model must not inherit it silently.
@@ -141,8 +144,9 @@ outputs must not be labeled as evidence for the current PDF.
   per request/seed. That must either be declared and hashed as the intended
   estimand or replaced by a common benchmark checkpoint.
 - New CPU tests cover Eq. (7) reference distributions, the damped filter,
-  fail-closed `B_tok`, exact Top-`Kp`, and hard-feasible accepted updates.
-  Retry-exhaustion edge cases, GPU numerics/memory, RQ1 tail eligibility, RQ2
+  fail-closed `B_tok`, exact Top-`Kp`, hard-feasible accepted updates, and a
+  tiny-model profile-to-parent-to-repair integration. GPU numerics/memory,
+  RQ1 tail eligibility, RQ2
   IUT, and native NI still lack end-to-end tests.
 
 ## Problems in the PDF itself
@@ -218,9 +222,9 @@ draft rather than a fully executable specification.
 - Relevant runner, probe, repair, partition, evidence, dataset, configuration,
   and test files were statically traced.
 - `python3 -m compileall -q src experiments tests` passes.
-- An isolated CPU runtime under `/tmp` collected 209 tests: 207 passed and two
-  pre-existing tests were skipped. This includes the new v4 repair, exact
-  Top-`Kp`, neutral independence, and fractional-CVaR regressions. No GPU/model
+- An isolated CPU runtime under `/tmp` collected 214 tests: 212 passed and two
+  pre-existing tests were skipped. This includes the v4 repair, local-runner
+  integration, exact Top-`Kp`, neutral independence, and fractional-CVaR regressions. No GPU/model
   campaign was run, so large-model numerics and memory remain uncertified.
 - Paper preflight exits 2 with `0/8` settings and `0/32` stages ready, as it
   should: model paths, v4 executors, selection freeze, and several adapters/

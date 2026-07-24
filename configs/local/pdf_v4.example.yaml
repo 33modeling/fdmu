@@ -1,0 +1,97 @@
+# Copy to configs/local/pdf_v4.local.yaml.  This file is intentionally
+# non-executable: null values must be calibrated on D_cal/D_prot, not guessed.
+schema_version: 1
+contract: kdd-unlearning-fail-pdf-v4-local
+status: template_not_ready
+claim_eligible: false
+
+run:
+  seed: 2025
+  deterministic_algorithms: true
+
+model:
+  source: /rdata/models/Qwen2.5-1.5B-Instruct
+  source_revision_or_sha256: null
+  tokenizer_source: /rdata/models/Qwen2.5-1.5B-Instruct
+  dtype: float32
+  device: cuda:0
+  block:
+    parameter_regex: '.*\.layers\.(?:20|21|22|23|24|25|26|27)\.mlp\.down_proj\.weight'
+    # Fill these from: bash local_run.sh inspect-model <config>
+    parameter_names_sha256: null
+    parameter_count_d_B: null
+
+data:
+  adapter: tofu
+  request:
+    author_id: 180
+    candidate_authors: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19]
+    universe_authors: 20
+    seed: 2025
+    max_length: 256
+  split:
+    seed: 2025
+    audit_groups: 4
+    neutral_groups: 2
+    utility_groups: 2
+    eligibility:
+      # Keep provisional for a diagnostic. For a reviewed run, list excluded
+      # duplicate/paraphrase/template IDs, set frozen_semantic_review, and hash
+      # the review artifact. The full paper preflight is still separate.
+      status: provisional_local_diagnostic
+      ineligible_ids: []
+      review_sha256: provisional_local_diagnostic
+  manifest:
+    path: runs/local_pdf_v4/manifests/tofu-a180.yaml
+
+probe:
+  gradient_scorer: fd_norm
+  proximity_scorer: knn_feature
+  R: null
+  eta: null
+  norm_eta: null
+  seed: 0
+  batch_size: 4
+  k: null
+  representation_layer: -1
+  representation_pooling: answer_mean
+  alpha_prot: null
+  Kp: null
+
+parent:
+  objective: npo
+  recall_max: 0.10
+  # full or block; this is a calibrated parent operating point, not a repair knob.
+  trainable_scope: block
+  trajectory:
+    max_steps: null
+    checkpoint_every: null
+    batch_size: 4
+    lr: null
+    seed: 2025
+    beta: null
+    forget_weight: 1.0
+    retain_weight: 1.0
+
+repair:
+  step_size: null
+  beta: null
+  momentum: null
+  max_steps: null
+  batch_size: 4
+  m_ref: null
+  ridge_lambda: null
+  kappa_tok: null
+  kappa_ex: null
+  epsilon_tok: null
+  epsilon_ex: null
+  max_retries: null
+  retry_shrink: 0.5
+  token_budget: null
+  save_every: null
+  constraint_reduction: per_token_and_per_example
+
+output:
+  directory: runs/local_pdf_v4/tofu-a180
+  save_final_block: true
+  overwrite: false

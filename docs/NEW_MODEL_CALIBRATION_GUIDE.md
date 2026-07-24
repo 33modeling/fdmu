@@ -1,9 +1,11 @@
 # New environment and new LLM calibration guide
 
 This guide follows the July 24 PDF contract, not the superseded endpoint-router
-method in the checked-in LaTeX. Read `PDF_V4_CODE_AUDIT.md` first: the present
-repository still needs the Chapter 4 rebuild, so the final target stage must
-remain blocked until preflight certifies the new executor and evidence schema.
+method in the checked-in LaTeX. Read `PDF_V4_CODE_AUDIT.md` first. The Equation
+(7)--(8) core and a fail-closed single-request local executor now exist, but a
+final target campaign must remain blocked until preflight also certifies the
+resolved cross-request freeze, comparator arms, native metrics, and evidence
+schema.
 Use `configs/paper/new_model_calibration.template.yaml` as the machine-readable
 handoff record; it is deliberately non-executable while any value is null or
 `TBD`.
@@ -286,8 +288,23 @@ python experiments/paper/preflight.py \
 ```
 
 Exit code 2 means “not ready”, not “run anyway”. At present this is the expected
-result because the PDF-compliant executor, rosters, and selection freeze are not
-complete.
+result while the rosters and model-specific selection freeze remain incomplete.
+
+For one local diagnostic, use the narrower fail-closed runner after calibration:
+
+```bash
+cp configs/local/pdf_v4.example.yaml configs/local/pdf_v4.local.yaml
+bash local_run.sh inspect-model configs/local/pdf_v4.local.yaml
+bash local_run.sh prepare-manifest configs/local/pdf_v4.local.yaml
+# Fill calibrated nulls and set status: frozen_for_local_diagnostic.
+bash local_run.sh validate configs/local/pdf_v4.local.yaml
+bash local_run.sh run configs/local/pdf_v4.local.yaml
+```
+
+The order matters: `prepare-manifest` must happen before profiling, and the
+runner refuses to call the model if the resolved config or frozen manifest is
+invalid. Its output is always diagnostic (`claim_eligible: false`); it is not a
+shortcut around D_cal/D_pred/D_prot or the full evidence preflight.
 
 ## 10. Target execution and acceptance checks
 
@@ -357,7 +374,9 @@ claim-bearing tables.
 `src/rsus/generators/repaired.py` implement the Equation (7)--(8) mechanics,
 hard guards, retries, and token metering described above. The old
 `src/rsus/stage2.py` remains a legacy diagnostic and must never receive v4
-parameter names by translation.
+parameter names by translation. `experiments/local_pdf_v4.py` is the local
+orchestrator that connects the frozen manifest, two profile channels, exact
+Top-Kp allocation, first-reaching parent, and this repair core.
 
 The paper campaign must remain blocked until all of the following are frozen
 and the new wrapper is wired into a `PAPER_STAGE_CONTRACT` executor:
