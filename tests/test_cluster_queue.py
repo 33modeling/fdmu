@@ -235,6 +235,11 @@ def test_model_launchers_pin_queues_without_force_override():
     assert '--queue "$QUEUE" --gpu "$WORKER_GPU"' in fourteen
     assert '--unit aud__' not in seven
     assert '--unit aud__' not in fourteen
+    enqueue = (ROOT / "experiments/cluster/enqueue_table12.sh").read_text(
+        encoding="utf-8"
+    )
+    assert "each 8-GPU node starts 8 workers" not in enqueue
+    assert "exactly one foreground worker on GPU 0" in enqueue
 
 
 def test_quarantine_moves_only_retryable_partial_audit(tmp_path, monkeypatch):

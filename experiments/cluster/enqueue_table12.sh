@@ -104,13 +104,10 @@ post_enqueue_notes() {  # $1 = queue dir
   cat <<EOF
 
 [enqueue_table12] Units are queued in $1 — this script does NOT start workers.
-  On each node assigned to this queue (configs/cluster/fleet.yaml) run:
-
-    bash experiments/cluster/launch_node.sh $1
-
   Reminders:
-    - each 8-GPU node starts 8 workers (one per GPU 0-7); fp32 runs take a
-      whole H100, so never co-schedule anything else on those GPUs.
+    - worker count and GPU selection belong to the caller-specific launcher.
+      run_tofu_7b_h100.sh uses the fleet launcher; run_tofu_14b_h100.sh runs
+      exactly one foreground worker on GPU 0.
     - make_units-generated gate/audit units must KEEP the max_attempts that
       make_units set — do not hand-edit queue JSON to add retries (sealed
       runners refuse partial run dirs by design; see the runbook's triage).
