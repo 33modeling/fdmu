@@ -144,6 +144,16 @@ def test_worker_env_isolates_one_gpu_per_unit():
     assert cpu_env["HOME"].startswith(f"{storage}/runtime/")
 
 
+def test_worker_pins_queued_python_to_active_interpreter():
+    assert worker.resolve_unit_command(["python", "-u", "job.py"]) == [
+        sys.executable,
+        "-u",
+        "job.py",
+    ]
+    assert worker.resolve_unit_command(["python3", "job.py"])[0] == sys.executable
+    assert worker.resolve_unit_command(["bash", "job.sh"]) == ["bash", "job.sh"]
+
+
 def test_worker_env_replaces_node_local_tmpdir():
     env = worker.build_env(
         {

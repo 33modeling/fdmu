@@ -15,11 +15,13 @@ is randomized sensitivity and endpoint alpha=1 is hidden-state proximity.
 from __future__ import annotations
 
 import argparse
+from datetime import datetime, timezone
 import hashlib
 import itertools
 import json
 import os
 import platform
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -537,6 +539,23 @@ def _output_dir(cfg: dict, phase: str, model_id: str, author: int, seed: int) ->
     root = _runtime_output_root(cfg)
     return (root / "alpha_protection" / phase / model_id
             / f"tofu-a{author}" / f"seed-{seed}")
+
+
+def _quarantine_partial_alpha(out: Path) -> Path:
+    """Preserve an alpha run that cannot resume under the current contract."""
+    runs_root = Path(os.environ.get("CLUSTER_RUNS_ROOT", ROOT / "runs"))
+    forensics = runs_root / "forensics" / "alpha-partials"
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S.%fZ")
+    identity = "__".join(out.parts[-5:])
+    destination = forensics / f"{stamp}__{identity}"
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    shutil.move(str(out), str(destination))
+    print(
+        f"QUARANTINED incompatible alpha partial: source={out} "
+        f"destination={destination}",
+        flush=True,
+    )
+    return destination
 
 
 def worker_commands(
@@ -1155,8 +1174,15 @@ def _run_worker(
         )
         mismatched = [key for key in immutable_keys if old.get(key) != manifest.get(key)]
         if mismatched:
-            raise RuntimeError(
-                f"resume manifest mismatch at {out}: {mismatched}; preserve the directory"
+            if not resume:
+                raise RuntimeError(
+                    f"resume manifest mismatch at {out}: {mismatched}; "
+                    "preserve the directory"
+                )
+            _quarantine_partial_alpha(out)
+            out.mkdir(parents=True, exist_ok=True)
+            manifest_path.write_text(
+                json.dumps(manifest, indent=2, sort_keys=True), encoding="utf-8"
             )
         if not resume:
             raise RuntimeError(f"pre-existing alpha protection run at {out}; pass --resume")

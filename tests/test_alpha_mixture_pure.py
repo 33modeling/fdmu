@@ -10,6 +10,7 @@ import tempfile
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
+from unittest import mock
 
 import yaml
 
@@ -41,6 +42,29 @@ alpha_campaign = _module(
 
 
 class MixtureScoreTest(unittest.TestCase):
+    def test_incompatible_alpha_partial_is_preserved_on_group_runs_root(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            runs = root / "runs"
+            partial = (
+                runs / "channel_matrix_7b" / "alpha_protection"
+                / "development" / "qwen25_7b" / "tofu-a198" / "seed-2025"
+            )
+            partial.mkdir(parents=True)
+            (partial / "run_manifest.json").write_text(
+                '{"code_commit": "old"}', encoding="utf-8"
+            )
+            with mock.patch.dict(
+                alpha_campaign.os.environ, {"CLUSTER_RUNS_ROOT": str(runs)}
+            ):
+                destination = alpha_campaign._quarantine_partial_alpha(partial)
+
+            self.assertFalse(partial.exists())
+            self.assertTrue((destination / "run_manifest.json").is_file())
+            self.assertEqual(
+                destination.parent, runs / "forensics" / "alpha-partials"
+            )
+
     def test_endpoints_recover_component_rankings(self):
         gradient = {"a": 4.0, "b": 1.0, "c": 3.0, "d": 2.0}
         proximity = {"a": -2.0, "b": 8.0, "c": 0.0, "d": 4.0}

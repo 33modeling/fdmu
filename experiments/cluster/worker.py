@@ -29,6 +29,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from workqueue import Claim, WorkQueue  # noqa: E402
 
 HEARTBEAT_INTERVAL_S = 60.0
+FAILURE_TAIL_LINES = 60
 
 
 def _require_group_volume(path: str, group_root: str, role: str) -> str:
@@ -49,6 +50,25 @@ def gpu_memory_used_mib(gpu: int) -> int | None:
         capture_output=True, text=True, check=True,
     )
     return int(out.stdout.strip().splitlines()[0])
+
+
+def resolve_unit_command(cmd: list[str]) -> list[str]:
+    """Pin queued Python commands to the worker's active interpreter."""
+    resolved = list(cmd)
+    if resolved and resolved[0] in {"python", "python3"}:
+        resolved[0] = sys.executable
+    return resolved
+
+
+def print_failure_tail(log_path: Path, lines: int = FAILURE_TAIL_LINES) -> None:
+    try:
+        content = log_path.read_text(encoding="utf-8", errors="replace").splitlines()
+    except OSError as exc:
+        print(f"[worker] could not read failure log {log_path}: {exc}", flush=True)
+        return
+    print(f"[worker] ERROR LOG TAIL BEGIN {log_path}", flush=True)
+    print("\n".join(content[-lines:]), flush=True)
+    print(f"[worker] ERROR LOG TAIL END {log_path}", flush=True)
 
 
 def build_env(base: dict[str, str], unit_env: dict[str, str], gpu: int, needs_gpu: bool) -> dict[str, str]:
@@ -146,6 +166,7 @@ def build_env(base: dict[str, str], unit_env: dict[str, str], gpu: int, needs_gp
 
 def run_claim(queue: WorkQueue, claim: Claim, gpu: int, log_dir: Path) -> bool:
     unit = claim.unit
+    cmd = resolve_unit_command(unit.cmd)
     host = socket.gethostname()
     attempt = claim.attempts + 1
     log_path = log_dir / f"{unit.unit_id}__{host}_gpu{gpu}__try{attempt}.out"
@@ -170,12 +191,12 @@ def run_claim(queue: WorkQueue, claim: Claim, gpu: int, log_dir: Path) -> bool:
         with open(log_path, "ab") as log:
             header = (
                 f"# unit={unit.unit_id} attempt={attempt} host={host} gpu={gpu}\n"
-                f"# cmd={' '.join(unit.cmd)}\n"
+                f"# cmd={' '.join(cmd)}\n"
             )
             log.write(header.encode("utf-8"))
             log.flush()
             proc = subprocess.run(
-                unit.cmd, cwd=ROOT, env=env, stdout=log, stderr=subprocess.STDOUT
+                cmd, cwd=ROOT, env=env, stdout=log, stderr=subprocess.STDOUT
             )
         exit_code = proc.returncode
     except Exception as exc:  # a broken unit must never take the worker down
@@ -202,6 +223,7 @@ def run_claim(queue: WorkQueue, claim: Claim, gpu: int, log_dir: Path) -> bool:
         print(f"[worker gpu{gpu}] done {unit.unit_id} ({result['duration_s']}s)", flush=True)
         return True
     state = queue.fail(claim, result)
+    print_failure_tail(log_path)
     print(
         f"[worker gpu{gpu}] FAIL {unit.unit_id} exit={exit_code} error={error} -> {state} "
         f"(log: {log_path})",
