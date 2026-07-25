@@ -1,13 +1,20 @@
 from __future__ import annotations
 
 from copy import deepcopy
+import hashlib
+import json
 from pathlib import Path
 
 import pytest
 import yaml
 
+from experiments.paper.approve_parent_freeze import (
+    ApprovalError,
+    validate_draft,
+)
 from experiments.paper.run_joint_dev_sweep import (
     SweepError,
+    _unit_complete,
     build_exhaustion_report,
     candidate_score,
     evaluate_cell,
@@ -265,3 +272,99 @@ def test_paper_runtime_registers_the_14b_scale_setting():
     assert setting["channel_model_id"] == "qwen25_14b"
     assert setting["parent_freeze"].endswith("objective_freeze_14b.yaml")
     assert setting["sft"]["steps"] == 800
+
+
+def test_calibration_resume_requires_hashed_outputs_and_fidelity(tmp_path):
+    def artifact(path):
+        return {
+            "path": str(path),
+            "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+        }
+
+    fidelity = tmp_path / "fidelity_raw.jsonl"
+    selection = tmp_path / "parent_selection_inputs.jsonl"
+    diagnostics = tmp_path / "fidelity_diagnostics.json"
+    for path in (fidelity, selection, diagnostics):
+        path.write_text("{}\n", encoding="utf-8")
+    hashes = {
+        "campaign_config_sha256": "a" * 64,
+        "evidence_config_sha256": "b" * 64,
+        "runtime_config_sha256": "c" * 64,
+    }
+    run_manifest = tmp_path / "run_manifest.json"
+    run_manifest.write_text(
+        json.dumps(
+            {
+                "contract": "tofu-pdf-v4-unit-output",
+                "stage": "calibration",
+                "setting": "tofu_qwen25_1p5b",
+                "parent": "graddiff",
+                "request": "tofu-a198",
+                "seed": 2025,
+                **hashes,
+                "outputs": {
+                    "fidelity_raw": artifact(fidelity),
+                    "parent_selection_inputs": artifact(selection),
+                },
+                "fidelity_diagnostics": artifact(diagnostics),
+            }
+        ),
+        encoding="utf-8",
+    )
+    unit = {
+        "setting": "tofu_qwen25_1p5b",
+        "parent": "graddiff",
+        "request": "tofu-a198",
+        "seed": "2025",
+        "run_manifest": str(run_manifest),
+        "outputs": {
+            "fidelity_raw": str(fidelity),
+            "parent_selection_inputs": str(selection),
+        },
+    }
+    assert _unit_complete(
+        unit,
+        campaign_hash=hashes["campaign_config_sha256"],
+        evidence_hash=hashes["evidence_config_sha256"],
+        runtime_hash=hashes["runtime_config_sha256"],
+        stage="calibration",
+    )
+    diagnostics.write_text('{"changed": true}\n', encoding="utf-8")
+    assert not _unit_complete(
+        unit,
+        campaign_hash=hashes["campaign_config_sha256"],
+        evidence_hash=hashes["evidence_config_sha256"],
+        runtime_hash=hashes["runtime_config_sha256"],
+        stage="calibration",
+    )
+
+
+def test_parent_freeze_approval_rejects_unresolved_or_changed_draft(tmp_path):
+    selection = tmp_path / "parent_selection_inputs.jsonl"
+    selection.write_text("{}\n", encoding="utf-8")
+    source = {
+        "path": str(selection.resolve()),
+        "sha256": hashlib.sha256(selection.read_bytes()).hexdigest(),
+    }
+    proposal = {
+        "schema_version": 1,
+        "contract": "tofu-pdf-v4-parent-freeze",
+        "status": "draft",
+        "freeze_id": "PENDING",
+        "frozen_at_utc": None,
+        "frozen_before_prediction": False,
+        "parents": {"graddiff": {"lr": 1e-6, "steps": 120}},
+        "unresolved": [],
+        "development_artifacts": [source],
+    }
+    validate_draft(proposal, deepcopy(proposal), input_path=selection)
+
+    unresolved = deepcopy(proposal)
+    unresolved["unresolved"] = ["graddiff"]
+    with pytest.raises(ApprovalError, match="unresolved"):
+        validate_draft(unresolved, unresolved, input_path=selection)
+
+    changed = deepcopy(proposal)
+    changed["parents"]["graddiff"]["steps"] = 240
+    with pytest.raises(ApprovalError, match="recomputation"):
+        validate_draft(proposal, changed, input_path=selection)

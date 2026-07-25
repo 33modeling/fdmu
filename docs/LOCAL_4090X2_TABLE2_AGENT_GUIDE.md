@@ -7,10 +7,17 @@
 
 ## 구현된 joint 개발 스윕
 
-Table 2 전체 state machine과 별도로, 1.5B `D_prot`에서 joint가 comparator
-전체보다 좋은 trial을 찾는 재개 가능한 실행기는 구현되어 있다.
+1.5B parent calibration, 검토 가능한 freeze proposal, 명시적 승인, 그리고
+`D_prot` joint sweep까지 구현되어 있다. YAML을 직접 편집하지 않는다.
 
 ```bash
+# 28개 calibration unit 실행 후 proposal 생성
+GPU_IDS=0,1 bash local_run/run_tofu_1p5b_calibration.sh
+
+# proposal의 unresolved가 0이고 수치/hash 검토가 끝난 뒤 명시적으로 승인
+bash local_run/approve_tofu_1p5b_parent_freeze.sh --approve
+
+# 24개 이하의 target-free joint sweep
 GPU_IDS=0,1 bash local_run/sweep_joint_1p5b_4090x2.sh
 ```
 
@@ -38,6 +45,17 @@ tail -f /rdata/minsoo3.kim/results/paper/tofu_qwen25_1p5b/joint_sweep/events.jso
 주기를 바꾸려면 `PROGRESS_INTERVAL_SECONDS=5`처럼 지정한다. 개별 unit 원본
 로그는 `trials/<trial>/logs/units/<unit>/attempt-*.log`, stage 검증 로그는
 `trials/<trial>/logs/verify.log`에 보존된다.
+
+Calibration 현황은 다음 경로에서 확인한다.
+
+```bash
+tail -f /rdata/minsoo3.kim/results/paper/tofu_qwen25_1p5b/parent_calibration/launcher_logs/current.log
+cat /rdata/minsoo3.kim/results/paper/tofu_qwen25_1p5b/parent_calibration/CALIBRATION_STATUS.json
+```
+
+Calibration 결과에 unresolved parent가 하나라도 있으면 승인 명령은 실패한다.
+그 경우 YAML을 손으로 채우지 않고 `PARENT_CALIBRATION_UNRESOLVED`를 유효한
+개발 결과로 보고한다.
 
 ## 0. Agent 실행 원칙
 

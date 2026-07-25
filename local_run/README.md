@@ -52,6 +52,9 @@ calibration/comparator/CI 전체를 대신하지 않으므로
 | `download_data.py` | TOFU + RWKU + MiniLM 인코더 다운로드 |
 | `download_muse.py` | MUSE-News / MUSE-Books 다운로드 |
 | `local_run.sh` | 새 PDF v4 config/manifest 검증 및 실행 |
+| `run_tofu_1p5b_calibration.sh` | 1.5B PDF-v4 parent calibration과 freeze proposal |
+| `approve_tofu_1p5b_parent_freeze.sh` | resolved proposal의 명시적 freeze 승인 |
+| `sweep_joint_1p5b_4090x2.sh` | 1.5B joint 개발 스윕과 실시간 진행 로그 |
 | `run_one.sh` | legacy 모델 1개 × 데이터셋 1개 게이트 실행 + 요약 |
 | `run_queue.sh` | run_one 여러 개를 순차 실행 (레인) |
 | `summarize.py` | table1/2.json → 마크다운 (열 1등 볼드+밑줄) |

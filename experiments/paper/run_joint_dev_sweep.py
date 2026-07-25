@@ -661,6 +661,7 @@ def _unit_complete(
     campaign_hash: str,
     evidence_hash: str,
     runtime_hash: str,
+    stage: str = "protection",
 ) -> bool:
     try:
         run_manifest = Path(str(unit["run_manifest"])).resolve()
@@ -672,7 +673,7 @@ def _unit_complete(
         }
         if (
             raw.get("contract") != "tofu-pdf-v4-unit-output"
-            or raw.get("stage") != "protection"
+            or raw.get("stage") != stage
             or raw.get("setting") != unit.get("setting", raw.get("setting"))
             or any(raw.get(name) != digest for name, digest in expected_hashes.items())
         ):
@@ -689,10 +690,17 @@ def _unit_complete(
             return False
         if set(outputs) != set(raw_outputs):
             return False
-        return all(
+        outputs_valid = all(
             _valid_artifact(raw_outputs[name], Path(str(path)))
             for name, path in outputs.items()
-        ) and _valid_artifact(raw.get("protection_diagnostics"))
+        )
+        if stage == "calibration":
+            diagnostics_valid = _valid_artifact(raw.get("fidelity_diagnostics"))
+        elif stage == "protection":
+            diagnostics_valid = _valid_artifact(raw.get("protection_diagnostics"))
+        else:
+            diagnostics_valid = True
+        return outputs_valid and diagnostics_valid
     except (KeyError, OSError, SweepError, TypeError, ValueError):
         return False
 
