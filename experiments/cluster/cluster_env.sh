@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Shared state plus per-host scratch paths for H100 cluster jobs.
 
-CLUSTER_REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+CLUSTER_REPO_ROOT="${FDMU_TEST_REPO_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
 CLUSTER_LOCAL_ENV="${CLUSTER_LOCAL_ENV:-$CLUSTER_REPO_ROOT/.cluster_env.local.sh}"
 _FDMU_GROUP_VOLUME_ROOT="${FDMU_TEST_GROUP_VOLUME_ROOT:-/group-volume}"
 readonly _FDMU_GROUP_VOLUME_ROOT
@@ -109,6 +109,27 @@ ensure_writable_dir() {
 
 ensure_writable_dir "shared state" "$CLUSTER_RUNS_ROOT" \
   || { return 2 2>/dev/null || exit 2; }
+
+# Keep every relative `runs/...` fallback on the shared volume too. A real
+# checkout directory is rejected before any cluster command can add files.
+REPO_RUNS="$CLUSTER_REPO_ROOT/runs"
+if [[ -L "$REPO_RUNS" ]]; then
+  if [[ "$(readlink -f "$REPO_RUNS")" != "$(readlink -f "$CLUSTER_RUNS_ROOT")" ]]; then
+    printf 'checkout runs symlink points outside cluster storage: %s -> %s\n' \
+      "$REPO_RUNS" "$(readlink -f "$REPO_RUNS")" >&2
+    return 2 2>/dev/null || exit 2
+  fi
+elif [[ -e "$REPO_RUNS" ]]; then
+  printf 'checkout runs is a real local directory and cluster execution is blocked: %s\n' \
+    "$REPO_RUNS" >&2
+  printf 'move it once with: bash experiments/cluster/migrate_runs_to_group_volume.sh\n' >&2
+  return 2 2>/dev/null || exit 2
+else
+  ln -s "$CLUSTER_RUNS_ROOT" "$REPO_RUNS" \
+    || { printf 'cannot link %s -> %s\n' "$REPO_RUNS" "$CLUSTER_RUNS_ROOT" >&2;
+         return 2 2>/dev/null || exit 2; }
+fi
+
 for writable_path in \
   "$CLUSTER_WORK_ROOT" \
   "$RSUS_DATASETS_CACHE" \
