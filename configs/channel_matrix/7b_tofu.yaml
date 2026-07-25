@@ -38,9 +38,6 @@ common:
   probe_dirs: 64
   probe_norm_eta: 3.0e-3
   probe_seed: 0
-  # Pre-cache this exact encoder on the H100 host before audit; audit fails
-  # rather than silently dropping the sentence-embedding control row.
-  sentence_encoder: sentence-transformers/all-MiniLM-L6-v2
 
 # Numerical validation only; it uses the disjoint development candidate pool
 # and the already frozen R/eta. It is not allowed to inspect realized damage.
@@ -170,7 +167,7 @@ audit:
   # These run before any score is opened but are excluded from the core
   # interaction and main seven objective columns.
   stress_objectives: [ga, idkdpo, npo, simnpo, gru, repnoise, circuit_breakers]
-  predictors: [grad_norm, fd_norm, knn_feature, knn_embed, knn_lexical, fd, random_rank]
+  predictors: [grad_norm, fd_norm, knn_feature, knn_lexical, fd, random_rank]
   objective_freeze: objective_freeze.yaml
   fidelity_certificates:
     qwen25_7b: runs/channel_matrix_7b/fidelity/qwen25_7b.json

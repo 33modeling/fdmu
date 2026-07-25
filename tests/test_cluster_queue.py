@@ -229,6 +229,14 @@ def test_make_units_rejects_disabled_model():
         make_units._enabled_models(cfg, {"llama31_8b"})
 
 
+@pytest.mark.parametrize("scale", ["7b", "14b"])
+def test_h100_tofu_configs_do_not_require_minilm(scale):
+    path = ROOT / f"configs/channel_matrix/{scale}_tofu.yaml"
+    cfg = yaml.safe_load(path.read_text(encoding="utf-8"))
+    assert "sentence_encoder" not in cfg["common"]
+    assert "knn_embed" not in cfg["audit"]["predictors"]
+
+
 def test_replicate_units_rebuild_exact_cli_with_seed_override():
     import make_replicate_units as mru
 

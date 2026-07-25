@@ -66,7 +66,6 @@ from pathlib import Path
 import sys
 
 import datasets
-import sentence_transformers
 import torch
 import transformers
 import yaml
@@ -85,7 +84,6 @@ if not torch.cuda.is_available():
     raise SystemExit("torch.cuda.is_available() is false")
 print(f"torch={torch.__version__} cuda={torch.version.cuda} device={torch.cuda.get_device_name(0)}")
 print(f"transformers={transformers.__version__} datasets={datasets.__version__}")
-print(f"sentence-transformers={sentence_transformers.__version__}")
 print("models=" + ",".join(model["id"] for model in models))
 PY
 }
@@ -96,13 +94,10 @@ prefetch() {
   unset HF_HUB_OFFLINE TRANSFORMERS_OFFLINE HF_DATASETS_OFFLINE
   python - <<'PY'
 from datasets import load_dataset
-from sentence_transformers import SentenceTransformer
 
 for subset in ("full", "forget10_perturbed"):
     split = load_dataset("locuslab/TOFU", subset)["train"]
     print(f"cached locuslab/TOFU/{subset}: {len(split)} rows")
-SentenceTransformer("sentence-transformers/all-MiniLM-L6-v2", device="cpu")
-print("cached sentence-transformers/all-MiniLM-L6-v2")
 PY
 }
 

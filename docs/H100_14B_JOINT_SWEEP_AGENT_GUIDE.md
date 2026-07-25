@@ -101,7 +101,7 @@ export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 1. Python 3.11 venv와 repository editable install
 2. CUDA-enabled PyTorch와 H100 compute capability
 3. 각 H100의 총/가용 메모리와 active process
-4. model/tokenizer/encoder/TOFU dataset의 offline load
+4. model/tokenizer/TOFU dataset의 offline load
 5. Qwen2.5-14B fp32 weight load
 6. last-8 down-projection block만 trainable인지 확인
 7. real-token forward/backward와 block optimizer step

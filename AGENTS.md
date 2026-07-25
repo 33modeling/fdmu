@@ -171,7 +171,7 @@ python experiments/paper/export_channel_matrix_raw.py \
   --campaign-config configs/channel_matrix/7b_tofu.yaml \
   --setting-id tofu_qwen25_7b \
   --prediction-alpha-freeze configs/channel_matrix/prediction_alpha_freeze_7b.yaml \
-  --control-predictor knn_embed \
+  --control-predictor knn_feature \
   --fidelity-certificate runs/channel_matrix_7b/fidelity/qwen25_7b.json \
   --out-dir results/paper/raw/tofu_qwen25_7b
 # 3) normalized ledger

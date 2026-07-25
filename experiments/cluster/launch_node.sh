@@ -59,6 +59,24 @@ if (( NGPU > DETECTED )); then
   exit 1
 fi
 
+# Refuse before launching anything when this node already serves another
+# queue. Queue-specific duplicate checks alone can otherwise double-book all
+# GPUs and make every newly spawned worker fail independently.
+CONFLICTS=()
+while IFS= read -r process; do
+  [[ -n "${process}" ]] || continue
+  if [[ "${process}" == *"experiments/cluster/worker.py --queue ${QUEUE} "* ]]; then
+    continue
+  fi
+  CONFLICTS+=("${process}")
+done < <(pgrep -af "experiments/cluster/worker.py --queue" || true)
+if (( ${#CONFLICTS[@]} > 0 )); then
+  printf 'refusing to double-book this node; workers for another queue are active:\n' >&2
+  printf '  %s\n' "${CONFLICTS[@]}" >&2
+  printf 'stop or move those workers before launching queue %s\n' "${QUEUE}" >&2
+  exit 2
+fi
+
 LOGDIR="runs/logs/cluster"
 mkdir -p "${LOGDIR}"
 python experiments/cluster/workqueue.py init --queue "${QUEUE}"
