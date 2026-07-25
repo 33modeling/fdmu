@@ -10,7 +10,7 @@ QUEUE="$CLUSTER_RUNS_ROOT/cluster_queue/wave1_14b"
 VENV="/group-volume/fdmu/.venv"
 PYTHON="$VENV/bin/python"
 MODEL_ID=qwen25_14b
-WORKER_COUNT=1
+WORKER_GPU=0
 LOG_DIR="$CLUSTER_RUNS_ROOT/logs/cluster"
 mkdir -p "$LOG_DIR"
 LOG="$LOG_DIR/launcher_${MODEL_ID}_$(hostname)_$(date -u '+%Y%m%dT%H%M%SZ').out"
@@ -30,6 +30,15 @@ on_error() {
   exit "$code"
 }
 trap on_error ERR
+
+if [[ ! -f "$VENV/bin/activate" ]]; then
+  echo "[ERROR] missing environment: $VENV/bin/activate" >&2
+  exit 1
+fi
+# Queue units invoke `python`; activate the pinned environment so they resolve
+# to /group-volume/fdmu/.venv/bin/python.
+# shellcheck disable=SC1090
+source "$VENV/bin/activate"
 
 stage() {
   STAGE="$1"
@@ -63,11 +72,10 @@ stage fidelity-contract-validation
 
 stage enqueue
 bash experiments/cluster/enqueue_table12.sh audit-14b
-stage worker-launch
-printf '[CONFIG] model=%s worker_count=%s queue=%s\n' \
-  "$MODEL_ID" "$WORKER_COUNT" "$QUEUE"
-bash experiments/cluster/launch_node.sh "$QUEUE" "$WORKER_COUNT"
-stage queue-monitor
-"$PYTHON" -u experiments/cluster/monitor_queue.py \
-  --queue "$QUEUE" --match "$MODEL_ID" \
-  --interval "${MONITOR_INTERVAL_SECONDS:-30}"
+stage worker-run
+printf '[CONFIG] model=%s worker_gpu=%s queue=%s python=%s\n' \
+  "$MODEL_ID" "$WORKER_GPU" "$QUEUE" "$PYTHON"
+"$PYTHON" -u experiments/cluster/worker.py \
+  --queue "$QUEUE" --gpu "$WORKER_GPU" --log-dir "$LOG_DIR"
+stage final-status
+"$PYTHON" experiments/cluster/workqueue.py status --brief --queue "$QUEUE"

@@ -209,8 +209,10 @@ bash experiments/cluster/run_tofu_7b_h100.sh
 bash experiments/cluster/run_tofu_14b_h100.sh
 ```
 
-7B 실행기는 빈 GPU 전체에 worker를 띄운다. 14B 실행기는 host RAM과 model
-load I/O 폭증을 피하기 위해 **GPU 0 worker 1개로 고정**한다. 14B unit 자체도
+7B 실행기는 빈 GPU 전체에 worker를 띄운다. 14B 실행기는 공통
+`launch_node.sh`를 거치지 않고 **GPU 0 worker 1개를 foreground로 직접
+실행**한다. 따라서 hostname/fleet assignment에 의존하지 않고 worker 실패가
+launcher 터미널과 로그에 그대로 표시된다. 14B unit 자체도
 `CUDA_VISIBLE_DEVICES=0`인 단일-GPU 실행이며 내부 8-GPU sharding을 사용하지
 않는다.
 
