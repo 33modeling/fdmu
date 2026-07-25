@@ -11,6 +11,10 @@ __pycache__/
 # Local experiment artifacts and checkpoints
 runs/
 checkpoints/
+# migrate_runs_to_group_volume.sh leaves <repo>/runs as a symlink; the
+# directory-only `runs/` pattern does not match a symlink, which dirtied the
+# cluster worktree and blocked enqueue_table12.sh's clean-tree guard.
+/runs
 
 # Local paper reference; do not publish
 KDD_UnlearningFail.pdf
