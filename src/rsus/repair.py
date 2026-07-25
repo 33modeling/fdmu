@@ -582,6 +582,7 @@ def _margin_report(
 
 
 SnapshotHook = Callable[[int], None]
+ExternalFeasibilityHook = Callable[[torch.nn.Module], bool]
 
 
 def run_repair(
@@ -594,12 +595,14 @@ def run_repair(
     utility_guard: Sequence[Example],
     cfg: RepairConfig,
     snapshot_hook: SnapshotHook | None = None,
+    external_feasibility: ExternalFeasibilityHook | None = None,
 ) -> RepairResult:
     """Run the PDF repair operator from the model's current entry state.
 
     ``snapshot_hook`` is called only after accepted updates on the frozen save
-    schedule.  Model calls made by the hook are included automatically in
-    ``B_tok``.  The hook must not catch :class:`TokenBudgetExhausted`.
+    schedule and once for an unsaved terminal accepted state. Model calls made
+    by the hook or ``external_feasibility`` are included automatically in
+    ``B_tok``. Both hooks must propagate :class:`TokenBudgetExhausted`.
     """
     cfg.validate()
     _validate_streams(protect, forget_guard, neutral, utility_guard)
@@ -669,8 +672,29 @@ def run_repair(
                     except TokenBudgetExhausted:
                         load_params_(selected, before)
                         raise
-                    if margins.feasible:
-                        n_accepted += 1
+                    try:
+                        external_ok = (
+                            external_feasibility(model)
+                            if margins.feasible
+                            and external_feasibility is not None
+                            else True
+                        )
+                    except Exception:
+                        load_params_(selected, before)
+                        raise
+                    if margins.feasible and external_ok:
+                        next_accepted = n_accepted + 1
+                        should_save = (
+                            next_accepted % cfg.save_every == 0
+                            or next_accepted == cfg.max_steps
+                        )
+                        if should_save and snapshot_hook is not None:
+                            try:
+                                snapshot_hook(next_accepted)
+                            except Exception:
+                                load_params_(selected, before)
+                                raise
+                        n_accepted = next_accepted
                         velocity = {name: value.clone() for name, value in direction.items()}
                         events.append(
                             RepairEvent(
@@ -687,9 +711,7 @@ def run_repair(
                             )
                         )
                         accepted = True
-                        if n_accepted % cfg.save_every == 0 or n_accepted == cfg.max_steps:
-                            if snapshot_hook is not None:
-                                snapshot_hook(n_accepted)
+                        if should_save:
                             saved_steps.append(n_accepted)
                         break
 
@@ -705,7 +727,11 @@ def run_repair(
                             active_count,
                             zero_count,
                             margins,
-                            "hard_guard_rejected",
+                            (
+                                "hard_guard_rejected"
+                                if not margins.feasible
+                                else "external_feasibility_rejected"
+                            ),
                             budget.used,
                         )
                     )
@@ -714,6 +740,14 @@ def run_repair(
                 if not accepted:
                     stopped_reason = "retry_exhausted"
                     break
+
+            if (
+                snapshot_hook is not None
+                and n_accepted > 0
+                and n_accepted not in saved_steps
+            ):
+                snapshot_hook(n_accepted)
+                saved_steps.append(n_accepted)
         except TokenBudgetExhausted:
             stopped_reason = "token_budget_exhausted"
             model.zero_grad(set_to_none=True)

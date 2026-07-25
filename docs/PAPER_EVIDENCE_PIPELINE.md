@@ -167,13 +167,15 @@ SHA-256.
 The core plan has `schema_version: 2`, bootstrap fields (`replicates`, `seed`,
 `alpha`, `top_q`, `cvar_q`), and a `units` list. Each unit contains its four
 keys, frozen prediction/protection selections, and exact
-`repeated_random_draws`, positive-damage tail size `tail_m`, and the dataset's
-frozen native metric orientation and non-inferiority margin. Selections cannot
-vary within a setting--parent row.
+`simple_control_name`, `repeated_random_draws`, positive-damage tail size
+`tail_m` (the frozen `Kp`), and the dataset's frozen native metric name,
+orientation, and non-inferiority margin. Selections cannot vary within a
+setting--parent row.
 
 Prediction JSONL has one row per candidate and unit: the four unit keys,
-`candidate_id`, semantic `group`, `s0`, `s1`, `joint`, `simple_control`, `damage`,
-`profile_valid`, `reached`, `trajectory_completed`, and the frozen selection.
+`candidate_id`, semantic `group`, `s0`, `s1`, `joint`, `simple_control`,
+`simple_control_name`, `damage`, `profile_valid`, `reached`,
+`trajectory_completed`, and the frozen selection.
 Every row identifies its parent checkpoint, and reached rows certify that it is
 the first checkpoint satisfying the direct criterion.
 The aggregator forms all correlations on identical candidates, averages seeds
@@ -185,8 +187,8 @@ Fidelity JSONL has exactly one row per unit with `f_rho`, `f_k`,
 `common_control_support`. These records feed only RQ2.
 
 Protection JSONL has one row per candidate, arm, and unit, with `damage`, the
-dataset-native `native_retention`, the frozen selection, and four explicit
-slacks: `direct_forget_margin`,
+dataset-native `native_retention`, `native_metric_name`, the frozen selection,
+exact `Kp`, and four explicit slacks: `direct_forget_margin`,
 `paraphrase_forget_margin`, `extraction_generation_margin`, and
 `utility_margin`. `feasible` must equal their conjunction; a missing metric or
 an inconsistent flag is rejected. Every row also carries the same
@@ -222,10 +224,22 @@ runs every command without a shell, checks first-reaching provenance, exact
 five-arm and repeated-random support, fidelity validity, and native retention,
 then writes consolidated JSONL and SHA-256 manifests. `--action verify` seals
 already-produced shards; `--action validate` checks only the frozen denominator.
-The calibration stage emits fidelity rows, `D_pred` emits prediction rows plus
-target-free `alpha_pred` selection inputs, and `D_prot` emits protection rows
-plus target-free `alpha_prot`/`Kp` selection inputs. The target stage emits the
-three claim-facing raw streams with their frozen selection mappings.
+The calibration stage emits fidelity rows plus sealed parent-selection inputs,
+`D_pred` emits prediction rows plus target-free `alpha_pred` selection inputs,
+and `D_prot` emits protection rows plus target-free `alpha_prot`/`Kp`
+selection inputs. The target stage emits the three claim-facing raw streams
+with their frozen selection mappings.
+Every stage also validates each unit's `run_manifest.json`, including raw,
+profile, score-independent split, diagnostic, config, parent-freeze, and
+target selection-freeze hashes before writing the sealed stage manifest.
+
+TOFU implements that producer in `experiments/paper/tofu_v4_unit.py`.
+`experiments/paper/run_tofu_table1.py --action run` executes the four stages in
+freeze order, creates the partial TOFU raw plan, aggregates the three target
+streams with `--core-only`, and writes the two-panel claim-bearing table to
+`paper/sections/generated/table1.tex`. `--action plan` creates exact manifests
+without opening target outcomes. The 1.5B parent freeze remains deliberately
+draft until complete `D_cal` artifacts exist.
 
 ### Schema-backed appendix artifacts
 

@@ -129,12 +129,10 @@ models:
 datasets:
   TOFU:
     adapter: tofu
-    # run_v4_stage.py only orchestrates and validates shards. This remains
-    # blocked until a real model runner emits all PDF-v4 raw records.
-    unit_producer: TBD_TOFU_PDF_V4_UNIT_PRODUCER
+    unit_producer: experiments/paper/tofu_v4_unit.py
     roster_unit: forget-author request_id
     native_metric:
-      name: retain_qa_accuracy
+      name: retain_answer_token_recall
       orientation: higher
       noninferiority_margin: 0.0
     # Exact, outcome-independent split of all forget10 authors.  Direct use of

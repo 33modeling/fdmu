@@ -115,8 +115,10 @@ class PlanUnit:
     key: UnitKey
     prediction_selection: Selection
     protection_selection: Selection
+    simple_control_name: str
     repeated_random_draws: tuple[str, ...]
     tail_m: int
+    native_metric_name: str
     native_metric_orientation: str
     native_noninferiority_margin: float
 
@@ -207,6 +209,9 @@ def raw_plan_from_mapping(raw: object) -> RawPlan:
             item.get("protection_selection"),
             where=f"{where}.protection_selection",
         )
+        simple_control_name = _required_text(
+            item, "simple_control_name", where=where
+        )
         raw_draws = item.get("repeated_random_draws")
         if not isinstance(raw_draws, list) or not raw_draws:
             raise EvidenceValidationError(
@@ -230,6 +235,7 @@ def raw_plan_from_mapping(raw: object) -> RawPlan:
             raise EvidenceValidationError(
                 f"{where}.native_noninferiority_margin must be non-negative"
             )
+        native_name = _required_text(item, "native_metric_name", where=where)
         native_orientation = item.get("native_metric_orientation")
         if native_orientation not in {"higher", "lower"}:
             raise EvidenceValidationError(
@@ -239,8 +245,10 @@ def raw_plan_from_mapping(raw: object) -> RawPlan:
             key=key,
             prediction_selection=prediction_selection,
             protection_selection=protection_selection,
+            simple_control_name=simple_control_name,
             repeated_random_draws=draws,
             tail_m=tail_m,
+            native_metric_name=native_name,
             native_metric_orientation=native_orientation,
             native_noninferiority_margin=native_margin,
         )
@@ -253,6 +261,7 @@ def raw_plan_from_mapping(raw: object) -> RawPlan:
     for row_key, row_units in by_row.items():
         prediction = {unit.prediction_selection for unit in row_units}
         protection = {unit.protection_selection for unit in row_units}
+        controls = {unit.simple_control_name for unit in row_units}
         if len(prediction) != 1:
             raise EvidenceValidationError(
                 f"planned row {row_key!r} changes frozen prediction selection"
@@ -260,6 +269,10 @@ def raw_plan_from_mapping(raw: object) -> RawPlan:
         if len(protection) != 1:
             raise EvidenceValidationError(
                 f"planned row {row_key!r} changes frozen protection selection"
+            )
+        if len(controls) != 1:
+            raise EvidenceValidationError(
+                f"planned row {row_key!r} changes frozen simple control"
             )
 
     raw_contracts = raw.get("artifact_contracts", {}) or {}
@@ -391,6 +404,8 @@ class ProtectionRecord:
     draw_complete: bool
     parent_checkpoint_id: str
     parent_checkpoint_first_reaching: bool
+    repair_updates: float
+    repair_rollbacks: float
 
     @property
     def forget_margin(self) -> float:
@@ -418,6 +433,8 @@ class ProtectionUnitData:
     common: bool
     min_forget_margin: float | None
     min_utility_margin: float | None
+    repair_updates: Mapping[str, float]
+    repair_rollbacks: Mapping[str, float]
 
 
 def _validate_frozen_selection(
@@ -452,6 +469,13 @@ def _parse_prediction_records(
             unit.prediction_selection,
             where=where,
         )
+        observed_control = _required_text(
+            raw, "simple_control_name", where=where
+        )
+        if observed_control != unit.simple_control_name:
+            raise EvidenceValidationError(
+                f"{where}.simple_control_name does not match the frozen unit plan"
+            )
         candidate_id = _required_text(raw, "candidate_id", where=where)
         identity = key, candidate_id
         if identity in seen:
@@ -553,6 +577,20 @@ def _parse_protection_records(
             unit.protection_selection,
             where=where,
         )
+        raw_kp = raw.get("Kp")
+        if isinstance(raw_kp, bool) or not isinstance(raw_kp, int):
+            raise EvidenceValidationError(f"{where}.Kp must be an integer")
+        if raw_kp != unit.tail_m:
+            raise EvidenceValidationError(
+                f"{where}.Kp does not match the frozen unit plan"
+            )
+        native_name = _required_text(
+            raw, "native_metric_name", where=where
+        )
+        if native_name != unit.native_metric_name:
+            raise EvidenceValidationError(
+                f"{where}.native_metric_name does not match the frozen unit plan"
+            )
         arm = _required_text(raw, "arm", where=where)
         if arm not in CLAIM_ARMS:
             raise EvidenceValidationError(f"{where}.arm is not one of {CLAIM_ARMS}")
@@ -629,6 +667,10 @@ def _parse_protection_records(
                 draw_complete=draw_complete,
                 parent_checkpoint_id=checkpoint_id,
                 parent_checkpoint_first_reaching=first_reaching,
+                repair_updates=_number(raw, "repair_updates", where=where),
+                repair_rollbacks=_number(
+                    raw, "repair_rollbacks", where=where
+                ),
             )
         )
 
@@ -699,6 +741,8 @@ def _normalize_protection_unit(
     random_draw_damages: dict[str, dict[str, float]] = {}
     native_retention: dict[str, float] = {}
     random_draw_native_retention: dict[str, float] = {}
+    repair_updates: dict[str, float] = {}
+    repair_rollbacks: dict[str, float] = {}
     candidates = tuple(sorted(support_sets[0])) if common else ()
     if common:
         for arm in NON_RANDOM_ARMS:
@@ -716,6 +760,21 @@ def _normalize_protection_unit(
                     f"within arm {arm!r}"
                 )
             native_retention[arm] = native_values.pop()
+            update_values = {
+                arm_draws[arm][None][candidate].repair_updates
+                for candidate in candidates
+            }
+            rollback_values = {
+                arm_draws[arm][None][candidate].repair_rollbacks
+                for candidate in candidates
+            }
+            if len(update_values) != 1 or len(rollback_values) != 1:
+                raise EvidenceValidationError(
+                    f"protection unit {unit.key!r} changes repair diagnostics "
+                    f"within arm {arm!r}"
+                )
+            repair_updates[arm] = update_values.pop()
+            repair_rollbacks[arm] = rollback_values.pop()
         damages["repeated_random"] = {
             candidate: sum(
                 arm_draws["repeated_random"][draw][candidate].damage
@@ -762,6 +821,8 @@ def _normalize_protection_unit(
         common=common,
         min_forget_margin=min((record.forget_margin for record in margins), default=None),
         min_utility_margin=min((record.utility_margin for record in margins), default=None),
+        repair_updates=repair_updates,
+        repair_rollbacks=repair_rollbacks,
     )
 
 
@@ -963,6 +1024,10 @@ def _protection_metrics(
         "mean": sum(joint) / len(joint),
         "cvar95": _tail_mean(joint, cvar_q=cvar_q),
     }
+    result["profile.mean"] = joint_outcomes["mean"]
+    result["profile.cvar95"] = joint_outcomes["cvar95"]
+    result["profile.repair_updates"] = unit.repair_updates["joint"]
+    result["profile.repair_rollbacks"] = unit.repair_rollbacks["joint"]
     for comparator in PROTECTION_COMPARATORS:
         if comparator == "repeated_random" and rng is not None:
             draws = sorted(unit.random_draw_damages)
@@ -981,6 +1046,9 @@ def _protection_metrics(
             "mean": sum(values) / len(values),
             "cvar95": _tail_mean(values, cvar_q=cvar_q),
         }
+        if comparator == "no_repair":
+            result["no_repair_absolute.mean"] = outcomes["mean"]
+            result["no_repair_absolute.cvar95"] = outcomes["cvar95"]
         for outcome in METRIC_OUTCOMES:
             result[f"{comparator}.{outcome}"] = (
                 joint_outcomes[outcome] - outcomes[outcome]
@@ -1146,6 +1214,12 @@ def _empty_rq3(*, selection_valid: bool = False) -> dict[str, object]:
         "common_support_units": 0,
         "min_forget_margin": None,
         "min_utility_margin": None,
+        "profile_mean": None,
+        "profile_cvar95": None,
+        "no_repair_mean": None,
+        "no_repair_cvar95": None,
+        "repair_updates": None,
+        "repair_rollbacks": None,
     }
 
 
@@ -1425,6 +1499,12 @@ def aggregate_raw_evidence(
                     for data in protection_common_data
                     if data.min_utility_margin is not None
                 ),
+                "profile_mean": point["profile.mean"],
+                "profile_cvar95": point["profile.cvar95"],
+                "no_repair_mean": point["no_repair_absolute.mean"],
+                "no_repair_cvar95": point["no_repair_absolute.cvar95"],
+                "repair_updates": point["profile.repair_updates"],
+                "repair_rollbacks": point["profile.repair_rollbacks"],
             }
 
         planned = len(row_units)
@@ -2077,6 +2157,9 @@ def build_raw_artifacts(
                         "seed": unit.key[3],
                         "prediction_selection": _selection_mapping(unit.prediction_selection),
                         "protection_selection": _selection_mapping(unit.protection_selection),
+                        "simple_control_name": unit.simple_control_name,
+                        "Kp": unit.tail_m,
+                        "native_metric_name": unit.native_metric_name,
                         "repeated_random_draws": list(unit.repeated_random_draws),
                     }
                     for unit in sorted(plan.units.values(), key=lambda value: value.key)

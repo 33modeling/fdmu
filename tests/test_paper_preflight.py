@@ -96,7 +96,12 @@ def _ready_contract(tmp_path: Path) -> tuple[Path, Path, Path]:
         "selections": {
             setting["id"]: {
                 parent: {
-                    "prediction": {"valid": True, "fallback": False, "alpha": 0.5},
+                    "prediction": {
+                        "valid": True,
+                        "fallback": False,
+                        "alpha": 0.5,
+                        "simple_control": "initial_nll",
+                    },
                     "protection": {
                         "valid": True,
                         "fallback": False,
@@ -214,10 +219,11 @@ def test_tbd_missing_adapter_and_unprovisioned_model_are_explicit(tmp_path):
         "reasons"
     ] == ["contains unresolved ids: TBD_WMDP_D_CAL_REQUEST_IDS"]
     assert "Llama-3.1-8B" in report["summary"]["unprovisioned_models"]
-    assert not report["unit_producers"]["TOFU"]["prediction"]["ready"]
-    assert report["unit_producers"]["TOFU"]["prediction"]["reasons"] == [
-        "dataset unit_producer is unresolved: TBD_TOFU_PDF_V4_UNIT_PRODUCER"
-    ]
+    assert report["unit_producers"]["TOFU"]["prediction"]["ready"]
+    assert report["unit_producers"]["TOFU"]["prediction"]["reasons"] == []
+    assert report["unit_producers"]["TOFU"]["prediction"]["entrypoint"] == (
+        "experiments/paper/tofu_v4_unit.py"
+    )
 
 
 def test_orchestrator_cannot_stand_in_for_a_model_output_producer(tmp_path):

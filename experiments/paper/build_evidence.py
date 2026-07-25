@@ -26,6 +26,7 @@ from rsus.evidence.rendering import (  # noqa: E402
     write_readiness_json,
     write_tex_macros,
 )
+from rsus.evidence.table1 import write_table1  # noqa: E402
 from rsus.evidence.schemas import (  # noqa: E402
     EvidenceLedger,
     EvidenceValidationError,
@@ -65,6 +66,21 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="return exit status 2 unless every registered table is data-ready",
     )
+    parser.add_argument(
+        "--table1-out",
+        default=None,
+        help="optional generated Table 1 LaTeX path",
+    )
+    parser.add_argument(
+        "--table1-setting",
+        default="tofu_qwen25_1p5b",
+        help="setting rendered into --table1-out",
+    )
+    parser.add_argument(
+        "--allow-incomplete-table1",
+        action="store_true",
+        help="render explicit dashes instead of failing on incomplete Table 1 rows",
+    )
     return parser
 
 
@@ -92,6 +108,15 @@ def main(argv: list[str] | None = None) -> int:
                 contract, ledger, report, _resolve_repo_path(args.paper_root)
             )
             print(f"wrote paper macros: {macro_path}")
+        if args.table1_out:
+            table_path = write_table1(
+                ledger,
+                report,
+                _resolve_repo_path(args.table1_out),
+                setting=args.table1_setting,
+                allow_incomplete=args.allow_incomplete_table1,
+            )
+            print(f"wrote Table 1: {table_path}")
         denominators = report["denominators"]
         print(
             "rows planned/attempted/completed: "

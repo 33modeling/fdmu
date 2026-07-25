@@ -66,8 +66,10 @@ def _selection_mapping(
         raise EvidenceValidationError(
             f"{name} must be exactly one of valid selection or declared fallback"
         )
-    if selection.valid and selection.alpha is None:
-        raise EvidenceValidationError(f"{name} valid selection requires alpha")
+    if selection.alpha is None:
+        raise EvidenceValidationError(
+            f"{name} requires a deployed alpha for valid or fallback execution"
+        )
     return {
         "valid": selection.valid,
         "fallback": selection.fallback,
@@ -227,7 +229,12 @@ def selection_template(evidence: Mapping[str, Any], campaign_id: str) -> dict[st
         "selections": {
             str(setting["id"]): {
                 str(parent): {
-                    "prediction": {"valid": False, "fallback": False, "alpha": None},
+                    "prediction": {
+                        "valid": False,
+                        "fallback": False,
+                        "alpha": None,
+                        "simple_control": None,
+                    },
                     "protection": {
                         "valid": False,
                         "fallback": False,
@@ -589,6 +596,14 @@ def build_plan(
                 selection.get("prediction"),
                 name=f"selections.{setting_id}.{parent}.prediction",
             )
+            raw_prediction = selection.get("prediction")
+            assert isinstance(raw_prediction, Mapping)
+            simple_control = raw_prediction.get("simple_control")
+            if not isinstance(simple_control, str) or not simple_control.strip():
+                raise EvidenceValidationError(
+                    f"selections.{setting_id}.{parent}.prediction.simple_control "
+                    "must be a frozen non-empty string"
+                )
             protection = _selection_mapping(
                 selection.get("protection"),
                 name=f"selections.{setting_id}.{parent}.protection",
@@ -611,7 +626,13 @@ def build_plan(
                     f"campaign dataset {setting['dataset']} lacks native_metric"
                 )
             native_margin = native_metric.get("noninferiority_margin")
+            native_name = native_metric.get("name")
             native_orientation = native_metric.get("orientation")
+            if not isinstance(native_name, str) or not native_name.strip():
+                raise EvidenceValidationError(
+                    f"campaign dataset {setting['dataset']} native_metric.name "
+                    "must be frozen"
+                )
             if native_orientation not in {"higher", "lower"}:
                 raise EvidenceValidationError(
                     f"campaign dataset {setting['dataset']} native_metric.orientation "
@@ -636,8 +657,10 @@ def build_plan(
                             "seed": seed,
                             "prediction_selection": prediction,
                             "protection_selection": protection,
+                            "simple_control_name": simple_control.strip(),
                             "repeated_random_draws": list(draws),
                             "tail_m": tail_m,
+                            "native_metric_name": native_name.strip(),
                             "native_metric_orientation": native_orientation,
                             "native_noninferiority_margin": float(native_margin),
                         }

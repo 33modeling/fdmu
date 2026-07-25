@@ -58,8 +58,18 @@ damage  d(x) = ℓ(x; θ_T) − ℓ(x; θ_0)      # 양수 = 손상
 
 논문 stage 오케스트레이터는 **`experiments/paper/run_v4_stage.py`**이며,
 정확한 `D_cal/D_pred/D_prot/target` roster와 unit command를 소비하고 후보
-원자료를 검증·봉인한다. 실제 모델 원자료를 생성하는 dataset unit producer는
-별도 계약이며 현재 TOFU용 producer도 아직 없다.
+원자료를 검증·봉인한다. TOFU 모델 원자료는
+**`experiments/paper/tofu_v4_unit.py`**가 만들며, Table 1 전체 workflow는
+다음 명령으로 manifest만 점검하거나 실제 순차 실행한다.
+
+```bash
+python experiments/paper/run_tofu_table1.py --action plan
+python experiments/paper/run_tofu_table1.py --action run
+```
+
+`run`은 `D_cal` parent freeze, `D_pred` prediction/control freeze,
+`D_prot` protection `(alpha,Kp)` freeze를 target 전에 기록한 뒤 target raw
+집계와 `paper/sections/generated/table1.tex` 렌더링까지 수행한다.
 `experiments/gate_1p5b/gate.py`는 단일 요청 진단 드라이버로 아래 산출물을 남긴다.
 
 ```

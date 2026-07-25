@@ -45,9 +45,13 @@ EXECUTOR_FLAGS = (
     "uses_adapter_registry",
     "consumes_exact_roster",
     "executes_unit_commands",
+    "validates_unit_run_manifests",
 )
 STAGE_EXECUTOR_FLAGS = {
-    "calibration": ("validates_fidelity_raw",),
+    "calibration": (
+        "validates_fidelity_raw",
+        "validates_parent_selection_inputs",
+    ),
     "prediction": (
         "validates_candidate_level_prediction_raw",
         "validates_selection_inputs",
@@ -72,6 +76,7 @@ UNIT_PRODUCER_FLAGS = (
 STAGE_UNIT_PRODUCER_FLAGS = {
     "calibration": (
         "emits_fidelity_raw",
+        "emits_parent_selection_inputs",
         "computes_exact_gradient_reference",
     ),
     "prediction": (
@@ -391,7 +396,7 @@ def _selection_freeze_report(
                             and isinstance(alpha, (int, float))
                             and 0.0 <= float(alpha) <= 1.0
                         )
-                        if not resolved or (valid is True and not numeric_alpha):
+                        if not resolved or not numeric_alpha:
                             reasons.append(f"selection freeze has unresolved {where}")
                             continue
                         if claim == "protection":
@@ -403,6 +408,14 @@ def _selection_freeze_report(
                             ):
                                 reasons.append(
                                     f"selection freeze has unresolved {where}.Kp"
+                                )
+                                continue
+                        else:
+                            simple_control = selection.get("simple_control")
+                            if not _nonempty_string(simple_control):
+                                reasons.append(
+                                    f"selection freeze has unresolved "
+                                    f"{where}.simple_control"
                                 )
                                 continue
                         completed += 1

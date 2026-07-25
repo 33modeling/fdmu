@@ -160,6 +160,38 @@ def _native_retention(row: Mapping[str, Any], *, where: str) -> float:
     return number
 
 
+def _repair_counts(
+    row: Mapping[str, Any], *, arm: str, where: str
+) -> tuple[float, float]:
+    if arm == "no_repair":
+        return 0.0, 0.0
+    metadata = row.get("trajectory_metadata")
+    repair = (
+        metadata.get("pdf_v4_repair")
+        if isinstance(metadata, Mapping)
+        else None
+    )
+    if not isinstance(repair, Mapping):
+        raise EvidenceValidationError(
+            f"{where} lacks PDF-v4 repair update/rollback provenance"
+        )
+    values = []
+    for field in ("n_accepted", "n_rejected"):
+        value = repair.get(field)
+        if (
+            isinstance(value, bool)
+            or not isinstance(value, (int, float))
+            or not math.isfinite(float(value))
+            or float(value) < 0.0
+        ):
+            raise EvidenceValidationError(
+                f"{where}.trajectory_metadata.pdf_v4_repair.{field} "
+                "must be finite and non-negative"
+            )
+        values.append(float(value))
+    return values[0], values[1]
+
+
 def export_records(
     plan: RawPlan,
     payloads: Iterable[Mapping[str, Any]],
@@ -277,6 +309,9 @@ def export_records(
                 damage, groups = _source_support(source_row, where=where)
                 native_retention = _native_retention(source_row, where=where)
                 slacks = _constraint_margins(source_row, where=where)
+                repair_updates, repair_rollbacks = _repair_counts(
+                    source_row, arm=arm, where=where
+                )
                 checkpoint = source_row.get("parent_checkpoint")
                 if not isinstance(checkpoint, Mapping):
                     raise EvidenceValidationError(f"{where} lacks parent checkpoint identity")
@@ -303,6 +338,8 @@ def export_records(
                         slacks,
                         source_row,
                         checkpoint_id,
+                        repair_updates,
+                        repair_rollbacks,
                     )
                 )
             if len(checkpoint_ids) != 1:
@@ -319,6 +356,8 @@ def export_records(
                 slacks,
                 source_row,
                 checkpoint_id,
+                repair_updates,
+                repair_rollbacks,
             ) in parsed_sources:
                 for candidate_id in sorted(damage):
                     record: dict[str, object] = {
@@ -329,6 +368,8 @@ def export_records(
                         "candidate_id": candidate_id,
                         "group": groups[candidate_id],
                         "arm": arm,
+                        "Kp": unit.tail_m,
+                        "native_metric_name": unit.native_metric_name,
                         "damage": damage[candidate_id],
                         "native_retention": native_retention,
                         "feasible": bool(source_row["feasible"]),
@@ -336,6 +377,8 @@ def export_records(
                         "paraphrase_forget_margin": slacks["paraphrase_forgetting"],
                         "extraction_generation_margin": slacks["extraction_generation"],
                         "utility_margin": slacks["utility"],
+                        "repair_updates": repair_updates,
+                        "repair_rollbacks": repair_rollbacks,
                         "parent_checkpoint_id": checkpoint_id,
                         "parent_checkpoint_first_reaching": True,
                         "protection_selection": selection,

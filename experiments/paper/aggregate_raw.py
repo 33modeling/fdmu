@@ -101,6 +101,11 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="optional existing ledger whose validated artifacts mapping is preserved",
     )
+    parser.add_argument(
+        "--core-only",
+        action="store_true",
+        help="aggregate RQ1/RQ2/RQ3 without requiring appendix artifact shards",
+    )
     return parser
 
 
@@ -132,7 +137,11 @@ def main(argv: list[str] | None = None) -> int:
         protection = read_raw_records(_path(path) for path in args.protection_raw)
         artifacts = dict(_artifact_mapping(args.artifacts_from))
         measurements = _measurement_inputs(args.artifact_raw)
-        if plan.artifact_contracts:
+        if args.core_only and measurements:
+            raise EvidenceValidationError(
+                "--core-only cannot be combined with --artifact-raw"
+            )
+        if plan.artifact_contracts and not args.core_only:
             artifact_dir = (
                 _path(args.artifact_dir)
                 if args.artifact_dir

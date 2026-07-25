@@ -317,6 +317,12 @@ class RQ3Evidence:
     common_support_units: int = 0
     min_forget_margin: float | None = None
     min_utility_margin: float | None = None
+    profile_mean: float | None = None
+    profile_cvar95: float | None = None
+    no_repair_mean: float | None = None
+    no_repair_cvar95: float | None = None
+    repair_updates: float | None = None
+    repair_rollbacks: float | None = None
 
     @classmethod
     def from_mapping(
@@ -402,6 +408,26 @@ class RQ3Evidence:
             min_utility_margin=_optional_number(
                 data.get("min_utility_margin"),
                 field_name=f"{name}.min_utility_margin",
+            ),
+            profile_mean=_optional_number(
+                data.get("profile_mean"), field_name=f"{name}.profile_mean"
+            ),
+            profile_cvar95=_optional_number(
+                data.get("profile_cvar95"), field_name=f"{name}.profile_cvar95"
+            ),
+            no_repair_mean=_optional_number(
+                data.get("no_repair_mean"), field_name=f"{name}.no_repair_mean"
+            ),
+            no_repair_cvar95=_optional_number(
+                data.get("no_repair_cvar95"),
+                field_name=f"{name}.no_repair_cvar95",
+            ),
+            repair_updates=_optional_number(
+                data.get("repair_updates"), field_name=f"{name}.repair_updates"
+            ),
+            repair_rollbacks=_optional_number(
+                data.get("repair_rollbacks"),
+                field_name=f"{name}.repair_rollbacks",
             ),
         )
 

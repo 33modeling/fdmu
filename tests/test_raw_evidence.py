@@ -53,8 +53,10 @@ def _plan(
                     "seed": seed,
                     "prediction_selection": _selection(0.4),
                     "protection_selection": _selection(0.6),
+                    "simple_control_name": "initial_nll",
                     "repeated_random_draws": ["d0", "d1"],
                     "tail_m": 2,
+                    "native_metric_name": "retain_answer_token_recall",
                     "native_metric_orientation": native_orientation,
                     "native_noninferiority_margin": 0.05,
                 }
@@ -82,6 +84,7 @@ def _prediction(request: str, seed: str = "1") -> list[dict]:
                 "s1": float(index % 3),
                 "joint": value,
                 "simple_control": -float((index + 1) % 3),
+                "simple_control_name": "initial_nll",
                 "damage": value,
                 "profile_valid": True,
                 "reached": True,
@@ -128,6 +131,8 @@ def _protection(request: str, seed: str = "1") -> list[dict]:
                     "candidate_id": f"c{index}",
                     "group": "g0" if index < 3 else "g1",
                     "arm": arm,
+                    "Kp": 2,
+                    "native_metric_name": "retain_answer_token_recall",
                     "damage": value + offset,
                     "native_retention": 0.9 if arm == "joint" else 0.8,
                     "feasible": True,
@@ -135,6 +140,8 @@ def _protection(request: str, seed: str = "1") -> list[dict]:
                     "paraphrase_forget_margin": 0.3,
                     "extraction_generation_margin": 0.25,
                     "utility_margin": 0.1,
+                    "repair_updates": 12 if arm == "joint" else 8,
+                    "repair_rollbacks": 2 if arm == "joint" else 1,
                     "parent_checkpoint_id": f"checkpoint-{request}-{seed}",
                     "parent_checkpoint_first_reaching": True,
                     "protection_selection": _selection(0.6),
@@ -151,6 +158,8 @@ def _protection(request: str, seed: str = "1") -> list[dict]:
                     "candidate_id": f"c{index}",
                     "group": "g0" if index < 3 else "g1",
                     "arm": "repeated_random",
+                    "Kp": 2,
+                    "native_metric_name": "retain_answer_token_recall",
                     "draw_id": draw,
                     "draw_complete": True,
                     "damage": value + offset,
@@ -160,6 +169,8 @@ def _protection(request: str, seed: str = "1") -> list[dict]:
                     "paraphrase_forget_margin": 0.3,
                     "extraction_generation_margin": 0.25,
                     "utility_margin": 0.1,
+                    "repair_updates": 8,
+                    "repair_rollbacks": 1,
                     "parent_checkpoint_id": f"checkpoint-{request}-{seed}",
                     "parent_checkpoint_first_reaching": True,
                     "protection_selection": _selection(0.6),
@@ -200,6 +211,10 @@ def test_full_raw_campaign_produces_schema_valid_paired_ledger():
     assert row.rq3.native_noninferiority["s1"].lower_bound > 0
     assert row.rq3.min_forget_margin == pytest.approx(0.2)
     assert row.rq3.min_utility_margin == pytest.approx(0.1)
+    assert row.rq3.profile_mean == pytest.approx(0.45)
+    assert row.rq3.no_repair_mean == pytest.approx(0.95)
+    assert row.rq3.repair_updates == pytest.approx(12)
+    assert row.rq3.repair_rollbacks == pytest.approx(2)
 
 
 def test_missing_planned_unit_stays_in_funnel_and_row_is_incomplete():
@@ -308,6 +323,16 @@ def test_unplanned_keys_and_changed_frozen_selection_are_rejected():
     with pytest.raises(EvidenceValidationError, match="frozen unit plan"):
         aggregate_raw_evidence(plan, changed, [])
 
+    changed_control = _prediction("r1")
+    changed_control[0]["simple_control_name"] = "answer_length"
+    with pytest.raises(EvidenceValidationError, match="simple_control_name"):
+        aggregate_raw_evidence(plan, changed_control, [])
+
+    changed_kp = _protection("r1")
+    changed_kp[0]["Kp"] = 40
+    with pytest.raises(EvidenceValidationError, match="Kp"):
+        aggregate_raw_evidence(plan, _prediction("r1"), changed_kp)
+
 
 def test_unequal_seed_counts_are_averaged_within_request_then_equally():
     plan = _plan(units=[("r1", "1"), ("r1", "2"), ("r2", "1")])
@@ -339,8 +364,10 @@ def test_cli_writes_incomplete_rows_when_raw_shards_are_absent(tmp_path):
                         "seed": "1",
                         "prediction_selection": _selection(),
                         "protection_selection": _selection(),
+                        "simple_control_name": "initial_nll",
                         "repeated_random_draws": ["d0"],
                         "tail_m": 2,
+                        "native_metric_name": "retain_answer_token_recall",
                         "native_metric_orientation": "higher",
                         "native_noninferiority_margin": 0.05,
                     }

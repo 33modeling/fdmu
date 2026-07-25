@@ -6,12 +6,12 @@ Normative specification: `KDD_UnlearningFail.pdf` (13 pages)
 
 ## Bottom line
 
-The active code contract is aligned with the July 24 PDF at the evidence and
-stage-validation boundaries. This remediation does not create experimental
-results and does not make the repository claim-ready. Preflight still fails
-because no dataset-specific paper unit producer exists, required model paths
-and the target-free selection freeze are absent, and several dataset adapters,
-request semantics, and exact rosters remain unresolved.
+The active code contract is aligned with the July 24 PDF through the TOFU
+model-execution, evidence, and Table 1 rendering boundaries. This remediation
+does not create experimental results and does not make the repository
+claim-ready. Preflight still fails where required model paths or target-free
+freezes are absent, and non-TOFU adapters, request semantics, or rosters remain
+unresolved.
 
 Legacy channel-matrix and Stage1/Stage2 programs remain diagnostic tools. They
 are not accepted as paper evidence. The paper path is:
@@ -37,7 +37,7 @@ campaign.yaml
 | `B_tok` repair budget and final feasibility gates | Implemented in v4 repair wrapper | `src/rsus/repair.py`, `src/rsus/generators/repaired.py` |
 | Exact `Kp`, selector-independent neutral data and score-independent folds | Implemented and frozen in manifests/plans | `src/rsus/partition.py`, `src/rsus/local_pdf_v4.py`, `experiments/paper/init_raw_plan.py` |
 | Exact `D_cal`, `D_pred`, `D_prot`, target roster consumption | Implemented in paper orchestrator; external rosters remain unresolved for some datasets | `experiments/paper/run_v4_stage.py`, `configs/paper/campaign.yaml` |
-| Dataset model execution into paper raw schemas | Missing, including TOFU; preflight now blocks on `PAPER_UNIT_CONTRACT` | `experiments/paper/preflight.py`, `configs/paper/campaign.yaml` |
+| Dataset model execution into paper raw schemas | Implemented for TOFU; other datasets remain blocked | `experiments/paper/tofu_v4_unit.py`, `configs/paper/campaign.yaml` |
 | RQ1 four lower bounds and at least 80% tail eligibility | Implemented in schema-v2 raw aggregation and decision gate | `src/rsus/evidence/raw.py`, `src/rsus/evidence/pdf_v4.py` |
 | RQ2 fidelity/add-value four-way IUT | Implemented | `src/rsus/evidence/raw.py`, `src/rsus/evidence/pdf_v4.py` |
 | RQ3 eight damage UCBs and four native-NI LBs | Implemented; native raw data is mandatory | `src/rsus/evidence/raw.py`, `src/rsus/evidence/pdf_v4.py` |
@@ -79,8 +79,14 @@ campaign.yaml
    alone as paper readiness.
 
 9. Stage orchestration and dataset model execution are now separate contracts.
-   `run_v4_stage.py` cannot satisfy `PAPER_UNIT_CONTRACT`, so validation code
-   can no longer masquerade as the missing TOFU raw producer.
+   `run_v4_stage.py` cannot satisfy `PAPER_UNIT_CONTRACT`; TOFU uses the real
+   model producer in `tofu_v4_unit.py`.
+
+10. TOFU now has a complete freeze-ordered workflow:
+    `run_tofu_table1.py` runs parent calibration, prediction/control selection,
+    protection selection, target execution, raw aggregation, and Table 1
+    rendering. Non-differentiable forgetting/native constraints participate in
+    tentative-update rollback through `external_feasibility`.
 
 ## Remaining blockers
 
@@ -88,20 +94,20 @@ These are real missing inputs or experiments, not code paths that may be
 silently substituted:
 
 - The configured `/group-volume/models/...` paths are absent on this host.
-- No dataset-specific paper unit producer exists. For TOFU this still requires
-  actual prediction/fidelity/protection raw emission, all PDF-v4 comparator
-  arms, and `retain_qa_accuracy`.
+- Non-TOFU datasets still need their own `PAPER_UNIT_CONTRACT` producers.
 - Llama-3.1-8B is not provisioned.
-- `configs/paper/selection_freeze.yaml` does not exist. It must be produced
-  from target-free development stages and include `alpha_pred`, `alpha_prot`,
-  and positive integer `Kp` for all 8 settings by 7 parents.
+- `configs/paper/selection_freeze.yaml` does not exist until the implemented
+  TOFU `D_pred`/`D_prot` selector has consumed real development artifacts.
+- `configs/paper/tofu_parent_freeze_1p5b.yaml` remains draft until real
+  `D_cal` results resolve all seven parents.
 - WMDP-bio/MMLU and PISTOL lack real adapters and exact request rosters.
 - MUSE needs defensible independent deletion-request semantics before its four
   rosters can be frozen.
 - WMDP, MUSE, and PISTOL roster placeholders remain unresolved.
 - No full GPU campaign has produced the candidate-level RQ1/RQ2/RQ3 shards.
-- The checked-in LaTeX predates the supplied PDF; the PDF source is not present
-  in this repository, so it could not be reconstructed by this code change.
+- The checked-in LaTeX predates the supplied PDF; the generated current-format
+  Table 1 is written separately because the PDF's matching source tree is not
+  present in this repository.
 
 ## Specification gaps
 

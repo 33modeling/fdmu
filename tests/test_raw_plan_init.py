@@ -37,7 +37,12 @@ def _contracts():
     )
     primary = "tofu_qwen25_1p5b"
     for parent in freeze["selections"][primary].values():
-        parent["prediction"] = {"valid": True, "fallback": False, "alpha": 0.4}
+        parent["prediction"] = {
+            "valid": True,
+            "fallback": False,
+            "alpha": 0.4,
+            "simple_control": "initial_nll",
+        }
         parent["protection"] = {
             "valid": True,
             "fallback": False,
@@ -134,7 +139,12 @@ def test_pending_freeze_and_unprovisioned_setting_fail_closed():
     # an executable denominator.
     llama = "tofu_llama31_8b"
     for parent in freeze["selections"][llama].values():
-        parent["prediction"] = {"valid": True, "fallback": False, "alpha": 0.5}
+        parent["prediction"] = {
+            "valid": True,
+            "fallback": False,
+            "alpha": 0.5,
+            "simple_control": "initial_nll",
+        }
         parent["protection"] = {
             "valid": True,
             "fallback": False,
@@ -170,7 +180,12 @@ def test_execution_protocol_rejects_cost_runner_drift():
 def test_fallback_selection_is_frozen_but_never_mislabelled_valid():
     evidence, campaign, freeze = _contracts()
     parent = freeze["selections"]["tofu_qwen25_1p5b"]["npo"]
-    parent["prediction"] = {"valid": False, "fallback": True, "alpha": 0.5}
+    parent["prediction"] = {
+        "valid": False,
+        "fallback": True,
+        "alpha": 0.5,
+        "simple_control": "initial_nll",
+    }
     plan = build_plan(
         evidence,
         campaign,

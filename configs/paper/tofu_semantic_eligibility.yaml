@@ -1,0 +1,10 @@
+schema_version: 1
+contract: tofu-pdf-v4-semantic-eligibility
+status: frozen_rule_review
+frozen_before_scoring: true
+rule_id: tofu-author-disjoint-exact-text-v1
+rules:
+  - candidate authors must be outside TOFU forget10 authors 180-199
+  - native utility authors must be outside every candidate and forget author
+  - exclude a candidate whose normalized QA text exactly duplicates a forget QA
+  - exclude duplicate normalized QA text after the lexicographically first candidate

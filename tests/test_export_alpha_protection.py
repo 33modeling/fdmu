@@ -37,8 +37,10 @@ def _plan(request: str = "tofu-a188"):
                     "seed": 2025,
                     "prediction_selection": _selection(0.4),
                     "protection_selection": _selection(0.5),
+                    "simple_control_name": "initial_nll",
                     "repeated_random_draws": ["rand-000", "rand-001"],
                     "tail_m": 1,
+                    "native_metric_name": "retain_answer_token_recall",
                     "native_metric_orientation": "higher",
                     "native_noninferiority_margin": 0.0,
                 }
@@ -84,6 +86,9 @@ def _row(selector: str, *, alpha=None, deployed=False, draw_id=None, offset=0.0)
             "selected_index": 0,
             "selected_step": 20,
             "trace": [{"index": 0, "step": 20, "slacks": slacks}],
+        },
+        "trajectory_metadata": {
+            "pdf_v4_repair": {"n_accepted": 10, "n_rejected": 2}
         },
     }
     if draw_id is not None:

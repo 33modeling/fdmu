@@ -1,0 +1,24 @@
+schema_version: 1
+contract: tofu-pdf-v4-parent-freeze
+freeze_id: PENDING-TOFU-1P5B-D-CAL
+status: draft
+frozen_before_prediction: false
+source_campaign: kdd27-paper-campaign-v1
+setting: tofu_qwen25_1p5b
+selection_rule: all-cell-reach-then-minimax-cvar-mean-damage-steps-lr
+parents:
+  graddiff: null
+  npo: null
+  simnpo: null
+  gru: null
+  rmu: null
+  repnoise: null
+  circuit_breakers: null
+unresolved:
+  - graddiff
+  - npo
+  - simnpo
+  - gru
+  - rmu
+  - repnoise
+  - circuit_breakers

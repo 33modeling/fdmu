@@ -198,13 +198,15 @@ def run_pdf_repair_from_reached(
     cfg: PDFRepairedConfig,
     engine_record: TrajectoryRecord,
     extra_eval=None,
+    external_feasibility=None,
     log=None,
 ) -> TrajectoryRecord:
     """Apply the PDF v4 repair from an already first-reaching parent state.
 
-    Every model call performed by ``extra_eval`` is charged automatically by
+    Every model call performed by ``extra_eval`` or
+    ``external_feasibility`` is charged automatically by
     :func:`rsus.repair.run_repair`; therefore non-differentiable checkpoint
-    evaluation remains inside the same processed-token budget.
+    and acceptance evaluation remains inside the same processed-token budget.
     """
     if engine_record.request_id != request.request_id:
         raise ValueError(
@@ -261,6 +263,7 @@ def run_pdf_repair_from_reached(
         utility_guard=utility_guard,
         cfg=cfg.repair,
         snapshot_hook=_snapshot,
+        external_feasibility=external_feasibility,
     )
     rec.cost = engine_record.cost.merge(result.cost)
     rec.metadata["pdf_v4_repair"] = {

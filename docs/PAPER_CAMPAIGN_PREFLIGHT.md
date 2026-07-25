@@ -91,9 +91,9 @@ following work is real:
 
 | Dataset/model | Current status |
 |---|---|
-| TOFU + Qwen2.5-7B | adapter/rosters/orchestrator ready; TOFU unit producer, model path, and selection freeze absent |
-| TOFU + Qwen2.5-1.5B | adapter/rosters/orchestrator ready; TOFU unit producer, model path, and selection freeze absent |
-| TOFU + Llama-3.1-8B | TOFU unit producer absent; fp32 declared, model not yet provisioned |
+| TOFU + Qwen2.5-7B | adapter/rosters/orchestrator/unit producer ready; model path and selection freeze absent |
+| TOFU + Qwen2.5-1.5B | adapter/rosters/orchestrator/unit producer ready; model path, parent freeze, and selection freeze absent |
+| TOFU + Llama-3.1-8B | unit producer contract exists; runtime/model is not provisioned |
 | WMDP-bio/MMLU | adapter and all four rosters unresolved |
 | MUSE-News | corpus adapter registered; independent target-request semantics and all four rosters unresolved |
 | MUSE-Books | corpus adapter registered; independent target-request semantics and all four rosters unresolved |
@@ -101,10 +101,10 @@ following work is real:
 | PISTOL | adapter and all four rosters unresolved |
 
 These are execution blockers, not placeholders that the evidence layer may
-bypass. The v4 stage orchestrator contract is ready, but no dataset-specific
-paper unit producer is currently implemented. Preflight reports zero runnable
-stages on this host and names producer, model, freeze, adapter, capability, and
-roster blockers separately.
+bypass. The v4 stage orchestrator and TOFU unit producer contracts are ready.
+Preflight still reports no runnable TOFU model stages on this host when the
+configured model paths or generated freezes are absent, and names each blocker
+separately.
 
 ## Adding a real adapter
 

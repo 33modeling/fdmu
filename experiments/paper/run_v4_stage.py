@@ -33,6 +33,8 @@ PAPER_STAGE_CONTRACT = {
     "uses_adapter_registry": True,
     "consumes_exact_roster": True,
     "executes_unit_commands": True,
+    "validates_unit_run_manifests": True,
+    "validates_parent_selection_inputs": True,
     "validates_selection_inputs": True,
     "validates_candidate_level_prediction_raw": True,
     "validates_fidelity_raw": True,
@@ -40,7 +42,7 @@ PAPER_STAGE_CONTRACT = {
 }
 
 STAGE_OUTPUTS = {
-    "calibration": ("fidelity_raw",),
+    "calibration": ("fidelity_raw", "parent_selection_inputs"),
     "prediction": ("prediction_raw", "selection_inputs"),
     "protection": ("protection_raw", "selection_inputs"),
     "target_evaluation": ("prediction_raw", "fidelity_raw", "protection_raw"),
@@ -122,20 +124,12 @@ def _validate_selection_mapping(
         raise StageContractError(
             f"{where}.{field} must resolve exactly one of valid/fallback"
         )
-    if valid and (
+    if (
         isinstance(alpha, bool)
         or not isinstance(alpha, (int, float))
         or not 0.0 <= float(alpha) <= 1.0
     ):
         raise StageContractError(f"{where}.{field}.alpha must be in [0, 1]")
-    if fallback and alpha is not None and (
-        isinstance(alpha, bool)
-        or not isinstance(alpha, (int, float))
-        or not 0.0 <= float(alpha) <= 1.0
-    ):
-        raise StageContractError(
-            f"{where}.{field}.alpha must be null or in [0, 1] for fallback"
-        )
 
 
 def _validate_identity(
@@ -173,6 +167,7 @@ def _validate_prediction(
         _text(row.get("group"), f"{where}.group")
         for field in ("s0", "s1", "joint", "simple_control", "damage"):
             _number(row, field, where)
+        _text(row.get("simple_control_name"), f"{where}.simple_control_name")
         _validate_selection_mapping(row, "prediction_selection", where)
         status = tuple(
             row.get(field)
@@ -211,6 +206,48 @@ def _validate_fidelity(
             raise StageContractError(f"fidelity_raw[0].{field} must be boolean")
 
 
+def _validate_parent_selection(
+    rows: list[dict[str, Any]], setting: str, key: tuple[str, str, str]
+) -> None:
+    seen: set[str] = set()
+    for index, row in enumerate(rows):
+        where = f"parent_selection_inputs[{index}]"
+        _validate_identity(row, setting=setting, key=key, where=where)
+        if row.get("campaign_phase") != "calibration":
+            raise StageContractError(
+                f"{where}.campaign_phase must be calibration"
+            )
+        candidate = row.get("candidate_setting")
+        if not isinstance(candidate, dict) or not candidate:
+            raise StageContractError(
+                f"{where}.candidate_setting must be a non-empty mapping"
+            )
+        candidate_key = json.dumps(
+            candidate, sort_keys=True, separators=(",", ":")
+        )
+        if candidate_key in seen:
+            raise StageContractError(
+                f"{where} duplicates a parent candidate setting"
+            )
+        seen.add(candidate_key)
+        if type(row.get("reached")) is not bool:
+            raise StageContractError(f"{where}.reached must be boolean")
+        forget_recall = _number(row, "forget_recall", where)
+        if not 0.0 <= forget_recall <= 1.0:
+            raise StageContractError(
+                f"{where}.forget_recall must be in [0, 1]"
+            )
+        for field in ("mean_damage", "cvar95_damage"):
+            _number(row, field, where)
+        step = row.get("step")
+        if isinstance(step, bool) or not isinstance(step, int) or step < 1:
+            raise StageContractError(f"{where}.step must be a positive integer")
+    if not seen:
+        raise StageContractError(
+            "parent_selection_inputs requires at least one candidate"
+        )
+
+
 def _validate_protection(
     rows: list[dict[str, Any]],
     setting: str,
@@ -226,6 +263,10 @@ def _validate_protection(
         arm = _text(row.get("arm"), f"{where}.arm")
         if arm not in CLAIM_ARMS:
             raise StageContractError(f"{where}.arm is not a PDF-v4 claim arm")
+        kp = row.get("Kp")
+        if isinstance(kp, bool) or not isinstance(kp, int) or kp < 1:
+            raise StageContractError(f"{where}.Kp must be a positive integer")
+        _text(row.get("native_metric_name"), f"{where}.native_metric_name")
         draw: str | None = None
         if arm == "repeated_random":
             draw = _text(row.get("draw_id"), f"{where}.draw_id")
@@ -246,6 +287,8 @@ def _validate_protection(
             "paraphrase_forget_margin",
             "extraction_generation_margin",
             "utility_margin",
+            "repair_updates",
+            "repair_rollbacks",
         ):
             _number(row, field, where)
         if type(row.get("feasible")) is not bool:
@@ -292,6 +335,10 @@ def _validate_selection(
             raise StageContractError(
                 "selection_inputs[0].alpha_pred must be in [0, 1]"
             )
+        if type(row.get("reached")) is not bool:
+            raise StageContractError(
+                "prediction selection_inputs[0].reached must be boolean"
+            )
     elif stage == "protection":
         if row.get("selection_kind") != "protection":
             raise StageContractError(
@@ -315,6 +362,119 @@ def _validate_selection(
 
 def _sha256(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def _load_json(path: Path, where: str) -> dict[str, Any]:
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as error:
+        raise StageContractError(f"cannot read {where} {path}: {error}") from error
+    if not isinstance(value, dict):
+        raise StageContractError(f"{where} must contain one JSON object")
+    return value
+
+
+def _validate_artifact_entry(
+    raw: object, *, where: str, expected_path: Path | None = None
+) -> dict[str, str]:
+    if not isinstance(raw, dict):
+        raise StageContractError(f"{where} must be an artifact mapping")
+    path = Path(_text(raw.get("path"), f"{where}.path")).resolve()
+    if expected_path is not None and path != expected_path.resolve():
+        raise StageContractError(f"{where}.path does not match the stage manifest")
+    digest = _text(raw.get("sha256"), f"{where}.sha256")
+    if len(digest) != 64 or not path.is_file() or _sha256(path) != digest:
+        raise StageContractError(f"{where} file/hash validation failed")
+    return {"path": str(path), "sha256": digest}
+
+
+def _validate_unit_run_manifest(
+    path: Path,
+    *,
+    campaign_id: object,
+    stage: str,
+    setting: str,
+    key: tuple[str, str, str],
+    outputs: Mapping[str, Path],
+    config_hashes: Mapping[str, str],
+) -> dict[str, Any]:
+    raw = _load_json(path, "unit run manifest")
+    if raw.get("schema_version") != 1:
+        raise StageContractError("unit run manifest schema_version must be 1")
+    if raw.get("contract") != "tofu-pdf-v4-unit-output":
+        raise StageContractError("unit run manifest contract is not TOFU PDF-v4")
+    if raw.get("campaign_id") != campaign_id or raw.get("stage") != stage:
+        raise StageContractError("unit run manifest campaign/stage mismatch")
+    for field, digest in config_hashes.items():
+        if raw.get(field) != digest:
+            raise StageContractError(
+                f"unit run manifest {field} does not match the stage config"
+            )
+    _validate_identity(
+        raw, setting=setting, key=key, where="unit run manifest"
+    )
+    raw_outputs = raw.get("outputs")
+    if not isinstance(raw_outputs, dict) or set(raw_outputs) != set(outputs):
+        raise StageContractError(
+            "unit run manifest output roster differs from its stage unit"
+        )
+    output_artifacts = {
+        kind: _validate_artifact_entry(
+            raw_outputs[kind],
+            where=f"unit run manifest.outputs.{kind}",
+            expected_path=output_path,
+        )
+        for kind, output_path in outputs.items()
+    }
+    profile = _validate_artifact_entry(
+        raw.get("profile_artifact"),
+        where="unit run manifest.profile_artifact",
+    )
+    stream = _validate_artifact_entry(
+        raw.get("score_independent_manifest"),
+        where="unit run manifest.score_independent_manifest",
+    )
+    if stage in {"calibration", "target_evaluation"}:
+        _validate_artifact_entry(
+            raw.get("fidelity_diagnostics"),
+            where="unit run manifest.fidelity_diagnostics",
+        )
+    if stage in {"protection", "target_evaluation"}:
+        _validate_artifact_entry(
+            raw.get("protection_diagnostics"),
+            where="unit run manifest.protection_diagnostics",
+        )
+    if stage == "target_evaluation":
+        _validate_artifact_entry(
+            raw.get("selection_freeze"),
+            where="unit run manifest.selection_freeze",
+        )
+    if stage != "calibration":
+        parent_freeze_path = Path(
+            _text(
+                raw.get("parent_freeze"),
+                "unit run manifest.parent_freeze",
+            )
+        ).resolve()
+        parent_freeze_digest = _text(
+            raw.get("parent_freeze_sha256"),
+            "unit run manifest.parent_freeze_sha256",
+        )
+        if (
+            not parent_freeze_path.is_file()
+            or len(parent_freeze_digest) != 64
+            or _sha256(parent_freeze_path) != parent_freeze_digest
+        ):
+            raise StageContractError(
+                "unit run manifest parent freeze file/hash validation failed"
+            )
+    return {
+        "path": str(path),
+        "sha256": _sha256(path),
+        "profile": profile,
+        "score_independent_manifest": stream,
+        "outputs": output_artifacts,
+    }
 
 
 def _write_jsonl(path: Path, rows: Iterable[Mapping[str, Any]]) -> None:
@@ -386,7 +546,12 @@ def _contracts(
     units = manifest.get("units")
     if not isinstance(units, list):
         raise StageContractError("stage manifest units must be a list")
-    expected = {(parent, request, seed) for parent in parents for request in requests for seed in seeds}
+    expected = {
+        (parent, request, seed)
+        for parent in parents
+        for request in requests
+        for seed in seeds
+    }
     observed: dict[tuple[str, str, str], dict[str, Any]] = {}
     for index, unit in enumerate(units):
         if not isinstance(unit, dict):
@@ -399,7 +564,13 @@ def _contracts(
         missing = sorted(expected - set(observed))
         extra = sorted(set(observed) - expected)
         raise StageContractError(f"stage unit roster mismatch; missing={missing}, extra={extra}")
-    return stage, setting_id, draws, STAGE_OUTPUTS[stage], [observed[key] for key in sorted(expected)]
+    return (
+        stage,
+        setting_id,
+        draws,
+        STAGE_OUTPUTS[stage],
+        [observed[key] for key in sorted(expected)],
+    )
 
 
 def execute(args: argparse.Namespace) -> Path:
@@ -409,12 +580,31 @@ def execute(args: argparse.Namespace) -> Path:
     campaign = _load_yaml(campaign_path)
     evidence = _load_yaml(evidence_path)
     manifest = _load_yaml(manifest_path)
+    runtime_path = _resolve(
+        _text(manifest.get("runtime_config"), "manifest.runtime_config"),
+        base=manifest_path.parent,
+    )
+    if not runtime_path.is_file():
+        raise StageContractError(
+            f"stage runtime config is missing: {runtime_path}"
+        )
+    config_hashes = {
+        "campaign_config_sha256": _sha256(campaign_path),
+        "evidence_config_sha256": _sha256(evidence_path),
+        "runtime_config_sha256": _sha256(runtime_path),
+    }
+    for field, digest in config_hashes.items():
+        if manifest.get(field) != digest:
+            raise StageContractError(
+                f"stage manifest {field} does not match its current config"
+            )
     stage, setting, draws, output_kinds, units = _contracts(campaign, evidence, manifest)
     if args.action == "validate":
         print(f"valid PDF-v4 stage manifest: {stage}/{setting}, units={len(units)}")
         return Path(args.output_dir).resolve()
 
     collected = {kind: [] for kind in output_kinds}
+    unit_manifests = []
     for index, unit in enumerate(units):
         key = _unit_key(unit, f"manifest.units[{index}]")
         command = unit.get("command")
@@ -431,18 +621,48 @@ def execute(args: argparse.Namespace) -> Path:
             raise StageContractError(
                 f"unit {key!r} outputs must be exactly {list(output_kinds)}"
             )
+        resolved_outputs: dict[str, Path] = {}
         for kind in output_kinds:
-            path = _resolve(_text(raw_outputs[kind], f"unit {key!r}.{kind}"), base=manifest_path.parent)
+            path = _resolve(
+                _text(raw_outputs[kind], f"unit {key!r}.{kind}"),
+                base=manifest_path.parent,
+            )
+            resolved_outputs[kind] = path
             rows = _records(path)
             if kind == "prediction_raw":
                 _validate_prediction(rows, setting, key)
             elif kind == "fidelity_raw":
                 _validate_fidelity(rows, setting, key)
+            elif kind == "parent_selection_inputs":
+                _validate_parent_selection(rows, setting, key)
             elif kind == "protection_raw":
                 _validate_protection(rows, setting, key, draws)
             else:
                 _validate_selection(rows, setting, key, stage)
             collected[kind].extend(rows)
+        run_manifest_path = _resolve(
+            _text(
+                unit.get("run_manifest"),
+                f"unit {key!r}.run_manifest",
+            ),
+            base=manifest_path.parent,
+        )
+        unit_manifests.append(
+            {
+                "parent": key[0],
+                "request": key[1],
+                "seed": key[2],
+                **_validate_unit_run_manifest(
+                    run_manifest_path,
+                    campaign_id=campaign.get("campaign_id"),
+                    stage=stage,
+                    setting=setting,
+                    key=key,
+                    outputs=resolved_outputs,
+                    config_hashes=config_hashes,
+                ),
+            }
+        )
 
     output_dir = Path(args.output_dir).resolve()
     artifacts: dict[str, dict[str, Any]] = {}
@@ -462,6 +682,7 @@ def execute(args: argparse.Namespace) -> Path:
         "setting": setting,
         "units": len(units),
         "source_manifest_sha256": _sha256(manifest_path),
+        "unit_manifests": unit_manifests,
         "artifacts": artifacts,
     }
     output_dir.mkdir(parents=True, exist_ok=True)

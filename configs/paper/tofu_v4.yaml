@@ -1,0 +1,105 @@
+schema_version: 1
+contract: kdd-unlearning-fail-tofu-pdf-v4
+status: executable
+
+settings:
+  tofu_qwen25_1p5b:
+    model: Qwen2.5-1.5B
+    channel_config: configs/channel_matrix/1p5b_tofu.yaml
+    channel_model_id: qwen25_1p5b
+    parent_freeze: configs/paper/tofu_parent_freeze_1p5b.yaml
+    sft:
+      lr: 1.0e-5
+      steps: 1200
+      target_loss: 0.8
+      eval_every: 100
+  tofu_qwen25_7b:
+    model: Qwen2.5-7B
+    channel_config: configs/channel_matrix/7b_tofu.yaml
+    channel_model_id: qwen25_7b
+    parent_freeze: configs/channel_matrix/objective_freeze.yaml
+    sft:
+      lr: 1.0e-5
+      steps: 400
+      target_loss: 0.8
+      eval_every: 100
+
+runtime:
+  device: cuda
+  dtype: float32
+  attn_impl: ""
+  trainable_scope: probe_block
+  block_last_n: 8
+  batch_size: 4
+  max_length: 256
+  sft_cache_root: runs/paper/tofu_v4/sft_cache
+
+candidate_design:
+  authors_per_request: 30
+  stage_author_ranges:
+    calibration: [0, 29]
+    prediction: [30, 69]
+    protection: [70, 109]
+    target_evaluation: [110, 149]
+  split:
+    audit_groups: 10
+    neutral_groups: 5
+    utility_groups: 5
+  semantic_eligibility: configs/paper/tofu_semantic_eligibility.yaml
+  native_utility_authors: [150, 179]
+  native_utility_examples_per_author: 4
+
+probe:
+  gradient_scorer: fd_norm
+  proximity_scorer: knn_feature
+  R: 64
+  eta: 3.0e-4
+  norm_eta: 3.0e-3
+  seed: 0
+  representation_k: 5
+  representation_layer: -1
+  representation_pooling: answer_mean
+  simple_controls:
+    - initial_nll
+    - answer_length
+    - knn_lexical
+    - knn_embed
+  sentence_encoder: sentence-transformers/all-MiniLM-L6-v2
+  alpha_grid: [0.0, 0.25, 0.5, 0.75, 1.0]
+
+parent:
+  recall_max: 0.10
+  checkpoint_every: 10
+  calibration_mean_damage_max: 2.0
+  calibration_cvar95_damage_max: 8.0
+
+protection:
+  Kp_grid: [20, 40, 80]
+  repair:
+    step_size: 3.0e-5
+    beta: 1.0
+    momentum: 0.0
+    max_steps: 120
+    batch_size: 4
+    m_ref: 4
+    ridge_lambda: 1.0e-4
+    kappa_tok: 0.0
+    kappa_ex: 0.0
+    epsilon_tok: 0.0
+    epsilon_ex: 0.0
+    max_retries: 3
+    retry_shrink: 0.5
+    token_budget: 20000000
+    save_every: 10
+    constraint_reduction: per_token_and_per_example
+  final_constraints:
+    direct_recall_max: 0.10
+    paraphrase_recall_max: 0.10
+    extraction_generation_max: 0.10
+    native_utility_fraction_min: 0.90
+
+selection:
+  prediction_min_reached_requests: 2
+  fallback_alpha: 0.5
+  fallback_control: initial_nll
+  fallback_Kp: 40
