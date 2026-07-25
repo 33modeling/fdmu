@@ -14,6 +14,7 @@ from experiments.paper.approve_parent_freeze import (
 )
 from experiments.paper.run_joint_dev_sweep import (
     SweepError,
+    _absolute_executable,
     _unit_complete,
     build_exhaustion_report,
     candidate_score,
@@ -24,6 +25,20 @@ from experiments.paper.run_joint_dev_sweep import (
 
 
 DRAWS = ["rand-000", "rand-001"]
+
+
+def test_executable_path_keeps_virtualenv_symlink(tmp_path):
+    base_python = tmp_path / "base-python"
+    base_python.write_text("#!/bin/sh\n", encoding="utf-8")
+    venv_python = tmp_path / ".venv/bin/python"
+    venv_python.parent.mkdir(parents=True)
+    venv_python.symlink_to(base_python)
+
+    resolved = _absolute_executable(".venv/bin/python", base=tmp_path)
+
+    assert resolved == venv_python
+    assert resolved.is_symlink()
+    assert resolved != base_python.resolve()
 
 
 def _arm(name, mean, cvar, *, feasible=True, draw=None):

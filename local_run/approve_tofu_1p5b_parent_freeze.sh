@@ -17,6 +17,8 @@ if [[ ! -x "$PYTHON" ]]; then
   exit 2
 fi
 
+bash local_run/ensure_4090_yaml.sh
+
 mkdir -p "$(dirname "$APPROVAL_LOG")"
 exec > >(tee -a "$APPROVAL_LOG") 2>&1
 printf '[%s] parent freeze approval requested\n' "$(date -u '+%FT%TZ')"

@@ -68,6 +68,12 @@ GPU_IDS=0,1 bash local_run/run_tofu_1p5b_4090x2.sh
 ```
 
 가상환경은 레포의 `.venv`를 사용하며 세 단계가 같은 Python을 사용한다.
+`yaml` import가 실패하면 실행기가 `PyYAML`을 강제 재설치하고 Python,
+`site-packages`, 설치 위치를 로그에 출력한다. 이 점검만 따로 실행하려면:
+
+```bash
+bash local_run/ensure_4090_yaml.sh
+```
 
 ## Legacy 실행 예시
 ```bash

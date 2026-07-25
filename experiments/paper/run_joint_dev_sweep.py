@@ -120,6 +120,15 @@ def _resolve(value: str | Path, *, base: Path = ROOT) -> Path:
     return path.resolve() if path.is_absolute() else (base / path).resolve()
 
 
+def _absolute_executable(value: str | Path, *, base: Path = ROOT) -> Path:
+    """Make an executable path absolute without dereferencing a venv symlink."""
+    expanded = os.path.expanduser(os.path.expandvars(str(value)))
+    path = Path(expanded)
+    if not path.is_absolute():
+        path = base / path
+    return Path(os.path.abspath(path))
+
+
 def _finite(value: object, name: str) -> float:
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         raise SweepError(f"{name} must be numeric")
@@ -1140,7 +1149,7 @@ def run(args: argparse.Namespace) -> int:
     campaign_path = _resolve(spec["paths"]["campaign"])
     evidence_path = _resolve(spec["paths"]["evidence"])
     runtime_source = _resolve(spec["paths"]["runtime"])
-    python = _resolve(spec["paths"]["python"])
+    python = _absolute_executable(spec["paths"]["python"])
     output_root = _resolve(spec["paths"]["output_root"])
     _status(
         f"CONFIG setting={spec['setting']} trials={len(spec['trials'])} "

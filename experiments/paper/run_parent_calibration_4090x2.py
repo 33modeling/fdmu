@@ -17,6 +17,7 @@ sys.path.insert(0, str(ROOT))
 from experiments.paper.init_v4_stage import build_manifest  # noqa: E402
 from experiments.paper.run_joint_dev_sweep import (  # noqa: E402
     _EventLog,
+    _absolute_executable,
     _atomic_json,
     _environment_snapshot,
     _load_yaml,
@@ -116,7 +117,7 @@ def run(args: argparse.Namespace) -> int:
     campaign_source = args.campaign.resolve()
     evidence_source = args.evidence.resolve()
     runtime_source = args.runtime.resolve()
-    python = args.python.resolve()
+    python = _absolute_executable(args.python)
     model_source = args.model_source.resolve()
     output_root = args.output_root.resolve()
     sft_cache_root = args.sft_cache_root.resolve()

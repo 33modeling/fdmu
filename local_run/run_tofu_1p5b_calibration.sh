@@ -35,9 +35,7 @@ if [[ ! -x "$PYTHON" ]]; then
 elif ! "$PYTHON" -c 'import torch, transformers, datasets, yaml' >/dev/null 2>&1; then
   "$PYTHON" -m pip install -e ".[dev]" "datasets>=2.19" "PyYAML>=6.0"
 fi
-if ! "$PYTHON" -c 'import yaml' >/dev/null 2>&1; then
-  "$PYTHON" -m pip install --no-cache-dir --upgrade "PyYAML>=6.0"
-fi
+bash local_run/ensure_4090_yaml.sh
 "$PYTHON" -c 'import datasets, site, sys, torch, transformers, yaml; print(
     f"[deps] python={sys.executable} prefix={sys.prefix} "
     f"site={site.getsitepackages()} yaml_file={yaml.__file__} "
