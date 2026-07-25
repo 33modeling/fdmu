@@ -167,9 +167,17 @@ append-only 큐가 거부하고 스크립트는 "already enqueued"로 알려준�
 bash experiments/cluster/enqueue_table12.sh              # status (기본)
 bash experiments/cluster/enqueue_table12.sh audit-7b     # 7B audit + alpha → wave2
 bash experiments/cluster/enqueue_table12.sh audit-14b    # 14B audit + alpha → wave1_14b
+bash experiments/cluster/enqueue_table12.sh audit-7b14b  # 7B + 14B → 단일 공유 큐
 bash experiments/cluster/enqueue_table12.sh wmdp         # WMDP fidelity+calibration → wave_wmdp
 bash experiments/cluster/enqueue_table12.sh llama        # Llama-8B fidelity+calibration → wave_llama
 bash experiments/cluster/enqueue_table12.sh rwku-audit   # RWKU audit → wave_rwku
+```
+
+7B와 14B TOFU를 한 H100 노드의 단일 큐로 실행하려면 다음 한 줄을 사용한다.
+중복 unit id는 다시 적재되지 않으며 빈 GPU마다 워커 하나가 시작된다.
+
+```bash
+bash experiments/cluster/run_tofu_7b14b_h100.sh
 ```
 
 - `status`: wave2 / wave1_14b / wave_wmdp / wave_llama / wave3_alpha /

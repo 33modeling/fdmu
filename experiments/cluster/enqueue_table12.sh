@@ -8,6 +8,7 @@ set -euo pipefail
 #   bash experiments/cluster/enqueue_table12.sh [status]     per-queue overview (default)
 #   bash experiments/cluster/enqueue_table12.sh audit-7b     7B TOFU audit (+alpha) -> wave2
 #   bash experiments/cluster/enqueue_table12.sh audit-14b    14B TOFU audit (+alpha) -> wave1_14b
+#   bash experiments/cluster/enqueue_table12.sh audit-7b14b  7B + 14B TOFU -> one shared queue
 #   bash experiments/cluster/enqueue_table12.sh wmdp         WMDP fidelity+calibration -> wave_wmdp
 #   bash experiments/cluster/enqueue_table12.sh wmdp-14b     WMDP-14B fidelity+calibration -> wave_wmdp14b
 #   bash experiments/cluster/enqueue_table12.sh llama        Llama-8B fidelity+calibration -> wave_llama
@@ -39,7 +40,7 @@ source "${VENV}/bin/activate"
 export HF_HOME="${HF_HOME:-/group-volume/data/hf_home}"
 
 CFG_DIR="configs/channel_matrix"
-STATUS_QUEUES=(wave1 wave2 wave1_14b wave_wmdp wave_wmdp14b wave_llama wave_rwku)
+STATUS_QUEUES=(wave1 wave2 wave1_14b wave_tofu_7b14b wave_wmdp wave_wmdp14b wave_llama wave_rwku)
 
 log()  { echo "[enqueue_table12] $*"; }
 die()  { echo "[enqueue_table12] ERROR: $*" >&2; exit 1; }
@@ -171,6 +172,26 @@ case "${cmd}" in
     post_enqueue_notes "${queue}"
     ;;
 
+  audit-7b14b)
+    require_clean_tree
+    queue="${H100_7B14B_QUEUE:-runs/cluster_queue/wave_tofu_7b14b}"
+    for scale in 7b 14b; do
+      cfg="${CFG_DIR}/${scale}_tofu.yaml"
+      require_config "${cfg}"
+      require_frozen "$(freeze_path_of "${cfg}" objective_freeze)" "${scale} audit"
+      enqueue_phase "${scale} TOFU audit" "${queue}" "${cfg}" audit
+      alpha_freeze="$(freeze_path_of "${cfg}" alpha_freeze)"
+      if [[ -f "${alpha_freeze}" ]] && freeze_is_frozen "${alpha_freeze}"; then
+        log "${scale} alpha freeze is frozen -> enqueueing alpha-audit."
+        enqueue_phase "${scale} alpha-audit" "${queue}" "${cfg}" alpha-audit
+      else
+        log "${scale} alpha freeze is draft -> enqueueing alpha-development."
+        enqueue_phase "${scale} alpha-development" "${queue}" "${cfg}" alpha-development
+      fi
+    done
+    post_enqueue_notes "${queue}"
+    ;;
+
   wmdp)
     cfg="${CFG_DIR}/wmdp_7b.yaml"
     require_config "${cfg}"
@@ -220,6 +241,6 @@ case "${cmd}" in
     ;;
 
   *)
-    die "unknown subcommand '${cmd}' (expected: status | audit-7b | audit-14b | wmdp | wmdp-14b | llama | rwku-audit)"
+    die "unknown subcommand '${cmd}' (expected: status | audit-7b | audit-14b | audit-7b14b | wmdp | wmdp-14b | llama | rwku-audit)"
     ;;
 esac
