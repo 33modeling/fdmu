@@ -18,9 +18,12 @@ joint, s0, s1, no_repair, repeated_random x 5
 한다.
 
 1. `joint.metrics.feasible == true`
-2. `joint.mean_damage < comparator.mean_damage`
-3. `joint.cvar95_damage < comparator.cvar95_damage`
-4. 2와 3을 `s0`, `s1`, `no_repair`, 반복 난수의 모든 draw에 각각 적용
+2. comparator가 infeasible이면 제약 우선 순위로 joint 승리
+3. comparator도 feasible이면
+   `joint.mean_damage < comparator.mean_damage`
+4. comparator도 feasible이면
+   `joint.cvar95_damage < comparator.cvar95_damage`
+5. 2--4를 `s0`, `s1`, `no_repair`, 반복 난수의 모든 draw에 각각 적용
 
 스윕 전체 종료 조건은 다음 두 그룹에서 각각 한 parent 이상이 모든 셀을
 통과하는 것이다.
@@ -194,7 +197,10 @@ target 실행은 자동으로 이어가지 않는다.
 - `HUMAN_FREEZE_REQUIRED`: parent freeze를 검토할 때까지 정지
 - OOM: 마지막 성공 allocation과 peak memory를 기록하고 정지
 - unit failure: 해당 attempt log를 보존하고 다음 trial로 넘어가지 않음
-- `SWEEP_EXHAUSTED`: D_prot 결과만 보고 새 trial을 목록 끝에 추가
+- `NO_JOINT_DOMINANCE` (exit 3): 모든 선언 trial이 끝났지만 성공 조건이
+  없으므로 failure report를 남기고 종료
+- `PAUSED_BUDGET_LIMIT` (exit 5): `--max-trials` 제한으로 일부만 실행한
+  상태이며 결론이 아님
 - target 파일이 controller 입력에 등장함: 즉시 실패
 
 스윕이 끝났다는 보고에는 passing parent, 모든 셀 수, trial hash,

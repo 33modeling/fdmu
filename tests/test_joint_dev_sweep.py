@@ -8,6 +8,8 @@ import yaml
 
 from experiments.paper.run_joint_dev_sweep import (
     SweepError,
+    build_exhaustion_report,
+    candidate_score,
     evaluate_cell,
     evaluate_trial,
     validate_spec,
@@ -76,6 +78,10 @@ def _spec():
                 }
             },
         },
+        "budget": {
+            "maximum_trials": 1,
+            "run_all_declared_trials": True,
+        },
         "trials": [
             {
                 "id": "baseline",
@@ -107,6 +113,13 @@ def test_spec_rejects_unreviewed_repair_keys():
         validate_spec(bad)
 
 
+def test_spec_requires_an_explicit_complete_trial_budget():
+    bad = _spec()
+    bad["budget"]["maximum_trials"] = 2
+    with pytest.raises(SweepError, match="maximum_trials"):
+        validate_spec(bad)
+
+
 def test_cell_requires_feasible_joint_and_both_damage_wins():
     result = evaluate_cell(
         _diagnostic(),
@@ -115,6 +128,8 @@ def test_cell_requires_feasible_joint_and_both_damage_wins():
         cvar_margin=0.0,
     )
     assert result["passed"]
+    assert result["comparisons"][0]["mean_advantage"] > 0.0
+    assert result["comparisons"][0]["cvar95_advantage"] > 0.0
 
     infeasible = _diagnostic()
     infeasible["arms"][0]["metrics"]["feasible"] = False
@@ -133,6 +148,20 @@ def test_cell_requires_feasible_joint_and_both_damage_wins():
         mean_margin=0.0,
         cvar_margin=0.0,
     )["passed"]
+
+    infeasible_competitor = _diagnostic()
+    infeasible_competitor["arms"][1]["metrics"]["feasible"] = False
+    infeasible_competitor["arms"][1]["mean_damage"] = 0.1
+    infeasible_competitor["arms"][1]["cvar95_damage"] = 0.1
+    constrained = evaluate_cell(
+        infeasible_competitor,
+        expected_draws=DRAWS,
+        mean_margin=0.0,
+        cvar_margin=0.0,
+    )
+    assert constrained["passed"]
+    assert constrained["comparisons"][0]["competitor_feasible"] is False
+    assert constrained["comparisons"][0]["joint_wins_constrained"] is True
 
 
 def test_cell_rejects_missing_random_draw():
@@ -182,6 +211,48 @@ def test_trial_requires_every_cell_and_each_parent_group():
     )
     assert not failed["passed"]
     assert not failed["parents"]["rmu"]["passed"]
+
+    failed.update({"trial_id": "failed", "trial_dir": "/tmp/failed"})
+    score = candidate_score(failed)
+    assert score["cells_passed"] == 7
+    assert score["blocking_count"] >= 1
+
+
+def test_exhaustion_report_selects_the_closest_failed_trial():
+    stop = validate_spec(_spec())["stop"]
+    near = evaluate_trial(
+        [_diagnostic()],
+        parents=["graddiff"],
+        requests=["tofu-a184"],
+        seeds=[2025],
+        expected_draws=DRAWS,
+        stop=stop,
+    )
+    near["cells"]["graddiff/tofu-a184/seed-2025"]["joint_feasible"] = False
+    near["passed"] = False
+    near.update({"trial_id": "near", "trial_dir": "/tmp/near"})
+
+    far_diagnostic = _diagnostic()
+    far_diagnostic["arms"][0]["mean_damage"] = 10.0
+    far_diagnostic["arms"][0]["cvar95_damage"] = 10.0
+    far = evaluate_trial(
+        [far_diagnostic],
+        parents=["graddiff"],
+        requests=["tofu-a184"],
+        seeds=[2025],
+        expected_draws=DRAWS,
+        stop=stop,
+    )
+    far.update({"trial_id": "far", "trial_dir": "/tmp/far"})
+    report = build_exhaustion_report(
+        [far, near],
+        setting="tofu_qwen25_1p5b",
+        spec_sha256="a" * 64,
+    )
+    assert report["status"] == "no_joint_dominance"
+    assert report["exit_code"] == 3
+    assert report["closest_candidate"]["trial_id"] == "near"
+    assert report["target_used"] is False
 
 
 def test_paper_runtime_registers_the_14b_scale_setting():

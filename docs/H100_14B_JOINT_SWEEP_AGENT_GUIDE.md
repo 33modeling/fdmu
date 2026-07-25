@@ -43,8 +43,10 @@ parallel units: number of free H100s
 joint, s0, s1, no_repair, repeated_random x 5
 ```
 
-모든 `D_prot request x seed` 셀에서 joint가 feasible이고 각 comparator보다
-mean damage와 CVaR damage가 모두 엄격히 낮아야 해당 parent가 통과한다.
+모든 `D_prot request x seed` 셀에서 joint가 feasible이어야 한다. Infeasible
+comparator는 제약 우선 순위에서 탈락하고, comparator도 feasible일 때는
+joint의 mean damage와 CVaR damage가 모두 엄격히 낮아야 해당 parent가
+통과한다.
 최종 종료에는 아래 두 그룹에서 각각 하나 이상의 passing parent가 필요하다.
 
 ```text
@@ -182,9 +184,11 @@ development recommendation이며 `status: draft`,
 prospective selection freeze를 커밋한다. 그 다음 별도 명령으로 target stage와
 Table 2/LaTeX 생성을 실행한다.
 
-## 8. SWEEP_EXHAUSTED 처리
+## 8. NO_JOINT_DOMINANCE 처리
 
-사전 선언한 trial이 모두 실패하면 controller는 exit code 3으로 종료한다.
+사전 선언한 trial이 모두 실패하면 controller는 `NO_JOINT_DOMINANCE`,
+exit code 3으로 로그와 failure report를 남기고 종료한다. 이 결과도 유효한
+부정적 실험 결과이며 무한히 trial을 생성하지 않는다.
 에이전트는 다음 절차만 허용된다.
 
 1. `joint_comparison.json`에서 D_prot 실패 셀과 comparator를 요약

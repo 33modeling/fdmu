@@ -16,9 +16,15 @@ GPU_IDS=0,1 bash local_run/sweep_joint_1p5b_4090x2.sh
 
 설정은 `configs/local/joint_sweep_1p5b_4090x2.yaml`, controller는
 `experiments/paper/run_joint_dev_sweep.py`다. joint가 feasible이고 모든
-개발 셀에서 `s0`, `s1`, `no_repair`, 반복 난수 5개보다 mean/CVaR damage가
-모두 작을 때만 멈춘다. 성공해도 target을 실행하지 않고 human freeze용
-draft recommendation만 만든다.
+개발 셀에서 joint가 feasible이어야 한다. Comparator가 infeasible이면
+제약 우선 순위로 joint가 이기고, comparator도 feasible일 때는 joint의
+mean/CVaR damage가 모두 작아야 한다. 성공해도 target을 실행하지 않고 human
+freeze용 draft recommendation만 만든다.
+
+현재 탐색 예산은 target-free trial 24개다. 성공 조건을 먼저 만족하면 exit
+0으로 즉시 종료한다. 24개를 모두 실행해도 조건을 만족하지 못하면
+`NO_JOINT_DOMINANCE`, exit 3으로 실패 셀과 가장 가까운 후보를 로그에 남기고
+종료한다.
 
 ## 0. Agent 실행 원칙
 

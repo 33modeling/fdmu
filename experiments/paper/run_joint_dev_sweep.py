@@ -227,6 +227,19 @@ def validate_spec(raw: Mapping[str, Any]) -> dict[str, Any]:
             {"id": trial_id, "alpha": alpha, "Kp": kp, "repair": dict(repair)}
         )
 
+    budget = raw.get("budget")
+    if (
+        not isinstance(budget, Mapping)
+        or budget.get("run_all_declared_trials") is not True
+        or isinstance(budget.get("maximum_trials"), bool)
+        or not isinstance(budget.get("maximum_trials"), int)
+        or int(budget["maximum_trials"]) != len(trials)
+    ):
+        raise SweepError(
+            "budget must require all declared trials and maximum_trials must "
+            "equal the ordered trial count"
+        )
+
     return {
         "schema_version": 1,
         "contract": CONTRACT,
@@ -241,6 +254,12 @@ def validate_spec(raw: Mapping[str, Any]) -> dict[str, Any]:
             "mean_damage_margin": mean_margin,
             "cvar95_damage_margin": cvar_margin,
             "parent_groups": normalized_groups,
+        },
+        "budget": {
+            "maximum_trials": len(trials),
+            "run_all_declared_trials": True,
+            "success_exit_code": 0,
+            "exhaustion_exit_code": 3,
         },
         "trials": trials,
     }
@@ -293,20 +312,34 @@ def evaluate_cell(
     ] + [(f"repeated_random/{draw}", random[draw]) for draw in expected_draws]
     comparisons = []
     for name, arm in competitors:
+        other_metrics = arm.get("metrics")
+        if (
+            not isinstance(other_metrics, Mapping)
+            or type(other_metrics.get("feasible")) is not bool
+        ):
+            raise SweepError(f"{name}.metrics.feasible must be boolean")
+        other_feasible = bool(other_metrics["feasible"])
         other_mean = _finite(arm.get("mean_damage"), f"{name}.mean_damage")
         other_cvar = _finite(arm.get("cvar95_damage"), f"{name}.cvar95_damage")
+        better_mean = joint_mean + mean_margin < other_mean
+        better_cvar = joint_cvar + cvar_margin < other_cvar
         comparisons.append(
             {
                 "competitor": name,
+                "competitor_feasible": other_feasible,
                 "mean_damage": other_mean,
                 "cvar95_damage": other_cvar,
-                "joint_better_mean": joint_mean + mean_margin < other_mean,
-                "joint_better_cvar95": joint_cvar + cvar_margin < other_cvar,
+                "mean_advantage": other_mean - joint_mean - mean_margin,
+                "cvar95_advantage": other_cvar - joint_cvar - cvar_margin,
+                "joint_better_mean": better_mean,
+                "joint_better_cvar95": better_cvar,
+                "joint_wins_constrained": (
+                    not other_feasible or (better_mean and better_cvar)
+                ),
             }
         )
     passed = bool(metrics["feasible"]) and all(
-        item["joint_better_mean"] and item["joint_better_cvar95"]
-        for item in comparisons
+        item["joint_wins_constrained"] for item in comparisons
     )
     return {
         "passed": passed,
@@ -405,6 +438,141 @@ def evaluate_trial(
         "parents": parent_results,
         "groups": group_results,
         "cells": cells,
+    }
+
+
+def candidate_score(result: Mapping[str, Any]) -> dict[str, Any]:
+    """Summarize how close one unsuccessful trial came to the stop rule."""
+    groups = result.get("groups", {})
+    parents = result.get("parents", {})
+    cells = result.get("cells", {})
+    if not all(isinstance(value, Mapping) for value in (groups, parents, cells)):
+        raise SweepError("trial comparison lacks group, parent, or cell mappings")
+    feasible_cells = 0
+    passing_cells = 0
+    metric_wins = 0
+    metric_tests = 0
+    total_shortfall = 0.0
+    blocking: list[dict[str, Any]] = []
+    for label, cell in cells.items():
+        if not isinstance(cell, Mapping):
+            raise SweepError(f"cell {label!r} must be a mapping")
+        passing_cells += int(cell.get("passed") is True)
+        feasible_cells += int(cell.get("joint_feasible") is True)
+        comparisons = cell.get("comparisons", [])
+        if not isinstance(comparisons, list):
+            raise SweepError(f"cell {label!r}.comparisons must be a list")
+        if cell.get("joint_feasible") is not True:
+            blocking.append(
+                {
+                    "cell": str(label),
+                    "reason": "joint_infeasible",
+                    "competitor": None,
+                }
+            )
+        for comparison in comparisons:
+            if not isinstance(comparison, Mapping):
+                raise SweepError(f"cell {label!r} has an invalid comparison")
+            mean_win = comparison.get("joint_better_mean") is True
+            cvar_win = comparison.get("joint_better_cvar95") is True
+            competitor_feasible = comparison.get("competitor_feasible") is True
+            metric_wins += (
+                int(mean_win) + int(cvar_win) if competitor_feasible else 2
+            )
+            metric_tests += 2
+            mean_advantage = _finite(
+                comparison.get("mean_advantage"),
+                f"{label}.mean_advantage",
+            )
+            cvar_advantage = _finite(
+                comparison.get("cvar95_advantage"),
+                f"{label}.cvar95_advantage",
+            )
+            mean_shortfall = (
+                max(0.0, -mean_advantage) if competitor_feasible else 0.0
+            )
+            cvar_shortfall = (
+                max(0.0, -cvar_advantage) if competitor_feasible else 0.0
+            )
+            total_shortfall += mean_shortfall + cvar_shortfall
+            if comparison.get("joint_wins_constrained") is not True:
+                blocking.append(
+                    {
+                        "cell": str(label),
+                        "reason": "damage_not_strictly_better",
+                        "competitor": comparison.get("competitor"),
+                        "mean_shortfall": mean_shortfall,
+                        "cvar95_shortfall": cvar_shortfall,
+                    }
+                )
+    return {
+        "trial_id": result.get("trial_id"),
+        "trial_dir": result.get("trial_dir"),
+        "groups_passed": sum(
+            item.get("passed") is True for item in groups.values()
+        ),
+        "groups_required": len(groups),
+        "parents_passed": sum(
+            item.get("passed") is True for item in parents.values()
+        ),
+        "parents_required": len(parents),
+        "cells_passed": passing_cells,
+        "cells_required": len(cells),
+        "joint_feasible_cells": feasible_cells,
+        "metric_wins": metric_wins,
+        "metric_tests": metric_tests,
+        "total_shortfall": total_shortfall,
+        "blocking_count": len(blocking),
+        "blocking": blocking,
+    }
+
+
+def build_exhaustion_report(
+    results: Sequence[Mapping[str, Any]],
+    *,
+    setting: str,
+    spec_sha256: str,
+) -> dict[str, Any]:
+    """Build a deterministic failure record after the declared grid is exhausted."""
+    if not results:
+        raise SweepError("cannot exhaust a sweep without evaluated trials")
+    if any(result.get("passed") is True for result in results):
+        raise SweepError("an exhaustion report cannot contain a passing trial")
+    scored = [candidate_score(result) for result in results]
+    ranked = sorted(
+        scored,
+        key=lambda item: (
+            -int(item["groups_passed"]),
+            -int(item["parents_passed"]),
+            -int(item["cells_passed"]),
+            -int(item["joint_feasible_cells"]),
+            -int(item["metric_wins"]),
+            float(item["total_shortfall"]),
+            str(item["trial_id"]),
+        ),
+    )
+    return {
+        "schema_version": 1,
+        "contract": CONTRACT,
+        "status": "no_joint_dominance",
+        "terminal": True,
+        "exit_code": 3,
+        "development_only": True,
+        "target_used": False,
+        "setting": setting,
+        "spec_sha256": spec_sha256,
+        "evaluated_trials": len(results),
+        "declared_trial_budget": len(results),
+        "reason": (
+            "all declared development trials were evaluated without satisfying "
+            "the strict joint-best stop rule"
+        ),
+        "closest_candidate": ranked[0],
+        "ranked_candidates": ranked,
+        "next_action": (
+            "report the negative result, or prospectively append reviewed "
+            "D_prot-only trials; do not inspect target outcomes"
+        ),
     }
 
 
@@ -925,6 +1093,7 @@ def run(args: argparse.Namespace) -> int:
         if not any(item.get("spec_sha256") == spec_digest for item in revisions):
             revisions.append(revision)
         sweep_manifest["ordered_trial_ids"] = trial_ids
+        sweep_manifest["budget"] = spec["budget"]
     else:
         sweep_manifest = {
             "schema_version": 1,
@@ -934,6 +1103,7 @@ def run(args: argparse.Namespace) -> int:
             "setting": spec["setting"],
             "ordered_trial_ids": trial_ids,
             "stop": spec["stop"],
+            "budget": spec["budget"],
             "spec_revisions": [revision],
         }
     _atomic_json(sweep_manifest_path, sweep_manifest)
@@ -946,6 +1116,7 @@ def run(args: argparse.Namespace) -> int:
         print(f"joint sweep already satisfied by {best['trial_dir']}")
         return 0
 
+    evaluated_results: list[dict[str, Any]] = []
     for index, trial in enumerate(spec["trials"], start=1):
         if args.max_trials is not None and index > args.max_trials:
             break
@@ -1016,6 +1187,7 @@ def run(args: argparse.Namespace) -> int:
                 "evaluated_at_utc": _utc_now(),
             }
         )
+        evaluated_results.append(result)
         _atomic_json(trial_dir / "joint_comparison.json", result)
         _write_summary(output_root)
         events.write(
@@ -1049,6 +1221,19 @@ def run(args: argparse.Namespace) -> int:
                 output_root / "recommendation.yaml",
                 yaml.safe_dump(recommendation, sort_keys=False),
             )
+            _atomic_json(
+                output_root / "SWEEP_STATUS.json",
+                {
+                    "status": "joint_best",
+                    "terminal": True,
+                    "exit_code": 0,
+                    "trial_id": trial["id"],
+                    "trial_dir": str(trial_dir),
+                    "development_only": True,
+                    "target_used": False,
+                    "updated_at_utc": _utc_now(),
+                },
+            )
             print(f"JOINT_BEST_DEVELOPMENT: {trial_dir}")
             print("target evaluation was not run; human freeze is required")
             return 0
@@ -1056,9 +1241,64 @@ def run(args: argparse.Namespace) -> int:
     if args.dry_run:
         print(f"dry run complete: {output_root}")
         return 0
+    if args.max_trials is not None and args.max_trials < len(spec["trials"]):
+        pause = {
+            "status": "paused_budget_limit",
+            "terminal": False,
+            "exit_code": 5,
+            "completed_trial_limit": args.max_trials,
+            "declared_trials": len(spec["trials"]),
+            "development_only": True,
+            "target_used": False,
+            "updated_at_utc": _utc_now(),
+        }
+        _atomic_json(output_root / "SWEEP_STATUS.json", pause)
+        events.write({"event": "sweep_paused_budget_limit", **pause})
+        print(
+            "PAUSED_BUDGET_LIMIT: not all declared trials were evaluated",
+            file=sys.stderr,
+        )
+        return 5
+
+    report = build_exhaustion_report(
+        evaluated_results,
+        setting=str(spec["setting"]),
+        spec_sha256=spec_digest,
+    )
+    report["recorded_at_utc"] = _utc_now()
+    exhaustion_path = output_root / "exhaustions" / f"{spec_digest}.json"
+    _write_once(
+        exhaustion_path,
+        json.dumps(report, indent=2, sort_keys=True) + "\n",
+    )
+    _write_once(
+        exhaustion_path.with_suffix(".yaml"),
+        yaml.safe_dump(report, sort_keys=False),
+    )
+    _atomic_json(
+        output_root / "SWEEP_STATUS.json",
+        {
+            "status": "no_joint_dominance",
+            "terminal": True,
+            "exit_code": 3,
+            "report": str(exhaustion_path),
+            "closest_trial_id": report["closest_candidate"]["trial_id"],
+            "development_only": True,
+            "target_used": False,
+            "updated_at_utc": _utc_now(),
+        },
+    )
+    events.write(
+        {
+            "event": "sweep_exhausted_no_joint_dominance",
+            "report": str(exhaustion_path),
+            "closest_trial_id": report["closest_candidate"]["trial_id"],
+            "exit_code": 3,
+        }
+    )
     print(
-        "SWEEP_EXHAUSTED: no predeclared development trial satisfied the strict "
-        "joint-best rule; add a new reviewed trial block and rerun",
+        "NO_JOINT_DOMINANCE: all declared development trials were exhausted; "
+        f"failure report: {exhaustion_path}",
         file=sys.stderr,
     )
     return 3
