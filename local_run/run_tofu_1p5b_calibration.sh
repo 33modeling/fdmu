@@ -79,13 +79,25 @@ done
 
 if command -v nvidia-smi >/dev/null; then
   nvidia-smi --query-gpu=index,name,memory.total,memory.used --format=csv,noheader
-  ACTIVE_COMPUTE="$(
-    nvidia-smi \
-      --query-compute-apps=gpu_uuid,pid,process_name,used_memory \
-      --format=csv,noheader 2>/dev/null || true
-  )"
+  BUSY_GPU_THRESHOLD_MIB="${BUSY_GPU_THRESHOLD_MIB:-1024}"
+  ACTIVE_COMPUTE=""
+  IFS=',' read -r -a SELECTED_GPUS <<< "$GPU_IDS"
+  for gpu in "${SELECTED_GPUS[@]}"; do
+    while IFS=',' read -r pid process_name used_mib; do
+      used_mib="${used_mib// /}"
+      [[ "$used_mib" =~ ^[0-9]+$ ]] || continue
+      if (( used_mib >= BUSY_GPU_THRESHOLD_MIB )); then
+        ACTIVE_COMPUTE+=$'gpu='"$gpu"$' pid='"${pid// /}"$' process='"${process_name# }"$' used_mib='"$used_mib"$'\n'
+      fi
+    done < <(
+      nvidia-smi --id="$gpu" \
+        --query-compute-apps=pid,process_name,used_gpu_memory \
+        --format=csv,noheader,nounits 2>/dev/null || true
+    )
+  done
   if [[ -n "$ACTIVE_COMPUTE" && "${ALLOW_BUSY_GPUS:-0}" != "1" ]]; then
-    printf 'GPU compute processes are already active; nothing was killed:\n%s\n' \
+    printf 'selected GPUs have compute processes using at least %s MiB; nothing was killed:\n%s\n' \
+      "$BUSY_GPU_THRESHOLD_MIB" \
       "$ACTIVE_COMPUTE" >&2
     exit 2
   fi
