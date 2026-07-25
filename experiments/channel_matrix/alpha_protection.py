@@ -794,6 +794,9 @@ def _run_worker(
         if len(members) < per_author:
             raise ValueError(f"utility group {group} has only {len(members)} examples")
         utility.extend(members[:per_author])
+    native_candidates = [
+        by_id[candidate_id] for candidate_id in sorted(audit_ids)
+    ]
 
     log(
         f"phase={phase_name} model={runtime.model} request={req.request_id} seed={seed} "
@@ -864,6 +867,11 @@ def _run_worker(
         result = {
             "utility_mean_nll": current,
             "utility_retention": utility_nll0 / current if current > 0 else float("nan"),
+            "native_retention": mean_recall(
+                model,
+                native_candidates,
+                int(common["batch_size"]),
+            ),
         }
         if para_examples:
             result["para_recall"] = mean_recall(
@@ -1207,6 +1215,7 @@ def _run_worker(
                 "mean_dnll": None,
                 "cvar05_dnll": None,
                 "utility_retention": None,
+                "native_retention": None,
                 "utility_mean_nll": None,
                 "para_recall": None,
                 "extraction_generation": None,
@@ -1241,6 +1250,7 @@ def _run_worker(
                 "mean_dnll": None,
                 "cvar05_dnll": None,
                 "utility_retention": None,
+                "native_retention": None,
                 "utility_mean_nll": None,
                 "para_recall": None,
                 "extraction_generation": None,
@@ -1272,6 +1282,7 @@ def _run_worker(
             "mean_dnll": sum(damage) / len(damage),
             "cvar05_dnll": cvar_upper(damage, 0.05),
             "utility_retention": extra.get("utility_retention"),
+            "native_retention": extra.get("native_retention"),
             "utility_mean_nll": extra.get("utility_mean_nll"),
             "para_recall": extra.get("para_recall"),
             "extraction_generation": extra.get("extraction_generation"),

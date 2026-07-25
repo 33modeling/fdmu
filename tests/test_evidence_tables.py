@@ -87,7 +87,7 @@ def test_tail_coverage_below_080_blocks_rq1(tmp_path):
     ledger = _ledger([raw])
     report = _report(contract, ledger)
     decision = report["rows"][0]["rq1"]
-    assert decision["eligible"]
+    assert not decision["eligible"]
     assert not decision["claim_pass"]
 
 

@@ -419,7 +419,7 @@ def test_completed_artifact_hash_is_verified(tmp_path):
 
 def test_repository_registry_covers_two_main_and_five_appendix_tables():
     contract = load_contract(ROOT / "configs/paper/evidence.yaml")
-    assert len(contract.planned_keys) == 8 * 7
+    assert len(contract.planned_keys) == 9 * 7
     locations = [table.location for table in contract.tables.values()]
     assert locations.count("main") == 2
     assert locations.count("appendix") == 5
@@ -495,7 +495,7 @@ def test_cli_emits_fail_closed_readiness_and_macros(tmp_path):
     )
     assert result.returncode == 2
     report = json.loads(readiness.read_text(encoding="utf-8"))
-    assert report["denominators"]["planned_rows"] == 56
+    assert report["denominators"]["planned_rows"] == 63
     assert report["denominators"]["completed_rows"] == 0
     macros = (paper / "sections/generated/results_macros.tex").read_text(
         encoding="utf-8"

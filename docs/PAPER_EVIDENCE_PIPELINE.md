@@ -290,29 +290,31 @@ budget summaries, and motion controls remain outputs of their named runners.
 The pipeline now renders the two main tables' bodies, not just the five
 headline macros:
 
-1. `experiments/paper/export_channel_matrix_raw.py` walks sealed gate audit
-   cells (`<output_root>/audit/...`) and alpha-protection audit cells and
-   emits candidate-level `prediction.jsonl`/`protection.jsonl` in the raw
-   schema, opening sealed audit scores only through `rsus.sealing` (DONE
-   markers required). It can also summarize a frozen fd-fidelity certificate
-   into the `fidelity_inputs` JSON consumed by the table renderer.
-2. `aggregate_raw.py` additionally computes, per row: a one-sided bound for
-   the absolute joint rank correlation, the above-chance tail lift on
-   tail-eligible cells (with eligible/total counts), the gain over the frozen
-   simple control (`control` column in prediction records), absolute
-   joint/no-repair mean+CVaR, per-comparator native-metric non-inferiority
-   effects (`native_metric` in protection records; margins via the plan's
-   `native_margins`), and mean accepted/rolled-back update diagnostics.
+1. `experiments/paper/tofu_v4_unit.py` is the authoritative TOFU producer. Its
+   target-evaluation stage emits all three candidate-level shards:
+   `prediction_raw.jsonl`, `fidelity_raw.jsonl`, and `protection_raw.jsonl`.
+   `experiments/paper/export_channel_matrix_raw.py` is a backfill bridge for
+   older sealed channel-matrix/alpha-protection cells. It emits PDF-v4-named
+   prediction/protection fields and fails when simple-control, native-retention,
+   first-reaching, or repair telemetry is absent. A setting-level fidelity
+   certificate summary is display-only and cannot replace per-unit fidelity
+   raw evidence.
+2. `aggregate_raw.py` computes, per row: a one-sided bound for the absolute
+   joint rank correlation, the above-chance tail lift on tail-eligible cells
+   (with eligible/total counts), the gain over the frozen simple control
+   (`simple_control`), absolute joint/no-repair mean+CVaR, per-comparator
+   native-metric non-inferiority effects (`native_retention` plus the plan's
+   frozen margin), and mean repair/rollback diagnostics.
 3. `decisions.py` enforces the paper's full IUTs: RQ1 = joint + both endpoint
    gains + tail lift with >=0.80 tail coverage; RQ3 = eight damage UCBs plus
    four native non-inferiority LBs plus feasibility/margins.
-4. `build_evidence.py --paper-root` writes
+4. `build_evidence.py --paper-root paper` writes
    `sections/generated/table_core_evidence.tex` and
    `sections/generated/table_robustness.tex` (labels `tab:core-evidence`,
    `tab:robustness`) alongside the macros; every incomplete cell stays
-   `\tblph`. RQ2 cells compose the frozen fidelity floors (`tau_rho=0.80`,
-   `tau_K=0.70`) with the `g_H`/`g_ctl` bounds and only report pass when all
-   bounds exist and clear their floors.
+   `\tblph`. RQ2 cells consume the ledger's four PDF-v4 effects
+   (`f_rho-0.80`, `f_K-0.70`, `g_H`, `g_ctl`) and only report pass when all
+   one-sided bounds exist and clear zero.
 
 Campaign wave -> table mapping and the pre-run outcome forecast live in
 `docs/plan_table12_campaign.md`.

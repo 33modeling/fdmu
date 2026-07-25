@@ -3,9 +3,10 @@
 > 목적: 논문 `tab:core-evidence`(Table 1)와 `tab:robustness`(Table 2)를
 > 실측으로 채운다. 오케스트레이션은 `experiments/cluster/` 파일 큐
 > (노드 = 8×H100 80GB, GPU 0–7 = 워커 8개). 점화 헬퍼:
-> `experiments/cluster/enqueue_table12.sh`. 테이블 생성은
-> `export_channel_matrix_raw.py → init_raw_plan.py → aggregate_raw.py →
-> build_evidence.py --paper-root`가 전담한다.
+> `experiments/cluster/enqueue_table12.sh`. claim-bearing TOFU 결과는
+> `tofu_v4_unit.py → init_raw_plan.py → aggregate_raw.py →
+> build_evidence.py --paper-root`가 전담한다. 기존 channel-matrix run의
+> prediction/protection backfill에만 `export_channel_matrix_raw.py`를 쓴다.
 
 ## 1. 무엇이 어느 테이블 셀을 채우나
 
@@ -20,28 +21,47 @@
 | 1.5B: 추가 GPU 불필요 | (종결) | Table 2 boundary 행 — 도달불가 실측으로 채움 |
 | MUSE-News / PISTOL | 실행 불가 (캐시·망 부재) | Table 2 planned/not-run 행 (denominator 유지) |
 
-파이프라인 (CPU, 클러스터 로그인 노드 또는 세션):
+권위 있는 PDF-v4 파이프라인 (CPU 집계는 로그인 노드 또는 로컬 세션):
 
 ```bash
-# 1) 개발 셀렉션 동결(selection_freeze) 후 불변 플랜
+# 0) exact roster와 허용된 다음 phase 확인
+python experiments/paper/preflight.py
+python experiments/cluster/next_actions.py
+
+# 1) HUMAN이 개발 셀렉션을 동결한 뒤 불변 플랜 생성
 python experiments/paper/init_raw_plan.py --selection-freeze configs/paper/selection_freeze.yaml \
   --setting tofu_qwen25_7b --out results/paper/raw_plan.json
-# 2) run 산출물 → 후보 레벨 raw shard (+ fidelity 요약)
+
+# 2-a) PDF-v4 target_evaluation unit이 직접 만든 세 shard 사용
+PRED=runs/paper/tofu_table1/tofu_qwen25_7b/target_evaluation/sealed/prediction_raw.jsonl
+FID=runs/paper/tofu_table1/tofu_qwen25_7b/target_evaluation/sealed/fidelity_raw.jsonl
+PROT=runs/paper/tofu_table1/tofu_qwen25_7b/target_evaluation/sealed/protection_raw.jsonl
+
+# 2-b) 기존 H100 channel-matrix 산출물을 backfill할 때만 exporter 사용.
+# prediction/protection은 v4 field로 변환되지만 RQ2용 per-unit fidelity raw를
+# 대신 만들지는 않는다.
 python experiments/paper/export_channel_matrix_raw.py \
   --campaign-config configs/channel_matrix/7b_tofu.yaml --setting-id tofu_qwen25_7b \
-  --prediction-alpha-freeze configs/paper/selection_freeze.yaml \
+  --prediction-alpha-freeze configs/channel_matrix/prediction_alpha_freeze_7b.yaml \
   --control-predictor knn_embed \
   --fidelity-certificate runs/channel_matrix_7b/fidelity/qwen25_7b.json \
   --out-dir results/paper/raw/tofu_qwen25_7b
-# 3) 정규화 렛저
+
+# 3) 정규화 ledger
 python experiments/paper/aggregate_raw.py --plan results/paper/raw_plan.json \
-  --prediction-raw results/paper/raw/tofu_qwen25_7b/prediction.jsonl \
-  --protection-raw results/paper/raw/tofu_qwen25_7b/protection.jsonl \
+  --prediction-raw "$PRED" --fidelity-raw "$FID" --protection-raw "$PROT" \
   --out results/paper/evidence_ledger.json
-# 4) Table 1/2 .tex + 헤드라인 매크로 (paper 레포 루트를 --paper-root로)
-python experiments/paper/build_evidence.py --paper-root ../paper
+
+# 4) Table 1/2 .tex + 헤드라인 매크로
+python experiments/paper/build_evidence.py \
+  --ledger results/paper/evidence_ledger.json --paper-root paper
 #    → sections/generated/table_core_evidence.tex / table_robustness.tex
 ```
+
+`aggregate_raw.py`가 selection, roster, Kp, native metric, first-reaching
+checkpoint 중 하나라도 frozen plan과 다르면 실패하는 것이 정상이다. fidelity
+certificate summary는 표의 진단 셀 fallback일 뿐 RQ2 eligibility/pass 근거가
+아니다.
 
 ## 2. 노드 배치 (수십 GPU 규모, 노드 = 8×H100)
 

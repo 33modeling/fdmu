@@ -200,7 +200,7 @@ fdmu/  (retain-susceptibility 포크)
 │   │   ├── rwku.py       ✅       RWKU 실세계 지식 삭제 (타겟별)
 │   │   ├── substrate.py  ✅       합성 substrate (ground-truth adjacency)
 │   │   ├── muse.py       ✅       MUSE-News/Books knowmem (forget_qa→Df, retain_qa→C(q)) — 이 포크 추가
-│   │   └── (wmdp / pistol ❌ 미구현 — 논문엔 있음)
+│   │   └── wmdp.py ✅ / pistol ❌
 │   │
 │   └── evidence/                 v4 raw/schema/decision + Table 1 렌더링
 │
@@ -255,17 +255,18 @@ fdmu/  (retain-susceptibility 포크)
 | **정확 roster paper-stage 오케스트레이터** | ✅ unit 실행·검증·봉인 구현 |
 | **TOFU PDF-v4 model-output unit producer** | ✅ 구현·계약테스트; 실제 GPU campaign 미실행 |
 | **TOFU Table 1 Panel A/B 선택·집계·LaTeX 렌더링** | ✅ 구현·합성 140-unit E2E 검증 |
-| PDF Table 2 breadth/failure-boundary LaTeX 렌더링 | ❌ readiness JSON까지만 구현 |
+| PDF Table 2 breadth/failure-boundary LaTeX 렌더링 | ✅ 9-setting denominator, E/P, funnel, worst RQ1/RQ2/RQ3 bound |
 | 구버전 Table 3 ablation / Table 4 cost 도구 | ✅ 구현; 최신 PDF appendix와 재매핑 필요 |
 | 데이터셋 **TOFU, RWKU, substrate** | ✅ 어댑터 구현 |
 | 데이터셋 **MUSE (News/Books)** | ✅ corpus-level 어댑터와 registry 구현; 독립 target-request roster는 미지원이라 paper preflight 차단 |
-| 데이터셋 **WMDP / PISTOL** | ❌ **미구현** (PDF 실험 roster) |
+| 데이터셋 **WMDP-bio/MMLU** | ✅ 어댑터·7B/14B H100 campaign·테스트 구현; PDF-v4 exact roster/producer는 미동결 |
+| 데이터셋 **PISTOL** | ❌ 어댑터·exact roster 미구현 |
 | **KnowUnDo / OpenUnlearning** | related work 인용이며 현재 실험 roster 아님 |
 
-> 요약: **v4 프로브·repair·증거 계약과 TOFU model-output producer 및 Table 1
-> workflow는 구현됨**. 실제 수치는 아직 없으며, 1.5B parent freeze는 real
-> `D_cal` 결과가 필요한 draft다. 비-TOFU setting의 exact roster와 producer,
-> 외부 모델 경로도 아직 준비되지 않았다.
+> 요약: **v4 프로브·repair·증거 계약, TOFU model-output producer, Table 1/2
+> renderer와 H100 campaign orchestration이 구현됨**. 실제 target 수치는 아직
+> 없으며, 비-TOFU setting은 어댑터 구현 여부와 별개로 exact roster와
+> PDF-v4 unit producer가 동결되기 전까지 claim-bearing evidence가 아니다.
 
 ## 6. 설치 & 실행
 
@@ -285,8 +286,49 @@ python experiments/gate_1p5b/gate.py --model <경로> --device cuda --dtype floa
   --dataset tofu --universe-authors 20 --trainable-scope probe_block
 
 # 최신 PDF-v4 TOFU exact manifest 점검
-python experiments/paper/run_tofu_table1.py --action plan
+python experiments/paper/run_tofu_table1.py \
+  --action plan --setting tofu_qwen25_7b
 ```
+
+### H100 Table 1/2 캠페인
+
+클러스터에서는 [AGENTS.md](AGENTS.md)의 freeze/seal 규칙과
+[클러스터 런북](docs/CLUSTER_FLEET_RUNBOOK.md)을 먼저 따른다. 현재 상태와
+허용된 다음 단계는 추측하지 않고 아래 명령으로 확인한다.
+
+```bash
+python experiments/paper/preflight.py
+python experiments/cluster/next_actions.py
+bash experiments/cluster/enqueue_table12.sh status
+
+# next_actions.py의 allowed_now에 나온 wave만 enqueue
+bash experiments/cluster/enqueue_table12.sh wmdp
+python experiments/cluster/workqueue.py status \
+  --brief --queue runs/cluster_queue/wave_wmdp
+```
+
+TOFU PDF-v4 target unit이 완료되면 sealed raw 세 종류를 하나의 ledger로
+집계하고, 그 ledger에서 두 main table과 readiness를 함께 생성한다.
+
+```bash
+python experiments/paper/aggregate_raw.py \
+  --plan runs/paper/tofu_table1/tofu_qwen25_7b/raw_plan.json \
+  --prediction-raw runs/paper/tofu_table1/tofu_qwen25_7b/target_evaluation/sealed/prediction_raw.jsonl \
+  --fidelity-raw runs/paper/tofu_table1/tofu_qwen25_7b/target_evaluation/sealed/fidelity_raw.jsonl \
+  --protection-raw runs/paper/tofu_table1/tofu_qwen25_7b/target_evaluation/sealed/protection_raw.jsonl \
+  --out results/paper/evidence_ledger.json
+
+python experiments/paper/build_evidence.py \
+  --ledger results/paper/evidence_ledger.json \
+  --paper-root paper
+```
+
+기존 channel-matrix audit 산출물은
+`experiments/paper/export_channel_matrix_raw.py`로 v4 이름의
+prediction/protection shard로 변환할 수 있다. 다만 setting별 RQ2 판정에는
+독립적인 per-unit `fidelity_raw.jsonl`이 필요하며, certificate summary만으로
+RQ2 pass를 만들지 않는다. 전체 순서는
+[Table 1/2 캠페인 문서](docs/plan_table12_campaign.md)에 정리돼 있다.
 
 `gate.py`는 기본적으로 exact SFT contract별 checkpoint를
 `runs/sft_cache/`에 저장하고 다음 실행에서 자동으로 불러온다. 명시적 파일은
@@ -319,8 +361,9 @@ GPU=0,1 DMAP=split:8 bash local_run/run_one.sh 7b_fp32 Qwen2.5-7B-Instruct float
 
 최신 TOFU workflow는 `runs/paper/tofu_table1/` 아래에 stage manifest,
 unit별 `run_manifest.json`, sealed JSONL, `raw_plan.json`,
-`evidence_ledger.json`, `evidence_readiness.json`을 남긴다. 완전한 ledger가
-있을 때 `paper/sections/generated/table1.tex`을 생성한다. 이전 `gate.py`
+`evidence_ledger.json`, `evidence_readiness.json`을 남긴다. ledger 상태와
+무관하게 main Table 1/2는 생성되며, 미완료 셀은 `\tblph`로 남는다. 완전한
+ledger에서만 `--require-ready`가 성공한다. 이전 `gate.py`
 캠페인의 `table1.json`, `table2.json`, `gate.log`, `seal_ledger.jsonl`과는
 별도 산출물이다.
 
@@ -330,7 +373,9 @@ unit별 `run_manifest.json`, sealed JSONL, `raw_plan.json`,
 그것을 채우기 위해 필요한 작업.
 
 ### 9.1 데이터셋 확장
-- **WMDP, PISTOL** — 최신 PDF 실험 roster지만 `data/`와 registry에 어댑터 없음.
+- **WMDP-bio/MMLU** — adapter와 H100 channel-matrix campaign은 구현됨.
+  claim-bearing PDF-v4 exact roster와 dataset unit producer는 아직 동결되지 않음.
+- **PISTOL** — 최신 PDF 실험 roster지만 `data/`와 registry에 어댑터 없음.
 - **KnowUnDo, OpenUnlearning** — related work 인용이며 현재 실험 구현 대상이 아님.
 - **MUSE(News/Books)** — corpus-level 로더는 등록됐지만, 현재 knowmem 구조는
   독립적인 `D_cal/D_pred/D_prot/target` 삭제 요청 roster를 제공하지 않는다.
@@ -352,8 +397,8 @@ unit별 `run_manifest.json`, sealed JSONL, `raw_plan.json`,
 ### 9.3 실험 커버리지 (구현됐으나 아직 안 돌린 것)
 - **최신 Table 1:** 코드와 합성 evidence 검증만 완료했으며 실제 TOFU target
   campaign은 미실행이다.
-- **최신 Table 2:** breadth/failure-boundary readiness는 계산하지만 LaTeX
-  renderer와 비-TOFU evidence가 없다.
+- **최신 Table 2:** LaTeX renderer와 9-setting denominator는 구현됐다.
+  비-TOFU PDF-v4 evidence는 exact roster/producer가 준비된 setting부터 채워야 한다.
 - **Appendix ablation/cost:** 기존 `analysis/ablation.py`와
   `experiments/cost/bench.py`를 최신 PDF appendix contract에 맞춰 재매핑해야 한다.
 - **통계:** hierarchical bootstrap과 IUT는 구현됐지만 실제 다중 request/seed

@@ -164,7 +164,9 @@ After audit/alpha waves drain (run on a login node or any node, CPU):
 python experiments/paper/init_raw_plan.py \
   --selection-freeze configs/paper/selection_freeze.yaml \
   --setting tofu_qwen25_7b --out results/paper/raw_plan.json
-# 2) sealed run outputs -> candidate-level shards (+ fidelity summary)
+# 2) legacy channel-matrix outputs -> v4 prediction/protection backfill.
+# The claim-bearing tofu_v4 target producer writes prediction/fidelity/
+# protection raw directly; do not substitute the summary below for fidelity_raw.
 python experiments/paper/export_channel_matrix_raw.py \
   --campaign-config configs/channel_matrix/7b_tofu.yaml \
   --setting-id tofu_qwen25_7b \
@@ -175,11 +177,17 @@ python experiments/paper/export_channel_matrix_raw.py \
 # 3) normalized ledger
 python experiments/paper/aggregate_raw.py --plan results/paper/raw_plan.json \
   --prediction-raw results/paper/raw/tofu_qwen25_7b/prediction.jsonl \
+  --fidelity-raw <target_evaluation/sealed/fidelity_raw.jsonl> \
   --protection-raw results/paper/raw/tofu_qwen25_7b/protection.jsonl \
   --out results/paper/evidence_ledger.json
 # 4) readiness + tables (point --paper-root at a scratch copy on the cluster)
-python experiments/paper/build_evidence.py
+python experiments/paper/build_evidence.py \
+  --ledger results/paper/evidence_ledger.json --paper-root paper
 ```
+
+For the authoritative TOFU path, use the three sealed shards emitted by
+`tofu_v4_unit.py` together. The channel-matrix certificate summary may populate
+diagnostic display cells, but it never licenses RQ2.
 
 Handoff (cluster cannot push): paste back to the human/session, verbatim —
 `results/paper/evidence_ledger.json`, `evidence_readiness.json`, the two

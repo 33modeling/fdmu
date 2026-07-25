@@ -5,7 +5,7 @@ paper ledger:
 
     gate.py audit cells        -> prediction.jsonl   (candidate-level)
     alpha_protection.py audit  -> protection.jsonl   (candidate-level, per arm)
-    fd-fidelity certificate    -> fidelity summary JSON (table f_rho/f_K cells)
+    fd-fidelity certificate    -> fidelity summary JSON (display-only fallback)
 
 The exporter opens sealed audit scores only through ``rsus.sealing`` (which
 requires every trajectory DONE marker) and never recomputes or reselects
@@ -18,9 +18,13 @@ Example
 python experiments/paper/export_channel_matrix_raw.py \
   --campaign-config configs/channel_matrix/7b_tofu.yaml \
   --setting-id tofu_qwen25_7b \
-  --prediction-alpha 0.5 --protection-alpha-freeze configs/channel_matrix/alpha_protection_freeze.yaml \
+  --prediction-alpha-freeze configs/channel_matrix/prediction_alpha_freeze_7b.yaml \
   --control-predictor knn_embed \
   --out-dir results/paper/raw/tofu_qwen25_7b
+
+The emitted shards use the PDF-v4 candidate schema. They still have to match
+an independently frozen ``init_raw_plan.py`` plan; ``aggregate_raw.py`` rejects
+selection, roster, native-metric, or Kp drift.
 """
 from __future__ import annotations
 
@@ -288,6 +292,15 @@ def export_prediction(
                         control_scores = empirical_midrank01(
                             control_disc, control_audit
                         )
+                    checkpoint_id = json.dumps(
+                        {
+                            "request": request_id,
+                            "parent": parent,
+                            "step": snapshot.get("step"),
+                            "source": str(damage_path.relative_to(ROOT)),
+                        },
+                        sort_keys=True,
+                    )
                     for candidate_id in audit_ids:
                         if candidate_id not in snapshot["nll"] or candidate_id not in nll0:
                             raise EvidenceValidationError(
@@ -322,8 +335,19 @@ def export_prediction(
                             raise EvidenceValidationError(
                                 f"{damage_path}: candidate {candidate_id} has no group"
                             )
-                        if control_scores is not None:
-                            record["control"] = control_scores[candidate_id]
+                        if control_scores is None:
+                            raise EvidenceValidationError(
+                                f"{seed_dir}: v4 prediction export requires a "
+                                "frozen simple control"
+                            )
+                        record.update(
+                            {
+                                "simple_control": control_scores[candidate_id],
+                                "simple_control_name": args.control_predictor,
+                                "parent_checkpoint_id": checkpoint_id,
+                                "parent_checkpoint_first_reaching": reached,
+                            }
+                        )
                         records.append(record)
     if not records:
         raise EvidenceValidationError(
@@ -447,10 +471,24 @@ def export_protection(
                 stage2 = (row.get("trajectory_metadata") or {}).get("stage2") or {}
                 updates_accepted = stage2.get("n_accepted")
                 updates_rolled_back = stage2.get("n_rejected")
+                if arm == "no_repair" and updates_accepted is None:
+                    updates_accepted = 0
+                    updates_rolled_back = 0
                 if (updates_accepted is None) != (updates_rolled_back is None):
                     raise EvidenceValidationError(
                         f"{results_path}: stage2 telemetry must report "
                         "n_accepted and n_rejected together"
+                    )
+                if updates_accepted is None:
+                    raise EvidenceValidationError(
+                        f"{results_path}: repaired arm {arm!r} lacks stage2 "
+                        "accepted/rollback telemetry"
+                    )
+                native_retention = row.get("native_retention")
+                if native_retention is None:
+                    raise EvidenceValidationError(
+                        f"{results_path}: arm {arm!r} lacks the dataset-native "
+                        "retention metric; rerun with the current campaign code"
                     )
                 for candidate_id, value in sorted(damage.items()):
                     record = {
@@ -464,6 +502,7 @@ def export_protection(
                             "alpha": protection_alpha,
                         },
                         "arm": arm,
+                        "Kp": int(alpha_cfg["partition"]["pool_size"]),
                         "candidate_id": candidate_id,
                         "group": groups.get(candidate_id),
                         "damage": float(value),
@@ -472,21 +511,10 @@ def export_protection(
                         "draw_complete": draw_complete,
                         "parent_checkpoint_id": checkpoint_id,
                         "parent_checkpoint_first_reaching": first_reaching,
-                        "native_metric": (
-                            float(row["utility_retention"])
-                            if row.get("utility_retention") is not None
-                            else None
-                        ),
-                        "updates_accepted": (
-                            float(updates_accepted)
-                            if updates_accepted is not None
-                            else None
-                        ),
-                        "updates_rolled_back": (
-                            float(updates_rolled_back)
-                            if updates_rolled_back is not None
-                            else None
-                        ),
+                        "native_retention": float(native_retention),
+                        "native_metric_name": args.native_metric_name,
+                        "repair_updates": float(updates_accepted),
+                        "repair_rollbacks": float(updates_rolled_back),
                     }
                     if record["group"] is None:
                         raise EvidenceValidationError(
@@ -618,6 +646,11 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="frozen strongest simple control (selected on development folds)",
     )
+    parser.add_argument(
+        "--native-metric-name",
+        default="retain_answer_token_recall",
+        help="dataset-native retention field declared by the paper raw plan",
+    )
     parser.add_argument("--prediction-alpha", type=float, default=None)
     parser.add_argument(
         "--prediction-alpha-freeze",
@@ -639,8 +672,8 @@ def build_parser() -> argparse.ArgumentParser:
         "--fidelity-out",
         default=None,
         help=(
-            "fidelity summary path; defaults to the tracked "
-            "docs/data/fidelity_summaries/<setting-id>.json declared by "
+            "fidelity summary path; defaults to "
+            "results/paper/fidelity_summaries/<setting-id>.json declared by "
             "configs/paper/evidence.yaml fidelity_inputs"
         ),
     )
@@ -657,6 +690,13 @@ def main(argv: list[str] | None = None) -> int:
                 file=sys.stderr,
             )
             return 1
+    if not args.skip_prediction and not args.control_predictor:
+        print(
+            "export failed: PDF-v4 prediction raw requires "
+            "--control-predictor",
+            file=sys.stderr,
+        )
+        return 1
     try:
         cfg = _load_yaml(ROOT / args.campaign_config)
         out_dir = ROOT / args.out_dir
