@@ -7,7 +7,7 @@ cd "$ROOT"
 source "$ROOT/experiments/cluster/cluster_env.sh"
 
 QUEUE="$CLUSTER_RUNS_ROOT/cluster_queue/wave1_14b"
-VENV="${VENV:-/group-volume/jieuns.shin/venvs/exp}"
+VENV="/group-volume/fdmu/.venv"
 PYTHON="$VENV/bin/python"
 MODEL_ID=qwen25_14b
 LOG_DIR="$CLUSTER_RUNS_ROOT/logs/cluster"

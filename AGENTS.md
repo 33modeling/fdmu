@@ -71,11 +71,12 @@ dataset, dtype, metric, or comparator.
 
 ### H100 cluster
 
-- Repository: `/group-volume/jieuns.shin/retain-susceptibility`
-- Environment: `/group-volume/jieuns.shin/venvs/exp`
-- Shared state/results: `/group-volume/jieuns.shin/fdmu/runs`
-- Host scratch/cache: `/group-volume/jieuns.shin/fdmu/runtime/<user>/<host>`
-- Model cache: `/group-volume/data/hf_home`
+- Environment: `/group-volume/fdmu/.venv`
+- Shared state/results: `/group-volume/fdmu/runs`
+- Host scratch/cache: `/group-volume/fdmu/runtime/<user>/<host>`
+- Newly provisioned models: `/group-volume/fdmu/models`
+- Existing shared model/data sources may be read from `/group-volume/models`
+  and `/group-volume/data/hf_home`, but no generated file is written there.
 
 The cluster has no GitHub egress. Do not commit or push there. Do not create a
 replacement venv or install packages into the shared environment. Use
@@ -84,7 +85,7 @@ replacement venv or install packages into the shared environment. Use
 Never write cluster results to user-volume, a home filesystem, `/tmp`, or a
 shared directory you do not own. `cluster_env.sh` redirects `HOME`, temp files,
 and library caches to the runtime path and rejects paths outside
-`/group-volume`.
+`/group-volume/fdmu`.
 
 ## 5. Safe execution
 

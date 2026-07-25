@@ -12,14 +12,13 @@ def test_cluster_env_separates_shared_state_from_host_scratch(tmp_path):
     group_root = tmp_path / "group-volume"
     hf_home = group_root / "data/hf_home"
     hf_home.mkdir(parents=True)
-    runtime_base = group_root / "scratch"
-    work_root = runtime_base / "researcher/node-7b"
+    work_root = group_root / "fdmu/runtime/researcher/node-7b"
     local_env = tmp_path / "cluster-local.sh"
     local_env.write_text(
         "\n".join(
             (
                 f"CLUSTER_HF_HOME={hf_home}",
-                f"CLUSTER_RUNTIME_BASE={runtime_base}",
+                f"CLUSTER_RUNTIME_BASE={tmp_path / 'wrong-runtime'}",
                 f"CLUSTER_WORK_ROOT={tmp_path / 'wrong-local-work'}",
                 f"CLUSTER_RUNS_ROOT={tmp_path / 'wrong-local-runs'}",
             )
@@ -55,7 +54,7 @@ def test_cluster_env_separates_shared_state_from_host_scratch(tmp_path):
     )
 
     assert result.returncode == 0, result.stderr
-    assert f"RUNS={group_root / 'jieuns.shin/fdmu/runs'}" in result.stdout
+    assert f"RUNS={group_root / 'fdmu/runs'}" in result.stdout
     assert f"WORK={work_root}" in result.stdout
     assert f"HOME={work_root / 'home'}" in result.stdout
     assert f"TMP={work_root / 'tmp'}" in result.stdout
@@ -64,7 +63,7 @@ def test_cluster_env_separates_shared_state_from_host_scratch(tmp_path):
     assert not list(work_root.rglob(".fdmu-write-probe-*"))
 
 
-def test_cluster_env_rejects_user_volume_storage_override(tmp_path):
+def test_cluster_env_ignores_user_volume_storage_override(tmp_path):
     group_root = tmp_path / "group-volume"
     (group_root / "data/hf_home").mkdir(parents=True)
     local_env = tmp_path / "cluster-local.sh"
@@ -84,5 +83,6 @@ def test_cluster_env_rejects_user_volume_storage_override(tmp_path):
         text=True,
         check=False,
     )
-    assert result.returncode == 2
-    assert "must be under" in result.stderr
+    assert result.returncode == 0, result.stderr
+    assert (group_root / "fdmu/runtime").is_dir()
+    assert not (tmp_path / "user-volume/runtime").exists()

@@ -9,5 +9,5 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 # shellcheck disable=SC1091
 source "${ROOT}/experiments/cluster/cluster_env.sh"
-VENV="${VENV:-/group-volume/jieuns.shin/venvs/exp}"
+VENV="/group-volume/fdmu/.venv"
 exec "${VENV}/bin/python" "${ROOT}/experiments/cluster/fleet_status.py"

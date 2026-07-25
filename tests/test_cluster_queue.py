@@ -125,7 +125,7 @@ def test_claim_survives_concurrent_double_rename_semantics(tmp_path):
 
 
 def test_worker_env_isolates_one_gpu_per_unit():
-    storage = "/group-volume/jieuns.shin/fdmu"
+    storage = "/group-volume/fdmu"
     base = {
         "PATH": "/bin",
         "CLUSTER_STORAGE_ROOT": storage,
@@ -158,7 +158,8 @@ def test_worker_env_replaces_node_local_tmpdir():
         gpu=0,
         needs_gpu=True,
     )
-    runtime = "/group-volume/shared/scratch/researcher/node-7b"
+    runtime = "/group-volume/fdmu/runtime/researcher/node-7b"
+    assert env["CLUSTER_RUNS_ROOT"] == "/group-volume/fdmu/runs"
     assert env["TMPDIR"] == f"{runtime}/tmp"
     assert env["HOME"] == f"{runtime}/home"
     assert env["HF_HOME"] == "/group-volume/data/hf_home"
@@ -182,22 +183,26 @@ def test_worker_unit_env_cannot_redirect_shared_cluster_roots():
         gpu=0,
         needs_gpu=True,
     )
-    assert env["CLUSTER_RUNS_ROOT"] == "/group-volume/shared/runs"
-    assert env["CLUSTER_WORK_ROOT"] == "/group-volume/shared/scratch/node-a"
-    assert env["TMPDIR"] == "/group-volume/shared/scratch/node-a/tmp"
+    runtime = f"/group-volume/fdmu/runtime/unknown/{worker.socket.gethostname()}"
+    assert env["CLUSTER_RUNS_ROOT"] == "/group-volume/fdmu/runs"
+    assert env["CLUSTER_WORK_ROOT"] == runtime
+    assert env["TMPDIR"] == f"{runtime}/tmp"
 
 
-def test_worker_rejects_user_volume_storage():
-    with pytest.raises(ValueError, match="must be under"):
-        worker.build_env(
-            {
-                "CLUSTER_RUNS_ROOT": "/user-volume/researcher/runs",
-                "CLUSTER_WORK_ROOT": "/user-volume/researcher/runtime",
-            },
-            {},
-            gpu=0,
-            needs_gpu=True,
-        )
+def test_worker_ignores_user_volume_storage():
+    env = worker.build_env(
+        {
+            "USER": "researcher",
+            "HOSTNAME": "node-a",
+            "CLUSTER_RUNS_ROOT": "/user-volume/researcher/runs",
+            "CLUSTER_WORK_ROOT": "/user-volume/researcher/runtime",
+        },
+        {},
+        gpu=0,
+        needs_gpu=True,
+    )
+    assert env["CLUSTER_RUNS_ROOT"] == "/group-volume/fdmu/runs"
+    assert env["CLUSTER_WORK_ROOT"] == "/group-volume/fdmu/runtime/researcher/node-a"
 
 
 def test_model_launchers_pin_queues_without_force_override():

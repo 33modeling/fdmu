@@ -70,7 +70,7 @@ def latest_running_log(unit_id: str) -> Path | None:
     runs_root = Path(
         os.environ.get(
             "CLUSTER_RUNS_ROOT",
-            "/group-volume/jieuns.shin/fdmu/runs",
+            "/group-volume/fdmu/runs",
         )
     )
     matches = list((runs_root / "logs/cluster").glob(f"{unit_id}__*.out"))

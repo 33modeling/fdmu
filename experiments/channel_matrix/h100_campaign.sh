@@ -19,7 +19,7 @@ set -Eeuo pipefail
 #   GPU=1 AUTHORS=199 MODEL_ID=qwen25_7b bash experiments/channel_matrix/h100_campaign.sh calibration
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-VENV="${VENV:-/group-volume/jieuns.shin/venvs/exp}"
+VENV="/group-volume/fdmu/.venv"
 CONFIG="${CONFIG:-configs/channel_matrix/7b_tofu.yaml}"
 MODEL_ID="${MODEL_ID:-qwen25_7b}"
 GPU="${GPU:-0}"
@@ -33,6 +33,7 @@ fi
 
 if [[ ! -f "${VENV}/bin/activate" ]]; then
   echo "missing official environment: ${VENV}/bin/activate" >&2
+  echo "run: bash experiments/cluster/setup_group_volume.sh" >&2
   exit 1
 fi
 

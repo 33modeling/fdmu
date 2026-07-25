@@ -112,7 +112,7 @@ def main() -> None:
     parser.add_argument("--interval", type=float, default=30.0)
     parser.add_argument(
         "--status-dir",
-        default="/group-volume/jieuns.shin/fdmu/runs/cluster_status",
+        default="/group-volume/fdmu/runs/cluster_status",
     )
     parser.add_argument("--replace", action="store_true",
                         help="take over from an existing watcher on this host")

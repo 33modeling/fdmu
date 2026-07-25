@@ -28,9 +28,10 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "${ROOT}"
 
 # venv activation — same default as launch_node.sh.
-VENV="${VENV:-/group-volume/jieuns.shin/venvs/exp}"
+VENV="/group-volume/fdmu/.venv"
 if [[ ! -f "${VENV}/bin/activate" ]]; then
   echo "[enqueue_table12] missing official environment: ${VENV}/bin/activate" >&2
+  echo "[enqueue_table12] run: bash experiments/cluster/setup_group_volume.sh" >&2
   exit 1
 fi
 # shellcheck disable=SC1090

@@ -78,20 +78,13 @@ def build_env(base: dict[str, str], unit_env: dict[str, str], gpu: int, needs_gp
         env["CUDA_VISIBLE_DEVICES"] = str(gpu)
         env["GPU"] = str(gpu)  # h100_campaign.sh reads GPU=
     env.setdefault("PYTHONUNBUFFERED", "1")
-    group_root = env.get(
-        "GROUP_VOLUME_ROOT",
-        env.get("FDMU_TEST_GROUP_VOLUME_ROOT", "/group-volume"),
-    )
-    storage_root = env.get(
-        "CLUSTER_STORAGE_ROOT", f"{group_root}/jieuns.shin/fdmu"
-    )
-    runs_root = env.get("CLUSTER_RUNS_ROOT", f"{storage_root}/runs")
+    group_root = "/group-volume"
+    env["GROUP_VOLUME_ROOT"] = group_root
+    storage_root = f"{group_root}/fdmu"
+    runs_root = f"{storage_root}/runs"
     user = env.get("USER", "unknown")
     host = env.get("HOSTNAME", socket.gethostname())
-    work_root = env.get(
-        "CLUSTER_WORK_ROOT",
-        f"{storage_root}/runtime/{user}/{host}",
-    )
+    work_root = f"{storage_root}/runtime/{user}/{host}"
     hf_home = env.get("CLUSTER_HF_HOME", f"{group_root}/data/hf_home")
     storage_root = _require_group_volume(
         storage_root, group_root, "cluster storage"
@@ -106,17 +99,10 @@ def build_env(base: dict[str, str], unit_env: dict[str, str], gpu: int, needs_gp
     env["HF_DATASETS_CACHE"] = env.get(
         "CLUSTER_HF_DATASETS_CACHE", f"{hf_home}/datasets"
     )
-    env["RSUS_DATASETS_CACHE"] = env.get(
-        "CLUSTER_RSUS_DATASETS_CACHE", f"{work_root}/datasets_cache"
-    )
-    env["TORCH_HOME"] = env.get(
-        "CLUSTER_TORCH_HOME", f"{work_root}/torch_home"
-    )
-    env["XDG_CACHE_HOME"] = env.get(
-        "CLUSTER_XDG_CACHE_HOME",
-        f"{work_root}/xdg_cache",
-    )
-    env["TMPDIR"] = env.get("CLUSTER_TMPDIR", f"{work_root}/tmp")
+    env["RSUS_DATASETS_CACHE"] = f"{work_root}/datasets_cache"
+    env["TORCH_HOME"] = f"{work_root}/torch_home"
+    env["XDG_CACHE_HOME"] = f"{work_root}/xdg_cache"
+    env["TMPDIR"] = f"{work_root}/tmp"
     env["HOME"] = f"{work_root}/home"
     env["TMP"] = env["TMPDIR"]
     env["TEMP"] = env["TMPDIR"]
@@ -236,7 +222,7 @@ def main() -> None:
     runs_root = Path(
         os.environ.get(
             "CLUSTER_RUNS_ROOT",
-            "/group-volume/jieuns.shin/fdmu/runs",
+            "/group-volume/fdmu/runs",
         )
     )
     parser.add_argument("--log-dir", default=str(runs_root / "logs" / "cluster"))

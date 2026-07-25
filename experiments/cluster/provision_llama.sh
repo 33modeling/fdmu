@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-# Provision meta-llama/Llama-3.1-8B-Instruct into /group-volume/models for the
+# Provision meta-llama/Llama-3.1-8B-Instruct into /group-volume/fdmu/models for the
 # llama8b_tofu.yaml campaign (second architecture family, Table 2).
 #
 # Run ON THE CLUSTER.  HF Hub has been blocked/unstable from the intranet since
@@ -18,8 +18,8 @@ set -Eeuo pipefail
 # present under the destination, it verifies and exits without downloading.
 
 REPO_ID="meta-llama/Llama-3.1-8B-Instruct"
-DEST="${DEST:-/group-volume/models/Llama-3.1-8B-Instruct}"
-VENV="${VENV:-/group-volume/jieuns.shin/venvs/exp}"
+DEST="/group-volume/fdmu/models/Llama-3.1-8B-Instruct"
+VENV="/group-volume/fdmu/.venv"
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$ROOT"
 # shellcheck disable=SC1091
@@ -71,10 +71,11 @@ if verify_dest; then
   exit 0
 fi
 
-if [[ -f "${VENV}/bin/activate" ]]; then
-  # shellcheck disable=SC1090
-  source "${VENV}/bin/activate"
+if [[ ! -f "${VENV}/bin/activate" ]]; then
+  fail "missing $VENV; run: bash experiments/cluster/setup_group_volume.sh"
 fi
+# shellcheck disable=SC1090
+source "${VENV}/bin/activate"
 command -v huggingface-cli >/dev/null 2>&1 \
   || fail "huggingface-cli not found (activate ${VENV} or pip install -U huggingface_hub)"
 

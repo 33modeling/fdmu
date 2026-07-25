@@ -3,11 +3,11 @@
 
 CLUSTER_REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 CLUSTER_LOCAL_ENV="${CLUSTER_LOCAL_ENV:-$CLUSTER_REPO_ROOT/.cluster_env.local.sh}"
-export GROUP_VOLUME_ROOT="${FDMU_TEST_GROUP_VOLUME_ROOT:-/group-volume}"
+_FDMU_GROUP_VOLUME_ROOT="${FDMU_TEST_GROUP_VOLUME_ROOT:-/group-volume}"
+readonly _FDMU_GROUP_VOLUME_ROOT
 
-# Queue/results and scratch live on group-volume, independently of where the
-# checkout itself is mounted. A local config may customize storage paths only
-# to another location below /group-volume.
+# Queue/results and scratch live under /group-volume/fdmu, independently of
+# where the checkout itself is mounted. They are intentionally not overridable.
 unset \
   CLUSTER_STORAGE_ROOT \
   CLUSTER_RUNS_ROOT \
@@ -25,11 +25,12 @@ if [[ -f "$CLUSTER_LOCAL_ENV" ]]; then
   printf '[cluster-env] loaded local overrides: %s\n' "$CLUSTER_LOCAL_ENV"
 fi
 
+export GROUP_VOLUME_ROOT="$_FDMU_GROUP_VOLUME_ROOT"
 CLUSTER_USER="${USER:-$(id -un)}"
 CLUSTER_HOST="${HOSTNAME:-$(hostname)}"
-export CLUSTER_STORAGE_ROOT="${CLUSTER_STORAGE_ROOT:-$GROUP_VOLUME_ROOT/jieuns.shin/fdmu}"
+export CLUSTER_STORAGE_ROOT="$GROUP_VOLUME_ROOT/fdmu"
 export CLUSTER_RUNS_ROOT="$CLUSTER_STORAGE_ROOT/runs"
-CLUSTER_RUNTIME_BASE="${CLUSTER_RUNTIME_BASE:-$CLUSTER_STORAGE_ROOT/runtime}"
+CLUSTER_RUNTIME_BASE="$CLUSTER_STORAGE_ROOT/runtime"
 export CLUSTER_WORK_ROOT="$CLUSTER_RUNTIME_BASE/$CLUSTER_USER/$CLUSTER_HOST"
 
 ensure_group_volume_path() {
@@ -47,10 +48,10 @@ ensure_group_volume_path() {
 
 export HF_HOME="${CLUSTER_HF_HOME:-$GROUP_VOLUME_ROOT/data/hf_home}"
 export HF_DATASETS_CACHE="${CLUSTER_HF_DATASETS_CACHE:-$HF_HOME/datasets}"
-export RSUS_DATASETS_CACHE="${CLUSTER_RSUS_DATASETS_CACHE:-$CLUSTER_WORK_ROOT/datasets_cache}"
-export TORCH_HOME="${CLUSTER_TORCH_HOME:-$CLUSTER_WORK_ROOT/torch_home}"
-export XDG_CACHE_HOME="${CLUSTER_XDG_CACHE_HOME:-$CLUSTER_WORK_ROOT/xdg_cache}"
-export TMPDIR="${CLUSTER_TMPDIR:-$CLUSTER_WORK_ROOT/tmp}"
+export RSUS_DATASETS_CACHE="$CLUSTER_WORK_ROOT/datasets_cache"
+export TORCH_HOME="$CLUSTER_WORK_ROOT/torch_home"
+export XDG_CACHE_HOME="$CLUSTER_WORK_ROOT/xdg_cache"
+export TMPDIR="$CLUSTER_WORK_ROOT/tmp"
 export HOME="$CLUSTER_WORK_ROOT/home"
 export TMP="$TMPDIR"
 export TEMP="$TMPDIR"
@@ -70,6 +71,7 @@ export PYTHONPYCACHEPREFIX="$CLUSTER_WORK_ROOT/pycache"
 export WANDB_DIR="$CLUSTER_WORK_ROOT/wandb"
 export WANDB_CACHE_DIR="$CLUSTER_WORK_ROOT/wandb/cache"
 export WANDB_CONFIG_DIR="$CLUSTER_WORK_ROOT/wandb/config"
+export PYTHONPATH="$CLUSTER_REPO_ROOT/src${PYTHONPATH:+:$PYTHONPATH}"
 
 if [[ ! -d "$HF_HOME" ]]; then
   printf 'shared HF_HOME is missing or not mounted: %s\n' "$HF_HOME" >&2

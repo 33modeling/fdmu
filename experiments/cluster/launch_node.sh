@@ -12,12 +12,13 @@ set -Eeuo pipefail
 # Stop this node's workers:  pkill -f "experiments/cluster/worker.py --queue"
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-VENV="${VENV:-/group-volume/jieuns.shin/venvs/exp}"
+VENV="/group-volume/fdmu/.venv"
 WAIT="${WAIT:-1}"
 HOST="$(hostname)"
 
 if [[ ! -f "${VENV}/bin/activate" ]]; then
   echo "missing official environment: ${VENV}/bin/activate" >&2
+  echo "run: bash experiments/cluster/setup_group_volume.sh" >&2
   exit 1
 fi
 # shellcheck disable=SC1090

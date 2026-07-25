@@ -27,7 +27,7 @@ paper evidence 실행에 사용하면 안 된다.
 
 ```bash
 cd /path/to/fdmu
-source /group-volume/jieuns.shin/venvs/exp/bin/activate
+source /group-volume/fdmu/.venv/bin/activate
 
 python -c 'import torch; print(torch.__version__, torch.cuda.is_available())'
 ```

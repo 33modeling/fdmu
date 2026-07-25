@@ -3,7 +3,7 @@ set -Eeuo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 SOURCE="$ROOT/runs"
-TARGET="/group-volume/jieuns.shin/fdmu/runs"
+TARGET="/group-volume/fdmu/runs"
 
 log() {
   printf '[migrate-runs] %s\n' "$*"

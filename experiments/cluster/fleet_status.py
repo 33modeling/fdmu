@@ -20,7 +20,7 @@ ROOT = Path(__file__).resolve().parents[2]
 RUNS_ROOT = Path(
     os.environ.get(
         "CLUSTER_RUNS_ROOT",
-        "/group-volume/jieuns.shin/fdmu/runs",
+        "/group-volume/fdmu/runs",
     )
 ).resolve()
 sys.path.insert(0, str(Path(__file__).resolve().parent))
