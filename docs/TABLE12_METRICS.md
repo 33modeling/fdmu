@@ -22,9 +22,11 @@ PDF와 Markdown, LaTeX, YAML, 코드가 충돌하면 PDF 정의를 따른다. �
 - **Table 1, Panel B:** `Profile mean; CVaR`,
   `No-repair mean; CVaR`, `max_(a,k) Delta_(a,k) [UCB]`,
   `min_a h_a [LB]`, `min F/U slack`, `updates/rollback`, `RQ3 E/P`
-- **Table 2:** `Axis`, `Setting`, `Plan/done`, `RQ1 E/P`, `RQ2 E/P`,
+- **PDF Table 2:** `Axis`, `Setting`, `Plan/done`, `RQ1 E/P`, `RQ2 E/P`,
   `RQ3 E/P`, `valid/reach`, `tail/common n`, `all-arm feasible`,
   `worst RQ1/RQ2/RQ3 bounds`, `Failure modes`
+- **현재 generated Table 2:** 같은 판정과 분모를 보존하되 최신 H100 실험
+  브랜치의 가독성 변경을 반영해 breadth(2A)와 funnel(2B) 두 표로 나눈다.
 
 Table 1의 parent roster는 output-readout
 `{GradDiff, NPO, SimNPO, GRU}`와 representation-readout
@@ -296,6 +298,8 @@ Table 2는 새로운 candidate metric을 계산하지 않는다. Table 1과 같�
 decision을 위에 열거한 PDF의 8개 predeclared setting에 대해 요약하며,
 미실행 setting도 분모에서 제거하지 않는다.
 
+### Table 2A: claim breadth
+
 | 열 | 의미 |
 |---|---|
 | `Axis` | request, model, dataset 중 변화 축 |
@@ -304,10 +308,23 @@ decision을 위에 열거한 PDF의 8개 predeclared setting에 대해 요약하
 | `RQ1 E/P` | 해당 setting에서 RQ1 eligible parent 수 / passed parent 수 |
 | `RQ2 E/P` | 해당 setting에서 RQ2 eligible parent 수 / passed parent 수 |
 | `RQ3 E/P` | 해당 setting에서 RQ3 eligible parent 수 / passed parent 수 |
-| `valid/reach` | valid profile/planned profile; reached trajectory/planned trajectory |
-| `tail/common n` | RQ1 tail-eligible unit 수 / prediction common-support unit 수 |
-| `all-arm feasible` | 다섯 arm이 모두 feasible한 unit 수 / reached+valid unit 수 |
-| `worst RQ1/RQ2/RQ3 bounds` | RQ1 LB 최솟값 / RQ2 LB 최솟값 / RQ3 damage UCB 최댓값 |
+| `Chain` | output-readout와 representation-readout group에서 각각 최소 1개 parent가 within-readout Bonferroni 보정 후 RQ1/RQ2/RQ3를 모두 통과했는지 (`y/n`) |
+
+아직 시도하지 않은 setting의 `Chain`은 실패를 뜻하는 `n`이 아니라
+`\tblph`로 남긴다. Stress setting은 primary 실패를 구제하지 않는다.
+
+### Table 2B: evidence funnel
+
+| 열 | 의미 |
+|---|---|
+| `Axis` | request, model, dataset 중 변화 축 |
+| `Setting` | dataset/model setting; stress와 boundary는 표시 |
+| `Profiles valid` | sealed profile valid 수 / planned profile 수 |
+| `Gate reached` | forgetting gate 도달 trajectory 수 / planned trajectory 수 |
+| `Common n` | prediction에서 complete common support를 가진 audit unit 수 |
+| `Tail-elig. n` | RQ1 harmful-tail 계산 자격을 갖춘 unit 수 |
+| `All-arm feas.` | 다섯 repair arm이 모두 feasible한 unit 수 / valid profile로 gate에 도달한 unit 수 |
+| `Worst RQ1/RQ2/RQ3` | RQ1 LB 최솟값 / RQ2 LB 최솟값 / RQ3 damage UCB 최댓값 |
 | `Failure modes` | non-reach, invalid profile, common-support, constraint/IUT 실패 요약 |
 
 `worst` 열에서 RQ1·RQ2는 큰 값이 유리하므로 lower bound의 최솟값을,
@@ -316,11 +333,11 @@ non-inferiority bound는 damage와 척도가 달라 Table 1의 `min_a h_a`에만
 표시한다. 이 worst 값은 기술적 요약이며 누락 row를 대신하거나 pass를
 허가하지 않는다.
 
-Setting-level/transfer claim은 row별 IUT보다 더 엄격하다. 각 readout parent
-group 안에서 Bonferroni 보정한 alpha를 적용해 RQ1/RQ2/RQ3를 모두 통과한
-parent가 필요하다. Primary, model-transfer, dataset-replication group의
-사전 동결 규칙까지 만족해야 최종 transfer 문구가 licensed된다. Stress
-setting은 primary 실패를 구제할 수 없다.
+Setting-level/transfer claim은 row별 IUT보다 더 엄격하다. `Chain`은 각
+readout parent group 안에서 Bonferroni 보정한 alpha를 적용해
+RQ1/RQ2/RQ3를 모두 통과한 parent가 있는지를 표시한다. Primary,
+model-transfer, dataset-replication group의 사전 동결 규칙까지 만족해야
+최종 transfer 문구가 licensed된다.
 
 ## 6. 구현 위치와 PDF 일치 상태
 

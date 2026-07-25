@@ -319,8 +319,10 @@ headline macros:
 4. `build_evidence.py --paper-root paper` writes
    `sections/generated/table_core_evidence.tex` and
    `sections/generated/table_robustness.tex` (labels `tab:core-evidence`,
-   `tab:robustness`) alongside the macros; every incomplete cell stays
-   `\tblph`. RQ2 cells consume the ledger's four PDF-v4 effects
+   `tab:robustness`, `tab:robustness-funnel`) alongside the macros. The
+   robustness output contains Table 2A claim breadth and Table 2B evidence
+   funnel; every incomplete cell stays `\tblph`. RQ2 cells consume the
+   ledger's four PDF-v4 effects
    (`f_rho-0.80`, `f_K-0.70`, `g_H`, `g_ctl`) and only report pass when all
    one-sided bounds exist and clear zero.
 

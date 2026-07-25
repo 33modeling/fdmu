@@ -33,6 +33,7 @@ def test_empty_ledger_renders_placeholders_only(tmp_path):
     assert r"\tblph" in core
     assert r"\label{tab:core-evidence}" in core
     assert r"\label{tab:robustness}" in robustness
+    assert r"\label{tab:robustness-funnel}" in robustness
     # No numeric prediction cell may appear without ledger evidence.
     assert "0.5" not in core.replace("0.05", "").replace("\\tabcolsep", "")
     assert "not attempted" in robustness
@@ -50,6 +51,10 @@ def test_passing_row_renders_bounds_and_yes_flags(tmp_path):
     assert "$f_\\rho/f_K$" in core
     robustness = render_robustness_table(contract, ledger, report)
     assert "1/1" in robustness
+    assert "RQ3 E/P & Chain" in robustness
+    assert "Profiles valid & Gate reached & Common $n$" in robustness
+    assert "held-out D0 requests & 1/1 & 1/1 & 1/1 & 1/1 & y" in robustness
+    assert "held-out D0 requests & 2/2 & 2/2 & 2 & 2 & 2/2" in robustness
 
 
 def test_validated_rq2_evidence_fills_fidelity_cells(tmp_path):
@@ -154,7 +159,7 @@ def test_robustness_worst_bounds_cover_all_three_rqs(tmp_path):
     robustness = render_robustness_table(
         contract, ledger, report, fidelity=fidelity
     )
-    assert "worst RQ1/RQ2/RQ3 bounds" in robustness
+    assert "Worst RQ1/RQ2/RQ3" in robustness
     # RQ1/RQ2 report least-favorable lower bounds (min over members, the
     # fidelity floor margins included), RQ3 the largest damage upper bound.
     assert "+0.050 / +0.050 / -0.050" in robustness
@@ -162,7 +167,7 @@ def test_robustness_worst_bounds_cover_all_three_rqs(tmp_path):
     empty = render_robustness_table(
         contract, EvidenceLedger.empty(), _report(contract, EvidenceLedger.empty())
     )
-    assert "worst RQ1/RQ2/RQ3 bounds" in empty
+    assert "Worst RQ1/RQ2/RQ3" in empty
 
 
 def test_rq2_cell_never_shows_eligible_for_ineligible_rows(tmp_path):

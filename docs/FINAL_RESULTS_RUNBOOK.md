@@ -234,7 +234,7 @@ python experiments/paper/build_evidence.py \
 
 ```text
 paper/sections/generated/table_core_evidence.tex
-paper/sections/generated/table_robustness.tex
+paper/sections/generated/table_robustness.tex  # Table 2A breadth + 2B funnel
 paper/sections/generated/results_macros.tex
 ```
 
