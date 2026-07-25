@@ -51,25 +51,32 @@ def build_env(base: dict[str, str], unit_env: dict[str, str], gpu: int, needs_gp
         env["GPU"] = str(gpu)  # h100_campaign.sh reads GPU=
     env.setdefault("PYTHONUNBUFFERED", "1")
     group_root = env.get("GROUP_VOLUME_ROOT", "/group-volume")
-    cluster_user = env.get("USER", "cluster")
+    runs_root = env.get(
+        "CLUSTER_RUNS_ROOT",
+        f"{group_root}/jieuns.shin/retain-susceptibility/runs",
+    )
+    work_root = env.get(
+        "CLUSTER_WORK_ROOT",
+        f"{runs_root}/_runtime",
+    )
     hf_home = env.get("CLUSTER_HF_HOME", f"{group_root}/data/hf_home")
     env["HF_HOME"] = hf_home
     env["HF_DATASETS_CACHE"] = env.get(
         "CLUSTER_HF_DATASETS_CACHE", f"{hf_home}/datasets"
     )
     env["RSUS_DATASETS_CACHE"] = env.get(
-        "CLUSTER_RSUS_DATASETS_CACHE", f"{hf_home}/rsus_datasets_cache"
+        "CLUSTER_RSUS_DATASETS_CACHE", f"{work_root}/datasets_cache"
     )
     env["TORCH_HOME"] = env.get(
-        "CLUSTER_TORCH_HOME", f"{group_root}/data/torch_home"
+        "CLUSTER_TORCH_HOME", f"{work_root}/torch_home"
     )
     env["XDG_CACHE_HOME"] = env.get(
         "CLUSTER_XDG_CACHE_HOME",
-        f"{group_root}/data/xdg_cache/{cluster_user}",
+        f"{work_root}/xdg_cache",
     )
     env["TMPDIR"] = env.get(
         "CLUSTER_TMPDIR",
-        f"{group_root}/tmp/{cluster_user}",
+        f"{work_root}/tmp",
     )
     # HF Hub is blocked/unstable from the cluster (2026-07-23); every queued
     # unit must run cache-only unless its own env explicitly opts back in

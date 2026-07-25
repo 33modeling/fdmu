@@ -18,8 +18,10 @@ experiments/cluster/
 
 ## 핵심 설계
 
-- **저장소는 전부 공유 볼륨.** `cluster_env.sh`가 `TMPDIR`, Hugging Face
-  datasets/RSUS fallback, Torch, XDG 캐시를 `/group-volume` 아래로 강제한다.
+- **저장소는 전부 공유 볼륨.** `cluster_env.sh`가 `TMPDIR`, RSUS fallback,
+  Torch, XDG 캐시를 레포의
+  `/group-volume/jieuns.shin/retain-susceptibility/runs/_runtime`
+  아래로 강제하고, 기존 `/group-volume/data/hf_home`은 읽기 전용으로 사용한다.
   노드 로컬 `/tmp`와 `~/.cache`에는 새 실험 파일을 쓰지 않는다.
 - **작업 단위 = 기존 러너가 이미 지원하는 최소 샤드.** run 디렉토리가 단위 간
   절대 겹치지 않도록 자름: calibration/audit은 `--only-authors <한 명>`,

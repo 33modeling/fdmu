@@ -147,10 +147,11 @@ def test_worker_env_replaces_node_local_tmpdir():
         gpu=0,
         needs_gpu=True,
     )
-    assert env["TMPDIR"] == "/group-volume/tmp/researcher"
+    runtime = "/group-volume/jieuns.shin/retain-susceptibility/runs/_runtime"
+    assert env["TMPDIR"] == f"{runtime}/tmp"
     assert env["HF_HOME"] == "/group-volume/data/hf_home"
-    assert env["TORCH_HOME"] == "/group-volume/data/torch_home"
-    assert env["XDG_CACHE_HOME"] == "/group-volume/data/xdg_cache/researcher"
+    assert env["TORCH_HOME"] == f"{runtime}/torch_home"
+    assert env["XDG_CACHE_HOME"] == f"{runtime}/xdg_cache"
 
 
 def test_worker_executes_units_and_records_results(tmp_path):
