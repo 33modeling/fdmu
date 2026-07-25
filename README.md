@@ -23,6 +23,12 @@
 > `prereg/constants.yaml`이 근거다. (`paper/sections/*.tex`와 `DESIGN.md`는
 > 현재 구버전 초안이므로 참고용으로만 사용한다.)
 
+## 문서 찾기
+
+모든 Markdown 문서는 [문서 인덱스](docs/README.md)에서 용도별로 찾을 수 있다.
+Table 1/2 수식은 [metric guide](docs/TABLE12_METRICS.md), 실제 실행 순서는
+[campaign guide](docs/plan_table12_campaign.md)를 바로 보면 된다.
+
 ---
 
 ## 1. 무엇을 하는가 (문제 정의)
