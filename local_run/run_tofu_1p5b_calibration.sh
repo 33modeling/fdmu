@@ -29,7 +29,9 @@ if [[ ! -x "$PYTHON" ]]; then
   "$PYTHON_BOOTSTRAP" -m venv "$VENV"
   "$PYTHON" -m pip install --upgrade pip setuptools wheel
   "$PYTHON" -m pip install "torch==2.7.1"
-  "$PYTHON" -m pip install -e ".[dev,campaign]"
+  "$PYTHON" -m pip install -e ".[dev]" "datasets>=2.19"
+elif ! "$PYTHON" -c 'import torch, transformers, datasets, yaml' >/dev/null 2>&1; then
+  "$PYTHON" -m pip install -e ".[dev]" "datasets>=2.19"
 fi
 
 export HF_HOME="${HF_HOME:-/rdata/minsoo3.kim/hf_home}"
@@ -37,6 +39,16 @@ export HF_HUB_OFFLINE="${HF_HUB_OFFLINE:-1}"
 export TRANSFORMERS_OFFLINE="${TRANSFORMERS_OFFLINE:-1}"
 export HF_DATASETS_OFFLINE="${HF_DATASETS_OFFLINE:-1}"
 export PYTORCH_CUDA_ALLOC_CONF="${PYTORCH_CUDA_ALLOC_CONF:-expandable_segments:True}"
+
+"$PYTHON" - <<'PY'
+from rsus.data.tofu import _load_tofu_config
+
+expected = {"full": 4000, "forget10_perturbed": 400}
+for config, count in expected.items():
+    rows = _load_tofu_config(config)
+    assert len(rows) == count, f"TOFU {config}: {len(rows)} != {count}"
+    print(f"[data] TOFU {config}: rows={len(rows)}")
+PY
 
 "$PYTHON" - "$GPU_IDS" <<'PY'
 import sys

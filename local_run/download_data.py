@@ -1,9 +1,8 @@
 #!/usr/bin/env python
-"""Download every dataset/encoder the gate experiment needs into ~/rdata/hf_home.
+"""Download the datasets the local experiments need into ~/rdata/hf_home.
 
 - locuslab/TOFU  configs: full, forget10_perturbed  (TOFU adapter)
 - jinzhuoran/RWKU configs: forget_target, forget_level1/2, neighbor_level1/2 (RWKU adapter)
-- sentence-transformers/all-MiniLM-L6-v2 (knn_embed selector)
 Run inside the repo venv.
 """
 import os
@@ -35,11 +34,6 @@ def main():
         grab("locuslab/TOFU", cfg, split)
     for cfg, split in RWKU:
         grab("jinzhuoran/RWKU", cfg, split)
-    # sentence encoder for knn_embed selector
-    print("[dl] sentence-transformers/all-MiniLM-L6-v2 ...", flush=True)
-    from sentence_transformers import SentenceTransformer
-
-    SentenceTransformer("sentence-transformers/all-MiniLM-L6-v2")
     print("all downloads complete", flush=True)
 
 

@@ -49,7 +49,7 @@ calibration/comparator/CI 전체를 대신하지 않으므로
 | 파일 | 용도 |
 |---|---|
 | `download_models.sh` | 누락 모델(1.5B/4B 등)을 `/rdata/models`로 다운로드 (Xet 비활성) |
-| `download_data.py` | TOFU + RWKU + MiniLM 인코더 다운로드 |
+| `download_data.py` | TOFU + RWKU 데이터 다운로드 |
 | `download_muse.py` | MUSE-News / MUSE-Books 다운로드 |
 | `local_run.sh` | 새 PDF v4 config/manifest 검증 및 실행 |
 | `run_tofu_1p5b_calibration.sh` | 1.5B PDF-v4 parent calibration과 freeze proposal |

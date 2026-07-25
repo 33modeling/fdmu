@@ -17,7 +17,11 @@ from pathlib import Path
 import torch
 
 from rsus.data.base import CandidateUniverse, Example, Request
-from rsus.data.hf_cache import find_cached_arrow_shards, writable_datasets_cache
+from rsus.data.hf_cache import (
+    dataset_cache_roots,
+    find_cached_arrow_shards,
+    writable_datasets_cache,
+)
 from rsus.losses import IGNORE
 
 QA_PER_AUTHOR = 20
@@ -60,12 +64,22 @@ def _load_tofu_config(config: str) -> list[dict]:
     # user-writable location instead of the shared HF_HOME dataset cache.
     from datasets import load_dataset
 
-    dataset = load_dataset(
-        TOFU_REPO,
-        config,
-        split=TRAIN_SPLIT,
-        cache_dir=str(writable_datasets_cache()),
-    )
+    try:
+        dataset = load_dataset(
+            TOFU_REPO,
+            config,
+            split=TRAIN_SPLIT,
+            cache_dir=str(writable_datasets_cache()),
+        )
+    except Exception as error:
+        roots = ", ".join(
+            str(path) for path in dataset_cache_roots()
+        )
+        raise RuntimeError(
+            f"TOFU config {config!r} is unavailable. No prepared train Arrow "
+            f"was found under [{roots}], and datasets.load_dataset failed: "
+            f"{error}"
+        ) from error
     return list(dataset)
 
 

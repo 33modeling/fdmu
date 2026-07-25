@@ -1,6 +1,7 @@
 from pathlib import Path
 
 from rsus.data.hf_cache import (
+    dataset_cache_roots,
     find_cached_arrow_shards,
     writable_datasets_cache,
 )
@@ -43,16 +44,53 @@ def test_cached_arrow_lookup_returns_empty_for_missing_config(tmp_path):
     ) == []
 
 
+def test_cached_arrow_lookup_skips_newer_incomplete_fingerprint(tmp_path):
+    complete = _fingerprint(tmp_path, "aaa")
+    incomplete = _fingerprint(tmp_path, "zzz")
+    arrow = complete / "tofu-train.arrow"
+    arrow.write_text("", encoding="utf-8")
+    incomplete_info = incomplete / "dataset_info.json"
+    incomplete_info.touch()
+
+    assert find_cached_arrow_shards(
+        "locuslab___tofu",
+        "full",
+        "train",
+        hf_home=tmp_path,
+    ) == [arrow]
+
+
 def test_cached_arrow_lookup_honors_hf_datasets_cache(tmp_path, monkeypatch):
     new = _fingerprint(tmp_path, "bbb")
     (new / "tofu-train.arrow").write_text("", encoding="utf-8")
     monkeypatch.setenv("HF_DATASETS_CACHE", str(tmp_path / "datasets"))
+    monkeypatch.delenv("HF_HOME", raising=False)
 
     assert find_cached_arrow_shards(
         "locuslab___tofu",
         "full",
         "train",
     ) == [new / "tofu-train.arrow"]
+
+
+def test_cached_arrow_lookup_falls_back_from_empty_override_to_hf_home(
+    tmp_path, monkeypatch
+):
+    empty = tmp_path / "empty"
+    empty.mkdir()
+    home = tmp_path / "home"
+    new = _fingerprint(home, "bbb")
+    arrow = new / "tofu-train.arrow"
+    arrow.write_text("", encoding="utf-8")
+    monkeypatch.setenv("HF_DATASETS_CACHE", str(empty))
+    monkeypatch.setenv("HF_HOME", str(home))
+
+    assert dataset_cache_roots() == [empty.resolve(), home / "datasets"]
+    assert find_cached_arrow_shards(
+        "locuslab___tofu",
+        "full",
+        "train",
+    ) == [arrow]
 
 
 def test_writable_fallback_cache_honors_override(tmp_path, monkeypatch):
