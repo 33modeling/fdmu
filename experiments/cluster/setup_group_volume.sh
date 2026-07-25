@@ -17,7 +17,6 @@ export PYTHONPYCACHEPREFIX="$STORAGE/bootstrap/pycache"
 mkdir -p \
   "$STORAGE/runs" \
   "$STORAGE/runtime" \
-  "$STORAGE/models" \
   "$STORAGE/environment" \
   "$HOME" \
   "$TMPDIR" \

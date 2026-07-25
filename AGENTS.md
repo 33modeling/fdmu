@@ -74,9 +74,8 @@ dataset, dtype, metric, or comparator.
 - Environment: `/group-volume/fdmu/.venv`
 - Shared state/results: `/group-volume/fdmu/runs`
 - Host scratch/cache: `/group-volume/fdmu/runtime/<user>/<host>`
-- Newly provisioned models: `/group-volume/fdmu/models`
-- Existing shared model/data sources may be read from `/group-volume/models`
-  and `/group-volume/data/hf_home`, but no generated file is written there.
+- Models: `/group-volume/models`
+- Existing dataset source cache: `/group-volume/data/hf_home`
 
 The cluster has no GitHub egress. Do not commit or push there. Do not create a
 replacement venv or install packages into the shared environment. Use

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-# Provision meta-llama/Llama-3.1-8B-Instruct into /group-volume/fdmu/models for the
+# Provision meta-llama/Llama-3.1-8B-Instruct into /group-volume/models for the
 # llama8b_tofu.yaml campaign (second architecture family, Table 2).
 #
 # Run ON THE CLUSTER.  HF Hub has been blocked/unstable from the intranet since
@@ -18,7 +18,7 @@ set -Eeuo pipefail
 # present under the destination, it verifies and exits without downloading.
 
 REPO_ID="meta-llama/Llama-3.1-8B-Instruct"
-DEST="/group-volume/fdmu/models/Llama-3.1-8B-Instruct"
+DEST="/group-volume/models/Llama-3.1-8B-Instruct"
 VENV="/group-volume/fdmu/.venv"
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$ROOT"
