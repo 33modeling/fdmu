@@ -650,6 +650,14 @@ def main() -> None:
                 if a.limit and n >= a.limit:
                     break
                 continue
+            if a.dry_run:
+                # Contract validation must not depend on mutable runtime
+                # artifacts from an earlier attempt.
+                _run(cmd, True, env)
+                n += 1
+                if a.limit and n >= a.limit:
+                    break
+                continue
             if _has_artifacts(out) and a.resume and not a.dry_run:
                 _quarantine_partial_audit(out)
             elif _has_artifacts(out):

@@ -127,6 +127,56 @@ class ChannelCampaignContractTest(unittest.TestCase):
                 destination.parent, runs / "forensics" / "audit-partials"
             )
 
+    def test_audit_dry_run_ignores_existing_runtime_artifacts(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            out = root / "audit" / "model" / "request" / "seed-1"
+            out.mkdir(parents=True)
+            (out / "partial.txt").write_text("old", encoding="utf-8")
+            cfg = {
+                "output_root": str(root),
+                "audit": {
+                    "offline": True,
+                    "objectives": ["rmu"],
+                    "stress_objectives": [],
+                },
+            }
+            cmd = ["python", "gate.py"]
+            argv = [
+                "run_campaign.py",
+                "--config",
+                str(root / "config.yaml"),
+                "--phase",
+                "audit",
+                "--dry-run",
+                "--limit",
+                "1",
+            ]
+            with (
+                mock.patch.object(sys, "argv", argv),
+                mock.patch.object(campaign, "_load_yaml", return_value=cfg),
+                mock.patch.object(campaign, "_validate_campaign"),
+                mock.patch.object(
+                    campaign,
+                    "_enabled_models",
+                    return_value=[{"id": "model", "path": "/missing"}],
+                ),
+                mock.patch.object(
+                    campaign,
+                    "_git_state",
+                    return_value={"code_dirty": False},
+                ),
+                mock.patch.object(
+                    campaign,
+                    "audit_commands",
+                    return_value=iter([(out, cmd, {})]),
+                ),
+                mock.patch.object(campaign, "_run") as run,
+            ):
+                campaign.main()
+
+            run.assert_called_once_with(cmd, True, mock.ANY)
+
     def test_fidelity_uses_only_frozen_development_cell(self):
         commands = list(campaign.fidelity_commands(
             self.config, self.models, ROOT / "runs/channel_matrix_7b"
