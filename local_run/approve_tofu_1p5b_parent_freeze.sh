@@ -4,7 +4,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 
-VENV="${VENV:-/rdata/minsoo3.kim/venvs/fdmu}"
+VENV="${VENV:-$ROOT/.venv}"
 PYTHON="$VENV/bin/python"
 CALIBRATION_ROOT="${CALIBRATION_ROOT:-/rdata/minsoo3.kim/results/paper/tofu_qwen25_1p5b/parent_calibration}"
 PROPOSAL="$CALIBRATION_ROOT/freeze_proposals/tofu_parent_freeze_1p5b.recommended.yaml"

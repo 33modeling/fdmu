@@ -3,7 +3,17 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
-export VENV="${VENV:-/rdata/minsoo3.kim/venvs/fdmu}"
+export VENV="${VENV:-$ROOT/.venv}"
+PYTHON="$VENV/bin/python"
+
+if [[ -x "$PYTHON" ]]; then
+  if ! "$PYTHON" -c 'import yaml' >/dev/null 2>&1; then
+    "$PYTHON" -m pip install --no-cache-dir "PyYAML>=6.0"
+  fi
+  "$PYTHON" -c 'import sys, yaml; print(
+      f"[deps] python={sys.executable} pyyaml={yaml.__version__}"
+  )'
+fi
 
 timestamp() {
   date -u '+%FT%TZ'

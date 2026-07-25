@@ -5,7 +5,7 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 
 PYTHON_BOOTSTRAP="${PYTHON_BOOTSTRAP:-python3.11}"
-VENV="${VENV:-/rdata/minsoo3.kim/venvs/fdmu}"
+VENV="${VENV:-$ROOT/.venv}"
 PYTHON="$VENV/bin/python"
 export PIP_NO_CACHE_DIR=1
 GPU_IDS="${GPU_IDS:-0,1}"
