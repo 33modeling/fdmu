@@ -117,6 +117,7 @@ fi
 exec "$PYTHON" -u experiments/paper/run_joint_dev_sweep.py \
   --spec "$SPEC" \
   --gpus "$GPU_IDS" \
+  --python "$PYTHON" \
   --model-source "$MODEL_PATH" \
   --sft-cache-root "$SFT_CACHE_ROOT" \
   --output-root "$RESULTS_ROOT" \

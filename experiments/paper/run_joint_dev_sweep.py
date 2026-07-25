@@ -1129,6 +1129,7 @@ def run(args: argparse.Namespace) -> int:
     if args.progress_interval < 1.0:
         raise SweepError("--progress-interval must be at least 1 second")
     for name, value in (
+        ("python", args.python),
         ("model_source", args.model_source),
         ("sft_cache_root", args.sft_cache_root),
         ("output_root", args.output_root),
@@ -1464,6 +1465,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         default=ROOT / "configs/local/joint_sweep_1p5b_4090x2.yaml",
     )
     parser.add_argument("--gpus", default=None, help="physical GPU ids, e.g. 0,1")
+    parser.add_argument("--python", type=Path, default=None)
     parser.add_argument("--model-source", type=Path, default=None)
     parser.add_argument("--sft-cache-root", type=Path, default=None)
     parser.add_argument("--output-root", type=Path, default=None)
