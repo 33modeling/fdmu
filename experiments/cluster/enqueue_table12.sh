@@ -55,9 +55,18 @@ require_config() {  # $1 = config path
 require_clean_tree() {
   # The sealed audit runner refuses a dirty worktree, and the runbook requires
   # committing before ANY enqueue (workers must not pick up drifting code).
-  if [[ -n "$(git status --porcelain --untracked-files=all)" ]]; then
-    git status --short --untracked-files=all | head -20 >&2
-    die "git worktree is dirty — commit/clean before enqueueing (audit units will refuse to run otherwise)."
+  local tree_status
+  if ! tree_status="$(git status --porcelain --untracked-files=all 2>&1)"; then
+    die "git status failed in ${ROOT} — fix git before enqueueing: ${tree_status}"
+  fi
+  if [[ -n "${tree_status}" ]]; then
+    {
+      echo "[enqueue_table12] dirty checkout: ${ROOT}"
+      echo "[enqueue_table12] commit: $(git rev-parse --short HEAD) ($(git log -1 --format=%s))"
+      echo "[enqueue_table12] offending files (M=tracked edit, ??=untracked):"
+      git status --short --untracked-files=all
+    } >&2
+    die "git worktree is dirty — THIS checkout must be clean. Tracked edits: commit+push from the workstation, then update this exact checkout (multiple checkouts exist on the cluster; a pull elsewhere does not fix this one). Untracked files: move them outside the checkout or gitignore them."
   fi
 }
 
