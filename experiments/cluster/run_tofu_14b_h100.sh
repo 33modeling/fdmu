@@ -41,11 +41,11 @@ CONFIG=configs/channel_matrix/14b_tofu.yaml \
 MODEL_ID="$MODEL_ID" \
   bash experiments/channel_matrix/h100_campaign.sh fidelity
 
-stage fidelity-contract-validation
-"$PYTHON" experiments/channel_matrix/run_campaign.py \
-  --config configs/channel_matrix/14b_tofu.yaml --phase audit \
-  --model-id "$MODEL_ID" --only-authors 181 \
-  --dry-run --limit 1
+stage failed-audit-partial-quarantine
+"$PYTHON" experiments/cluster/quarantine_failed_audit.py \
+  --queue "$QUEUE" \
+  --config configs/channel_matrix/14b_tofu.yaml \
+  --model-id "$MODEL_ID"
 
 stage failed-audit-recovery
 "$PYTHON" experiments/cluster/workqueue.py retry-failed \
@@ -53,6 +53,12 @@ stage failed-audit-recovery
   --unit aud__qwen25_14b__a181 \
   --unit aud__qwen25_14b__a186 \
   --unit aud__qwen25_14b__a191
+
+stage fidelity-contract-validation
+"$PYTHON" experiments/channel_matrix/run_campaign.py \
+  --config configs/channel_matrix/14b_tofu.yaml --phase audit \
+  --model-id "$MODEL_ID" --only-authors 181 \
+  --dry-run --limit 1
 
 stage enqueue
 bash experiments/cluster/enqueue_table12.sh audit-14b

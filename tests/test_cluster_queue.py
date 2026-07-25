@@ -16,6 +16,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "experiments" / "cluster"))
 
 import make_units  # noqa: E402
+import quarantine_failed_audit  # noqa: E402
 import worker  # noqa: E402
 from workqueue import Unit, WorkQueue  # noqa: E402
 
@@ -218,6 +219,59 @@ def test_model_launchers_pin_queues_without_force_override():
     assert "FORCE_QUEUE" not in fourteen
     assert 'QUEUE="$CLUSTER_RUNS_ROOT/cluster_queue/wave2"' in seven
     assert 'QUEUE="$CLUSTER_RUNS_ROOT/cluster_queue/wave1_14b"' in fourteen
+
+
+def test_quarantine_moves_only_retryable_partial_audit(tmp_path, monkeypatch):
+    runs = tmp_path / "runs"
+    queue = runs / "cluster_queue" / "wave2"
+    (queue / "pending").mkdir(parents=True)
+    (queue / "pending" / "aud__qwen25_7b__a181.json").write_text(
+        "{}", encoding="utf-8"
+    )
+    config = tmp_path / "campaign.yaml"
+    config.write_text(
+        yaml.safe_dump(
+            {
+                "output_root": "runs/channel_matrix_7b",
+                "audit": {
+                    "authors": [181],
+                    "seeds": [2025],
+                    "objectives": ["npo"],
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    partial = (
+        runs
+        / "channel_matrix_7b"
+        / "audit"
+        / "qwen25_7b"
+        / "tofu-a181"
+        / "seed-2025"
+    )
+    partial.mkdir(parents=True)
+    (partial / "run_manifest.json").write_text("{}", encoding="utf-8")
+    monkeypatch.setenv("CLUSTER_RUNS_ROOT", str(runs))
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "quarantine_failed_audit.py",
+            "--queue",
+            str(queue),
+            "--config",
+            str(config),
+            "--model-id",
+            "qwen25_7b",
+        ],
+    )
+
+    assert quarantine_failed_audit.main() == 0
+    assert not partial.exists()
+    moved = list((runs / "forensics" / "audit-partials").iterdir())
+    assert len(moved) == 1
+    assert (moved[0] / "run_manifest.json").is_file()
 
 
 def test_worker_executes_units_and_records_results(tmp_path):
