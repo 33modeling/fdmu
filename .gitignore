@@ -19,6 +19,9 @@ KDD_UnlearningFail.pdf
 # file when present so GPU nodes never need to edit tracked launch code.
 /.cluster_env.local.sh
 /.cluster-runtime/
+# Legacy emergency root from 84c0fc4. No new jobs use it; retain/ignore any
+# existing files so upgrading a cluster checkout does not become dirty.
+/.cluster-runs/
 
 # Legacy cluster launchers wrote host-specific logs beside the repository.
 # Keep them in place without making the sealed-audit worktree appear dirty.
