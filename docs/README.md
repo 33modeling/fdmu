@@ -10,6 +10,7 @@
 | 프로젝트 개요와 현재 구현 상태 | [루트 README](../README.md) |
 | 최신 PDF-v4와 코드의 일치 여부 | [PDF v4 code audit](PDF_V4_CODE_AUDIT.md) |
 | Table 1/2 메트릭 수식과 해석 | [Table 1/2 metric guide](TABLE12_METRICS.md) |
+| Predictor 메트릭과 좋은 값의 기준 | [Predictor metric guide](PREDICTOR_METRICS.md) |
 | 전체 paper evidence 생성 경로 | [Paper evidence pipeline](PAPER_EVIDENCE_PIPELINE.md) |
 | 캠페인 실행 전 차단 조건 | [Paper campaign preflight](PAPER_CAMPAIGN_PREFLIGHT.md) |
 

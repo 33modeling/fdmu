@@ -111,6 +111,10 @@ p_IUT      = max(p_1, ..., p_m)
 
 ## 3. Table 1 Panel A: RQ1/RQ2
 
+Predictor 메트릭만 빠르게 확인하려면
+[`PREDICTOR_METRICS.md`](PREDICTOR_METRICS.md)를 본다. 각 값의 좋은 방향,
+lower-bound 통과 기준과 `E/P` 조합을 함께 정리했다.
+
 ### Joint rho [LB]
 
 결합 score와 이후 발생한 audit damage의 Spearman 상관이다.
