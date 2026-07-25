@@ -17,7 +17,12 @@ from pathlib import Path
 import yaml
 
 ROOT = Path(__file__).resolve().parents[2]
-RUNS_ROOT = Path(os.environ.get("CLUSTER_RUNS_ROOT", ROOT / "runs")).resolve()
+RUNS_ROOT = Path(
+    os.environ.get(
+        "CLUSTER_RUNS_ROOT",
+        "/group-volume/jieuns.shin/fdmu/runs",
+    )
+).resolve()
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from workqueue import WorkQueue  # noqa: E402

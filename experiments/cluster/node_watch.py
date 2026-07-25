@@ -110,7 +110,10 @@ def pid_alive(pid: int) -> bool:
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--interval", type=float, default=30.0)
-    parser.add_argument("--status-dir", default=str(ROOT / "runs" / "cluster_status"))
+    parser.add_argument(
+        "--status-dir",
+        default="/group-volume/jieuns.shin/fdmu/runs/cluster_status",
+    )
     parser.add_argument("--replace", action="store_true",
                         help="take over from an existing watcher on this host")
     parser.add_argument("--once", action="store_true", help="write one snapshot and exit")

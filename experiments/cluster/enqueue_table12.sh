@@ -209,8 +209,8 @@ case "${cmd}" in
     cfg="${CFG_DIR}/rwku_7b.yaml"
     require_config "${cfg}"
     # RWKU audit is blocked on a real (non-TOFU-wired) fidelity certificate.
-    if ! ls runs/channel_matrix_rwku7b/fidelity/*.json >/dev/null 2>&1; then
-      die "no fidelity certificate under runs/channel_matrix_rwku7b/fidelity/ — run experiments/diag/fd_fidelity.py --dataset rwku first."
+    if ! ls "$CLUSTER_RUNS_ROOT"/channel_matrix_rwku7b/fidelity/*.json >/dev/null 2>&1; then
+      die "no fidelity certificate under $CLUSTER_RUNS_ROOT/channel_matrix_rwku7b/fidelity/ — run experiments/diag/fd_fidelity.py --dataset rwku first."
     fi
     require_clean_tree
     require_frozen "$(freeze_path_of "${cfg}" objective_freeze)" "RWKU audit"

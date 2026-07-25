@@ -155,8 +155,8 @@ case "${ACTION}" in
   select-freeze)
     python experiments/channel_matrix/select_freeze.py \
       --config "${CONFIG}" \
-      --root runs/channel_matrix_7b/calibration \
-      --out runs/channel_matrix_7b/objective_freeze.recommended.yaml
+      --root "$CLUSTER_RUNS_ROOT/channel_matrix_7b/calibration" \
+      --out "$CLUSTER_RUNS_ROOT/channel_matrix_7b/objective_freeze.recommended.yaml"
     echo "STOP: review the recommendation and commit a frozen objective_freeze.yaml before audit."
     ;;
   audit)
@@ -170,14 +170,14 @@ case "${ACTION}" in
     ;;
   aggregate)
     python experiments/channel_matrix/aggregate.py \
-      --root runs/channel_matrix_7b/audit \
-      --out runs/channel_matrix_7b/aggregate \
+      --root "$CLUSTER_RUNS_ROOT/channel_matrix_7b/audit" \
+      --out "$CLUSTER_RUNS_ROOT/channel_matrix_7b/aggregate" \
       --n-boot 2000
     python experiments/channel_matrix/make_main_table.py \
-      --report runs/channel_matrix_7b/aggregate/pooled_channel_report.csv \
-      --summary runs/channel_matrix_7b/aggregate/pooled_channel_report.json \
-      --out docs/tables/table1_channel_matrix_7b.tex \
-      --stress-out docs/tables/table1_stress_7b.tex
+      --report "$CLUSTER_RUNS_ROOT/channel_matrix_7b/aggregate/pooled_channel_report.csv" \
+      --summary "$CLUSTER_RUNS_ROOT/channel_matrix_7b/aggregate/pooled_channel_report.json" \
+      --out "$CLUSTER_RUNS_ROOT/channel_matrix_7b/aggregate/table1_channel_matrix_7b.tex" \
+      --stress-out "$CLUSTER_RUNS_ROOT/channel_matrix_7b/aggregate/table1_stress_7b.tex"
     ;;
   dry-alpha-development)
     CUDA_VISIBLE_DEVICES="${GPU}" python experiments/channel_matrix/alpha_protection.py \
@@ -194,8 +194,8 @@ case "${ACTION}" in
   select-alpha-freeze)
     python experiments/channel_matrix/select_alpha_freeze.py \
       --config "${CONFIG}" \
-      --root runs/channel_matrix_7b/alpha_protection/development \
-      --out runs/channel_matrix_7b/alpha_protection_freeze.recommended.yaml
+      --root "$CLUSTER_RUNS_ROOT/channel_matrix_7b/alpha_protection/development" \
+      --out "$CLUSTER_RUNS_ROOT/channel_matrix_7b/alpha_protection_freeze.recommended.yaml"
     echo "STOP: review and commit configs/channel_matrix/alpha_protection_freeze.yaml before alpha audit."
     ;;
   dry-alpha-audit)
@@ -219,8 +219,8 @@ case "${ACTION}" in
     python experiments/channel_matrix/aggregate_alpha_protection.py \
       --legacy-diagnostic \
       --config "${CONFIG}" \
-      --root runs/channel_matrix_7b/alpha_protection/audit \
-      --out runs/channel_matrix_7b/alpha_protection/aggregate \
+      --root "$CLUSTER_RUNS_ROOT/channel_matrix_7b/alpha_protection/audit" \
+      --out "$CLUSTER_RUNS_ROOT/channel_matrix_7b/alpha_protection/aggregate" \
       --n-boot 2000
     ;;
   *)

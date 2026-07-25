@@ -68,7 +68,10 @@ def failed_log(queue: Path, unit_id: str) -> Path | None:
 
 def latest_running_log(unit_id: str) -> Path | None:
     runs_root = Path(
-        os.environ.get("CLUSTER_RUNS_ROOT", ROOT / "runs")
+        os.environ.get(
+            "CLUSTER_RUNS_ROOT",
+            "/group-volume/jieuns.shin/fdmu/runs",
+        )
     )
     matches = list((runs_root / "logs/cluster").glob(f"{unit_id}__*.out"))
     return max(matches, key=lambda path: path.stat().st_mtime) if matches else None

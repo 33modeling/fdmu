@@ -31,6 +31,14 @@ from workqueue import Claim, WorkQueue  # noqa: E402
 HEARTBEAT_INTERVAL_S = 60.0
 
 
+def _require_group_volume(path: str, group_root: str, role: str) -> str:
+    resolved = Path(path).resolve()
+    root = Path(group_root).resolve()
+    if resolved != root and root not in resolved.parents:
+        raise ValueError(f"{role} must be under {root}, found: {resolved}")
+    return str(resolved)
+
+
 def gpu_memory_used_mib(gpu: int) -> int | None:
     """Resident memory on the GPU in MiB, or None when nvidia-smi is absent."""
     if shutil.which("nvidia-smi") is None:
@@ -49,6 +57,7 @@ def build_env(base: dict[str, str], unit_env: dict[str, str], gpu: int, needs_gp
         name: env.get(name)
         for name in (
             "GROUP_VOLUME_ROOT",
+            "CLUSTER_STORAGE_ROOT",
             "CLUSTER_RUNS_ROOT",
             "CLUSTER_WORK_ROOT",
             "CLUSTER_HF_HOME",
@@ -69,18 +78,28 @@ def build_env(base: dict[str, str], unit_env: dict[str, str], gpu: int, needs_gp
         env["CUDA_VISIBLE_DEVICES"] = str(gpu)
         env["GPU"] = str(gpu)  # h100_campaign.sh reads GPU=
     env.setdefault("PYTHONUNBUFFERED", "1")
-    group_root = env.get("GROUP_VOLUME_ROOT", "/group-volume")
-    runs_root = env.get(
-        "CLUSTER_RUNS_ROOT",
-        str(ROOT / "runs"),
+    group_root = env.get(
+        "GROUP_VOLUME_ROOT",
+        env.get("FDMU_TEST_GROUP_VOLUME_ROOT", "/group-volume"),
     )
+    storage_root = env.get(
+        "CLUSTER_STORAGE_ROOT", f"{group_root}/jieuns.shin/fdmu"
+    )
+    runs_root = env.get("CLUSTER_RUNS_ROOT", f"{storage_root}/runs")
     user = env.get("USER", "unknown")
     host = env.get("HOSTNAME", socket.gethostname())
     work_root = env.get(
         "CLUSTER_WORK_ROOT",
-        str(ROOT / ".cluster-runtime" / user / host),
+        f"{storage_root}/runtime/{user}/{host}",
     )
     hf_home = env.get("CLUSTER_HF_HOME", f"{group_root}/data/hf_home")
+    storage_root = _require_group_volume(
+        storage_root, group_root, "cluster storage"
+    )
+    runs_root = _require_group_volume(runs_root, group_root, "cluster runs")
+    work_root = _require_group_volume(work_root, group_root, "cluster scratch")
+    hf_home = _require_group_volume(hf_home, group_root, "HF_HOME")
+    env["CLUSTER_STORAGE_ROOT"] = storage_root
     env["CLUSTER_RUNS_ROOT"] = runs_root
     env["CLUSTER_WORK_ROOT"] = work_root
     env["HF_HOME"] = hf_home
@@ -97,10 +116,39 @@ def build_env(base: dict[str, str], unit_env: dict[str, str], gpu: int, needs_gp
         "CLUSTER_XDG_CACHE_HOME",
         f"{work_root}/xdg_cache",
     )
-    env["TMPDIR"] = env.get(
-        "CLUSTER_TMPDIR",
-        f"{work_root}/tmp",
-    )
+    env["TMPDIR"] = env.get("CLUSTER_TMPDIR", f"{work_root}/tmp")
+    env["HOME"] = f"{work_root}/home"
+    env["TMP"] = env["TMPDIR"]
+    env["TEMP"] = env["TMPDIR"]
+    storage_env = {
+        "XDG_CONFIG_HOME": "xdg_config",
+        "XDG_DATA_HOME": "xdg_data",
+        "HF_HUB_CACHE": "huggingface/hub",
+        "HF_ASSETS_CACHE": "huggingface/assets",
+        "HF_MODULES_CACHE": "huggingface/modules",
+        "TRANSFORMERS_CACHE": "huggingface/transformers",
+        "TORCH_EXTENSIONS_DIR": "torch_extensions",
+        "TRITON_CACHE_DIR": "triton",
+        "CUDA_CACHE_PATH": "cuda",
+        "MPLCONFIGDIR": "matplotlib",
+        "NUMBA_CACHE_DIR": "numba",
+        "PIP_CACHE_DIR": "pip",
+        "PYTHONPYCACHEPREFIX": "pycache",
+        "WANDB_DIR": "wandb",
+        "WANDB_CACHE_DIR": "wandb/cache",
+        "WANDB_CONFIG_DIR": "wandb/config",
+    }
+    for name, suffix in storage_env.items():
+        env[name] = f"{work_root}/{suffix}"
+    for name in (
+        "HF_DATASETS_CACHE",
+        "RSUS_DATASETS_CACHE",
+        "TORCH_HOME",
+        "XDG_CACHE_HOME",
+        "TMPDIR",
+        *storage_env,
+    ):
+        _require_group_volume(env[name], group_root, name)
     # HF Hub is blocked/unstable from the cluster (2026-07-23); every queued
     # unit must run cache-only unless its own env explicitly opts back in
     # (e.g. a provisioning unit setting HF_HUB_OFFLINE=0).
@@ -188,7 +236,7 @@ def main() -> None:
     runs_root = Path(
         os.environ.get(
             "CLUSTER_RUNS_ROOT",
-            ROOT / "runs",
+            "/group-volume/jieuns.shin/fdmu/runs",
         )
     )
     parser.add_argument("--log-dir", default=str(runs_root / "logs" / "cluster"))

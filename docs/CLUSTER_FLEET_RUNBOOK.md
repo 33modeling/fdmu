@@ -18,16 +18,18 @@ experiments/cluster/
 
 ## 핵심 설계
 
-- **공유 상태와 scratch를 분리.** queue/results는 항상 공유 checkout의
-  `runs/`를 사용한다. `CLUSTER_RUNS_ROOT`는 외부 env나 unit payload가
-  변경할 수 없다. `TMPDIR`, RSUS fallback, Torch, XDG 캐시는
-  `.cluster-runtime/<user>/<host>/`에 분리해 노드별 권한 충돌을 막는다.
-  둘 다 `/group-volume` checkout 아래이며, 기존 `/group-volume/data/hf_home`은
-  읽기 전용으로 사용한다. 노드 로컬 `/tmp`와 `~/.cache`에는 쓰지 않는다.
+- **공유 상태와 scratch를 분리.** queue/results는 checkout 위치와 무관하게
+  `/group-volume/jieuns.shin/fdmu/runs`를 사용한다. `CLUSTER_RUNS_ROOT`는
+  외부 env나 unit payload가 변경할 수 없다. `HOME`, `TMPDIR`, Triton/CUDA,
+  Hugging Face, RSUS, Torch, XDG, pip 캐시는
+  `/group-volume/jieuns.shin/fdmu/runtime/<user>/<host>/`에 분리한다.
+  기존 `/group-volume/data/hf_home`은 읽기 전용 원본 cache로 사용한다.
+  user-volume, 노드 로컬 `/tmp`, 실제 `~/.cache`에는 쓰지 않는다.
   scratch base/HF 경로가 꼭 다르면 Git에서 무시되는
   `.cluster_env.local.sh`에 `CLUSTER_RUNTIME_BASE`/`CLUSTER_HF_HOME`만 설정한다.
   실제 scratch는 base 아래 `<user>/<host>`로 자동 생성된다. queue root와
-  assignment는 override할 수 없으며 `configs/cluster/fleet.yaml`을 커밋해
+  assignment는 override할 수 없으며 모든 override는 `/group-volume`
+  아래여야 한다. Queue assignment는 `configs/cluster/fleet.yaml`을 커밋해
   변경한다.
 - **작업 단위 = 기존 러너가 이미 지원하는 최소 샤드.** run 디렉토리가 단위 간
   절대 겹치지 않도록 자름: calibration/audit은 `--only-authors <한 명>`,
@@ -44,6 +46,20 @@ experiments/cluster/
   다음 페이즈 enqueue.
 
 ## 사용 순서
+
+### 기존 checkout `runs/` 이동
+
+이전 버전이 checkout의 user-volume에 만든 `runs/`는 worker를 모두 중지한 뒤
+한 번만 이동한다.
+
+```bash
+bash experiments/cluster/migrate_runs_to_group_volume.sh
+```
+
+이 스크립트는 파일을 삭제하지 않고
+`/group-volume/jieuns.shin/fdmu/runs`로 옮긴 뒤 기존 `runs`를 그 위치의
+symlink로 바꾼다. 실행 중 cluster process가 있거나 일부 파일이 남으면
+중단한다.
 
 ### 0. 매 세션 공통 (기존 규칙 그대로)
 

@@ -73,16 +73,18 @@ dataset, dtype, metric, or comparator.
 
 - Repository: `/group-volume/jieuns.shin/retain-susceptibility`
 - Environment: `/group-volume/jieuns.shin/venvs/exp`
-- Shared state/results: `<repo>/runs`
-- Host scratch/cache: `<repo>/.cluster-runtime/<user>/<host>`
+- Shared state/results: `/group-volume/jieuns.shin/fdmu/runs`
+- Host scratch/cache: `/group-volume/jieuns.shin/fdmu/runtime/<user>/<host>`
 - Model cache: `/group-volume/data/hf_home`
 
 The cluster has no GitHub egress. Do not commit or push there. Do not create a
 replacement venv or install packages into the shared environment. Use
 `.cluster_env.local.sh` only for supported machine-local path overrides.
 
-Never write cluster results to a home filesystem, `/tmp`, or a shared directory
-you do not own. `cluster_env.sh` validates the effective paths and permissions.
+Never write cluster results to user-volume, a home filesystem, `/tmp`, or a
+shared directory you do not own. `cluster_env.sh` redirects `HOME`, temp files,
+and library caches to the runtime path and rejects paths outside
+`/group-volume`.
 
 ## 5. Safe execution
 

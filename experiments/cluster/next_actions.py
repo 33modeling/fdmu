@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 from pathlib import Path
 import subprocess
 import sys
@@ -22,6 +23,12 @@ import sys
 import yaml
 
 ROOT = Path(__file__).resolve().parents[2]
+RUNS_ROOT = Path(
+    os.environ.get(
+        "CLUSTER_RUNS_ROOT",
+        "/group-volume/jieuns.shin/fdmu/runs",
+    )
+).resolve()
 
 # setting label -> (campaign config, queue root, first-wave phases)
 CAMPAIGNS = {
@@ -75,7 +82,11 @@ def freeze_state(root: Path, config: dict, key: str) -> tuple[str, str | None]:
 
 
 def queue_counts(root: Path, queue: str) -> dict[str, int] | None:
-    queue_dir = root / queue
+    queue_path = Path(queue)
+    if queue_path.parts and queue_path.parts[0] == "runs":
+        queue_dir = RUNS_ROOT / Path(*queue_path.parts[1:])
+    else:
+        queue_dir = root / queue_path
     if not queue_dir.is_dir():
         return None
     counts = {}

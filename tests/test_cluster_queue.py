@@ -125,14 +125,22 @@ def test_claim_survives_concurrent_double_rename_semantics(tmp_path):
 
 
 def test_worker_env_isolates_one_gpu_per_unit():
-    env = worker.build_env({"PATH": "/bin"}, {"MODEL_ID": "qwen25_7b"}, gpu=5, needs_gpu=True)
+    storage = "/group-volume/jieuns.shin/fdmu"
+    base = {
+        "PATH": "/bin",
+        "CLUSTER_STORAGE_ROOT": storage,
+        "CLUSTER_RUNS_ROOT": f"{storage}/runs",
+        "CLUSTER_WORK_ROOT": f"{storage}/runtime/researcher/node-a",
+    }
+    env = worker.build_env(base, {"MODEL_ID": "qwen25_7b"}, gpu=5, needs_gpu=True)
     assert env["CUDA_VISIBLE_DEVICES"] == "5"
     assert env["GPU"] == "5"
     assert env["MODEL_ID"] == "qwen25_7b"
-    cpu_env = worker.build_env({}, {}, gpu=5, needs_gpu=False)
+    cpu_env = worker.build_env(base, {}, gpu=5, needs_gpu=False)
     assert "CUDA_VISIBLE_DEVICES" not in cpu_env
-    assert cpu_env["TMPDIR"].startswith(str(ROOT / ".cluster-runtime"))
-    assert cpu_env["RSUS_DATASETS_CACHE"].startswith(str(ROOT / ".cluster-runtime"))
+    assert cpu_env["TMPDIR"].startswith(f"{storage}/runtime/")
+    assert cpu_env["RSUS_DATASETS_CACHE"].startswith(f"{storage}/runtime/")
+    assert cpu_env["HOME"].startswith(f"{storage}/runtime/")
 
 
 def test_worker_env_replaces_node_local_tmpdir():
@@ -152,9 +160,12 @@ def test_worker_env_replaces_node_local_tmpdir():
     )
     runtime = "/group-volume/shared/scratch/researcher/node-7b"
     assert env["TMPDIR"] == f"{runtime}/tmp"
+    assert env["HOME"] == f"{runtime}/home"
     assert env["HF_HOME"] == "/group-volume/data/hf_home"
     assert env["TORCH_HOME"] == f"{runtime}/torch_home"
     assert env["XDG_CACHE_HOME"] == f"{runtime}/xdg_cache"
+    assert env["TRITON_CACHE_DIR"] == f"{runtime}/triton"
+    assert env["CUDA_CACHE_PATH"] == f"{runtime}/cuda"
 
 
 def test_worker_unit_env_cannot_redirect_shared_cluster_roots():
@@ -174,6 +185,19 @@ def test_worker_unit_env_cannot_redirect_shared_cluster_roots():
     assert env["CLUSTER_RUNS_ROOT"] == "/group-volume/shared/runs"
     assert env["CLUSTER_WORK_ROOT"] == "/group-volume/shared/scratch/node-a"
     assert env["TMPDIR"] == "/group-volume/shared/scratch/node-a/tmp"
+
+
+def test_worker_rejects_user_volume_storage():
+    with pytest.raises(ValueError, match="must be under"):
+        worker.build_env(
+            {
+                "CLUSTER_RUNS_ROOT": "/user-volume/researcher/runs",
+                "CLUSTER_WORK_ROOT": "/user-volume/researcher/runtime",
+            },
+            {},
+            gpu=0,
+            needs_gpu=True,
+        )
 
 
 def test_model_launchers_pin_queues_without_force_override():

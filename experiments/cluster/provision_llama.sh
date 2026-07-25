@@ -20,7 +20,10 @@ set -Eeuo pipefail
 REPO_ID="meta-llama/Llama-3.1-8B-Instruct"
 DEST="${DEST:-/group-volume/models/Llama-3.1-8B-Instruct}"
 VENV="${VENV:-/group-volume/jieuns.shin/venvs/exp}"
-export HF_HOME="${HF_HOME:-/group-volume/data/hf_home}"
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+cd "$ROOT"
+# shellcheck disable=SC1091
+source "$ROOT/experiments/cluster/cluster_env.sh"
 # A stale offline flag would turn every attempt into an instant cache miss.
 unset HF_HUB_OFFLINE HF_DATASETS_OFFLINE TRANSFORMERS_OFFLINE || true
 
@@ -77,14 +80,14 @@ command -v huggingface-cli >/dev/null 2>&1 \
 
 if [[ -n "${HUGGING_FACE_HUB_TOKEN:-}${HF_TOKEN:-}" ]]; then
   log "using HF token from environment."
-elif [[ -f "${HF_HOME}/token" || -f "${HOME}/.cache/huggingface/token" ]]; then
+elif [[ -f "${HF_HOME}/token" ]]; then
   log "using cached huggingface-cli login token."
 else
   log "WARNING: no HF token found in env or cache — the gated download will fail with 401."
 fi
 
 mkdir -p "${DEST}"
-TMPLOG="$(mktemp /tmp/provision_llama.XXXXXX.log)"
+TMPLOG="$(mktemp "$TMPDIR/provision_llama.XXXXXX.log")"
 
 download() {
   # $1 = attempt label; extra env comes from the caller
