@@ -26,6 +26,19 @@ freeze용 draft recommendation만 만든다.
 `NO_JOINT_DOMINANCE`, exit 3으로 실패 셀과 가장 가까운 후보를 로그에 남기고
 종료한다.
 
+실행 중에는 unit stdout/stderr가 `[GPU<id> <unit>]` 접두사로 콘솔에 바로
+출력되고 15초마다 완료 수, 실행 중 unit, 실패 수와 경과 시간이 표시된다.
+전체 launcher 출력은 다음 경로에서 동시에 확인한다.
+
+```bash
+tail -f /rdata/minsoo3.kim/results/paper/tofu_qwen25_1p5b/joint_sweep/launcher_logs/current.log
+tail -f /rdata/minsoo3.kim/results/paper/tofu_qwen25_1p5b/joint_sweep/events.jsonl
+```
+
+주기를 바꾸려면 `PROGRESS_INTERVAL_SECONDS=5`처럼 지정한다. 개별 unit 원본
+로그는 `trials/<trial>/logs/units/<unit>/attempt-*.log`, stage 검증 로그는
+`trials/<trial>/logs/verify.log`에 보존된다.
+
 ## 0. Agent 실행 원칙
 
 1. 먼저 `AGENTS.md`, 이 문서, `configs/paper/tofu_v4.yaml`을 읽는다.

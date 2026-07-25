@@ -13,6 +13,18 @@ ENCODER_PATH="${ENCODER_PATH:-/rdata/models/all-MiniLM-L6-v2}"
 RESULTS_ROOT="${RESULTS_ROOT:-/rdata/minsoo3.kim/results/paper/tofu_qwen25_1p5b/joint_sweep}"
 SFT_CACHE_ROOT="${SFT_CACHE_ROOT:-/rdata/minsoo3.kim/results/paper/tofu_qwen25_1p5b/sft_cache}"
 SPEC="${SPEC:-$ROOT/configs/local/joint_sweep_1p5b_4090x2.yaml}"
+PROGRESS_INTERVAL_SECONDS="${PROGRESS_INTERVAL_SECONDS:-15}"
+
+mkdir -p "$RESULTS_ROOT/launcher_logs"
+LAUNCH_TIMESTAMP="$(date -u '+%Y%m%dT%H%M%SZ')"
+LAUNCH_LOG="$RESULTS_ROOT/launcher_logs/${LAUNCH_TIMESTAMP}-$$.log"
+ln -sfn "$(basename "$LAUNCH_LOG")" "$RESULTS_ROOT/launcher_logs/current.log"
+exec > >(tee -a "$LAUNCH_LOG") 2>&1
+
+printf '[%s] launcher start pid=%s log=%s\n' \
+  "$(date -u '+%FT%TZ')" "$$" "$LAUNCH_LOG"
+printf '[config] repo=%s spec=%s gpus=%s results=%s progress=%ss\n' \
+  "$ROOT" "$SPEC" "$GPU_IDS" "$RESULTS_ROOT" "$PROGRESS_INTERVAL_SECONDS"
 
 if [[ ! -x "$PYTHON" ]]; then
   command -v "$PYTHON_BOOTSTRAP" >/dev/null
@@ -75,4 +87,5 @@ exec "$PYTHON" -u experiments/paper/run_joint_dev_sweep.py \
   --sentence-encoder "$ENCODER_PATH" \
   --sft-cache-root "$SFT_CACHE_ROOT" \
   --output-root "$RESULTS_ROOT" \
+  --progress-interval "$PROGRESS_INTERVAL_SECONDS" \
   "$@"

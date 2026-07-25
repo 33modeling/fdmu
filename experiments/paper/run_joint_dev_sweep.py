@@ -15,6 +15,7 @@ import re
 import subprocess
 import sys
 import threading
+import time
 from typing import Any, Iterable, Mapping, Sequence
 
 import yaml
@@ -59,6 +60,10 @@ class HumanFreezeRequired(SweepError):
 
 def _utc_now() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+def _status(message: str) -> None:
+    print(f"[{_utc_now()}] {message}", flush=True)
 
 
 def _load_yaml(path: Path) -> dict[str, Any]:
@@ -727,7 +732,11 @@ def _run_unit(
     env["CUDA_VISIBLE_DEVICES"] = str(gpu)
     env["TOKENIZERS_PARALLELISM"] = "false"
     started = _utc_now()
+    started_monotonic = time.monotonic()
     events.write({"event": "unit_started", "unit": identity, "gpu": gpu, "attempt": attempt})
+    _status(
+        f"UNIT_START gpu={gpu} unit={identity} attempt={attempt} log={log_path}"
+    )
     with log_path.open("w", encoding="utf-8") as handle:
         handle.write(
             json.dumps(
@@ -742,21 +751,32 @@ def _run_unit(
             + "\n"
         )
         handle.flush()
-        result = subprocess.run(
+        process = subprocess.Popen(
             command,
             cwd=ROOT,
             env=env,
-            stdout=handle,
+            stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
-            check=False,
+            text=True,
+            bufsize=1,
         )
+        if process.stdout is None:
+            raise SweepError(f"cannot capture output for unit {identity}")
+        prefix = f"[GPU{gpu} {identity}]"
+        for line in process.stdout:
+            handle.write(line)
+            handle.flush()
+            print(f"{prefix} {line}", end="", flush=True)
+        returncode = process.wait()
+    duration = time.monotonic() - started_monotonic
     status = {
         "unit": identity,
         "attempt": attempt,
         "gpu": gpu,
         "started_at_utc": started,
         "finished_at_utc": _utc_now(),
-        "returncode": result.returncode,
+        "duration_seconds": duration,
+        "returncode": returncode,
         "log": str(log_path),
         "command": command,
     }
@@ -767,10 +787,15 @@ def _run_unit(
             "unit": identity,
             "gpu": gpu,
             "attempt": attempt,
-            "returncode": result.returncode,
+            "duration_seconds": duration,
+            "returncode": returncode,
         }
     )
-    return result.returncode == 0, identity
+    _status(
+        f"UNIT_END gpu={gpu} unit={identity} returncode={returncode} "
+        f"elapsed={duration:.1f}s"
+    )
+    return returncode == 0, identity
 
 
 def _run_lanes(
@@ -779,20 +804,54 @@ def _run_lanes(
     gpus: Sequence[int],
     trial_dir: Path,
     events: _EventLog,
+    progress_interval: float,
 ) -> None:
+    if not units:
+        _status("UNITS all manifest units already validated; nothing to execute")
+        return
     lanes = [list(units[index::len(gpus)]) for index in range(len(gpus))]
     stopped = threading.Event()
+    monitor_stopped = threading.Event()
+    state_lock = threading.Lock()
+    running: dict[int, str] = {}
+    completed = 0
+    failures: list[str] = []
+    started = time.monotonic()
     cache_locks = {
         (str(unit["request"]), str(unit["seed"])): threading.Lock()
         for unit in units
     }
 
-    def worker(gpu: int, lane: Sequence[Mapping[str, Any]]) -> list[str]:
-        failures = []
+    def monitor() -> None:
+        while not monitor_stopped.wait(progress_interval):
+            with state_lock:
+                active = ", ".join(
+                    f"gpu{gpu}={identity}"
+                    for gpu, identity in sorted(running.items())
+                ) or "none"
+                done = completed
+                failed = len(failures)
+            _status(
+                f"PROGRESS completed={done}/{len(units)} failed={failed} "
+                f"elapsed={time.monotonic() - started:.1f}s running=[{active}]"
+            )
+
+    def worker(gpu: int, lane: Sequence[Mapping[str, Any]]) -> None:
+        nonlocal completed
         for unit in lane:
             if stopped.is_set():
                 break
+            identity = (
+                f"{unit['parent']}__{unit['request']}__seed-{unit['seed']}"
+            )
+            with state_lock:
+                running[gpu] = identity
             cache_key = (str(unit["request"]), str(unit["seed"]))
+            if cache_locks[cache_key].locked():
+                _status(
+                    f"CACHE_WAIT gpu={gpu} unit={identity} "
+                    f"request={cache_key[0]} seed={cache_key[1]}"
+                )
             with cache_locks[cache_key]:
                 ok, identity = _run_unit(
                     unit,
@@ -800,15 +859,37 @@ def _run_lanes(
                     trial_dir=trial_dir,
                     events=events,
                 )
+            with state_lock:
+                running.pop(gpu, None)
+                completed += 1
             if not ok:
-                failures.append(identity)
+                with state_lock:
+                    failures.append(identity)
                 stopped.set()
                 break
-        return failures
 
+    monitor_thread = threading.Thread(
+        target=monitor,
+        name="joint-sweep-progress",
+        daemon=True,
+    )
+    monitor_thread.start()
     with ThreadPoolExecutor(max_workers=len(gpus)) as pool:
         futures = [pool.submit(worker, gpu, lane) for gpu, lane in zip(gpus, lanes)]
-        failures = [identity for future in futures for identity in future.result()]
+        try:
+            for future in futures:
+                future.result()
+        finally:
+            monitor_stopped.set()
+            monitor_thread.join()
+    with state_lock:
+        active = ", ".join(
+            f"gpu{gpu}={identity}" for gpu, identity in sorted(running.items())
+        ) or "none"
+        _status(
+            f"PROGRESS completed={completed}/{len(units)} failed={len(failures)} "
+            f"elapsed={time.monotonic() - started:.1f}s running=[{active}]"
+        )
     if failures:
         raise SweepError(f"unit execution failed; inspect logs for {failures}")
 
@@ -943,15 +1024,29 @@ def _seal_trial(
         "--action",
         "verify",
     ]
+    _status(f"VERIFY_START manifest={manifest_path} log={log_path}")
+    started = time.monotonic()
     with log_path.open("w", encoding="utf-8") as handle:
-        result = subprocess.run(
+        process = subprocess.Popen(
             command,
             cwd=ROOT,
-            stdout=handle,
+            stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
-            check=False,
+            text=True,
+            bufsize=1,
         )
-    if result.returncode != 0:
+        if process.stdout is None:
+            raise SweepError("cannot capture stage verification output")
+        for line in process.stdout:
+            handle.write(line)
+            handle.flush()
+            print(f"[VERIFY] {line}", end="", flush=True)
+        returncode = process.wait()
+    _status(
+        f"VERIFY_END returncode={returncode} "
+        f"elapsed={time.monotonic() - started:.1f}s"
+    )
+    if returncode != 0:
         raise SweepError(f"stage verification failed; inspect {log_path}")
 
 
@@ -1012,6 +1107,7 @@ def _environment_snapshot(output_root: Path, python: Path, gpus: Sequence[int]) 
 
 def run(args: argparse.Namespace) -> int:
     spec_source = args.spec.resolve()
+    _status(f"LOAD_SPEC path={spec_source}")
     spec = validate_spec(_load_yaml(spec_source))
     if args.gpus:
         try:
@@ -1027,6 +1123,8 @@ def run(args: argparse.Namespace) -> int:
         spec["gpus"] = supplied_gpus
     if args.max_trials is not None and args.max_trials < 1:
         raise SweepError("--max-trials must be positive")
+    if args.progress_interval < 1.0:
+        raise SweepError("--progress-interval must be at least 1 second")
     for name, value in (
         ("model_source", args.model_source),
         ("sentence_encoder", args.sentence_encoder),
@@ -1041,6 +1139,14 @@ def run(args: argparse.Namespace) -> int:
     runtime_source = _resolve(spec["paths"]["runtime"])
     python = _resolve(spec["paths"]["python"])
     output_root = _resolve(spec["paths"]["output_root"])
+    _status(
+        f"CONFIG setting={spec['setting']} trials={len(spec['trials'])} "
+        f"gpus={spec['gpus']} progress_interval={args.progress_interval}s"
+    )
+    _status(
+        f"PATHS output={output_root} model={_resolve(spec['paths']['model_source'])} "
+        f"encoder={_resolve(spec['paths']['sentence_encoder'])}"
+    )
     campaign = _load_yaml(campaign_path)
     evidence = _load_yaml(evidence_path)
     runtime = _load_yaml(runtime_source)
@@ -1109,6 +1215,19 @@ def run(args: argparse.Namespace) -> int:
     _atomic_json(sweep_manifest_path, sweep_manifest)
     _environment_snapshot(output_root, python, spec["gpus"])
     events = _EventLog(output_root / "events.jsonl")
+    events.write(
+        {
+            "event": "sweep_invoked",
+            "setting": spec["setting"],
+            "trials": len(spec["trials"]),
+            "gpus": spec["gpus"],
+            "progress_interval_seconds": args.progress_interval,
+        }
+    )
+    _status(
+        "STOP_RULE joint feasible; infeasible comparators lose; feasible "
+        "comparators require strict mean and CVaR wins"
+    )
 
     best_path = output_root / "BEST.json"
     if best_path.is_file():
@@ -1151,9 +1270,11 @@ def run(args: argparse.Namespace) -> int:
                 runtime_hash=runtime_hash,
             )
         ]
-        print(
+        _status(
             f"[{index}/{len(spec['trials'])}] {trial['id']}: "
-            f"{len(manifest['units']) - len(pending)} valid, {len(pending)} pending"
+            f"alpha={trial['alpha']} Kp={trial['Kp']} repair={trial['repair']} "
+            f"valid={len(manifest['units']) - len(pending)} "
+            f"pending={len(pending)}"
         )
         if args.dry_run:
             continue
@@ -1162,6 +1283,7 @@ def run(args: argparse.Namespace) -> int:
             gpus=spec["gpus"],
             trial_dir=trial_dir,
             events=events,
+            progress_interval=args.progress_interval,
         )
         manifest_path = trial_dir / "manifest.yaml"
         _seal_trial(
@@ -1190,6 +1312,35 @@ def run(args: argparse.Namespace) -> int:
         evaluated_results.append(result)
         _atomic_json(trial_dir / "joint_comparison.json", result)
         _write_summary(output_root)
+        score = candidate_score(result)
+        passing_parents = [
+            parent
+            for parent, parent_result in result["parents"].items()
+            if parent_result["passed"] is True
+        ]
+        _status(
+            f"TRIAL_RESULT id={trial['id']} passed={result['passed']} "
+            f"groups={score['groups_passed']}/{score['groups_required']} "
+            f"parents={score['parents_passed']}/{score['parents_required']} "
+            f"cells={score['cells_passed']}/{score['cells_required']} "
+            f"feasible_cells={score['joint_feasible_cells']}/"
+            f"{score['cells_required']} blocking={score['blocking_count']} "
+            f"shortfall={score['total_shortfall']:.8g} "
+            f"passing_parents={passing_parents}"
+        )
+        for blocker in score["blocking"][:10]:
+            _status(
+                f"BLOCKER trial={trial['id']} cell={blocker['cell']} "
+                f"reason={blocker['reason']} "
+                f"competitor={blocker.get('competitor')} "
+                f"mean_shortfall={blocker.get('mean_shortfall', 0.0):.8g} "
+                f"cvar_shortfall={blocker.get('cvar95_shortfall', 0.0):.8g}"
+            )
+        if len(score["blocking"]) > 10:
+            _status(
+                f"BLOCKER remaining={len(score['blocking']) - 10} "
+                f"details={trial_dir / 'joint_comparison.json'}"
+            )
         events.write(
             {
                 "event": "trial_evaluated",
@@ -1317,6 +1468,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--sft-cache-root", type=Path, default=None)
     parser.add_argument("--output-root", type=Path, default=None)
     parser.add_argument("--max-trials", type=int, default=None)
+    parser.add_argument("--progress-interval", type=float, default=15.0)
     parser.add_argument("--dry-run", action="store_true")
     return parser.parse_args(argv)
 
