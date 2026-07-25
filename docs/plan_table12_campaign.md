@@ -1,5 +1,13 @@
 # Table 1/2 채우기 캠페인 — 플릿 설계 + 사전 예측 (2026-07-23)
 
+> **역사 기록이며 실행 금지.** 최신 `KDD_UnlearningFail.pdf`는 TOFU
+> primary/scale/family를 Qwen2.5-1.5B/Qwen2.5-7B/Llama-3.1-8B로 두고
+> Table 2를 8행으로 정의한다. 이 문서는 7B-primary, 1.5B-boundary,
+> Qwen2.5-14B를 포함한 9행 계획이므로 최신 paper contract와 다르다.
+> 정확한 PDF 열과 roster는 [Table 1/2 metric guide](TABLE12_METRICS.md)를
+> 따른다. Active config가 PDF와 동기화되기 전에는 아래 queue를 paper
+> evidence 목적으로 실행하지 않는다.
+
 > 목적: 논문 `tab:core-evidence`(Table 1)와 `tab:robustness`(Table 2)를
 > 실측으로 채운다. 오케스트레이션은 `experiments/cluster/` 파일 큐
 > (노드 = 8×H100 80GB, GPU 0–7 = 워커 8개). 점화 헬퍼:
@@ -7,8 +15,6 @@
 > `tofu_v4_unit.py → init_raw_plan.py → aggregate_raw.py →
 > build_evidence.py --paper-root`가 전담한다. 기존 channel-matrix run의
 > prediction/protection backfill에만 `export_channel_matrix_raw.py`를 쓴다.
-> 각 표 열의 수식과 E/P 판정은
-> [Table 1/2 metric guide](TABLE12_METRICS.md)를 따른다.
 
 ## 1. 무엇이 어느 테이블 셀을 채우나
 

@@ -1,18 +1,56 @@
-# Table 1/2 metric guide
+# Latest PDF Table 1/2 metric guide
 
-이 문서는 최신 PDF-v4 증거 파이프라인이 생성하는 다음 두 표의 열을
-설명한다.
+## 0. 기준 문서
 
-- Table 1: `tab:core-evidence`
-  (`paper/sections/generated/table_core_evidence.tex`)
-- Table 2: `tab:robustness`
-  (`paper/sections/generated/table_robustness.tex`)
+이 문서의 유일한 기준은 저장소 루트의 `KDD_UnlearningFail.pdf`다.
 
-`paper/sections/05_experiments.tex`에 직접 작성된 이전 channel-matrix 표와
-`local_run/table1.json`, `local_run/table2.json`은 이 문서의 범위가 아니다.
+```text
+PDF creation: 2026-07-24 19:48 KST
+Pages: 13
+SHA-256: b0ea5de888e4e5b3e429ce57f5bebd6a6cb18f36306422bcbafb963d02d93209
+```
+
+PDF와 Markdown, LaTeX, YAML, 코드가 충돌하면 PDF 정의를 따른다. 특히
+`paper/sections/05_experiments.tex`의 predictor-by-objective channel matrix는
+이전 초안의 Table 1이며 최신 PDF Table 1이 아니다.
+
+최신 PDF의 표 구조는 다음과 같다.
+
+- **Table 1, Panel A:** `Joint rho [LB]`,
+  `min(g_G,g_H) [min LB]`, `f_rho/f_K [LB]`, `g_ctl [LB]`,
+  `L_tail [LB]; eligible n/N`, `RQ1 E/P`, `RQ2 E/P`
+- **Table 1, Panel B:** `Profile mean; CVaR`,
+  `No-repair mean; CVaR`, `max_(a,k) Delta_(a,k) [UCB]`,
+  `min_a h_a [LB]`, `min F/U slack`, `updates/rollback`, `RQ3 E/P`
+- **Table 2:** `Axis`, `Setting`, `Plan/done`, `RQ1 E/P`, `RQ2 E/P`,
+  `RQ3 E/P`, `valid/reach`, `tail/common n`, `all-arm feasible`,
+  `worst RQ1/RQ2/RQ3 bounds`, `Failure modes`
+
+Table 1의 parent roster는 output-readout
+`{GradDiff, NPO, SimNPO, GRU}`와 representation-readout
+`{RMU, RepNoise, CB}`다.
+
+PDF Table 2의 setting roster는 정확히 8행이다.
+
+| Axis | PDF setting |
+|---|---|
+| Request | held-out TOFU requests |
+| Dataset | WMDP-bio/MMLU |
+| Dataset | MUSE-News |
+| Dataset | RWKU |
+| Dataset | MUSE-Books (stress) |
+| Dataset | PISTOL (stress) |
+| Model | Qwen2.5-7B |
+| Model | Llama-3.1-8B |
+
+PDF Table 3은 TOFU primary를 `Qwen2.5-1.5B / fp32`, scale을
+`Qwen2.5-7B / fp32`, family를 `Llama-3.1-8B / fp32`로 정의한다.
+현재 코드/config의 7B-primary, 1.5B-boundary, 14B 추가 roster는 이 PDF와
+일치하지 않으며 별도 동기화 전에는 paper contract로 취급하면 안 된다.
+
 계산과 렌더링이 구현되어 있다는 것과 실제 target campaign이 완료되어 숫자가
 채워졌다는 것은 다르다. 원자료가 없거나 eligibility가 불완전한 셀은
-`\tblph`로 남는다.
+placeholder로 남는다.
 
 ## 1. 공통 표기
 
@@ -27,20 +65,21 @@ d_a(x) = NLL(x; theta_a) - NLL(x; theta_0)
 `d_a(x) > 0`은 해당 retain 행동의 NLL이 증가해 손상이 생겼다는 뜻이다.
 따라서 damage의 mean과 CVaR는 작을수록 좋다.
 
-두 기본 score와 결합 score는 다음과 같다.
+두 기본 score의 정규화 rank와 결합 score는 다음과 같다.
 
 ```text
-S0(x) = q_G(x)  # loss-shake susceptibility
-S1(x) = q_H(x)  # forget-conditioned proximity
-S_joint(x) = (1 - alpha) rank(S0(x)) + alpha rank(S1(x))
+S0(x) = q_G_tilde(x)  # normalized loss-shake susceptibility rank
+S1(x) = q_H_tilde(x)  # normalized request-proximity rank
+S_alpha(x) = (1 - alpha) S0(x) + alpha S1(x)
 ```
 
 `alpha_pred`와 `alpha_prot`는 서로 다른 development fold에서 target 결과를
-보지 않고 동결한다.
+보지 않고 동결한다. RQ1/RQ2는 `S_(alpha_pred)`, RQ3는 별도로 동결한
+`S_(alpha_prot)`를 사용한다.
 
 | arm | 의미 |
 |---|---|
-| `joint` | 동결된 `S_joint`로 보호 대상을 선택해 repair |
+| `joint` | 동결된 `S_(alpha_prot)`로 보호 대상을 선택해 repair |
 | `no_repair` | 동일한 first-reaching parent checkpoint, repair 없음 |
 | `repeated_random` | 동결된 random draw roster로 보호 대상을 반복 선택 |
 | `s0` | `q_G`만 사용해 repair |
@@ -77,7 +116,7 @@ p_IUT      = max(p_1, ..., p_m)
 결합 score와 이후 발생한 audit damage의 Spearman 상관이다.
 
 ```text
-rho_joint = Spearman(S_joint(x), d_parent(x))
+rho_S = Spearman(S_(alpha_pred)(x), d_parent(x))
 ```
 
 범위는 `[-1, 1]`이다. 양수이면 높은 사전 score가 실제 고손상 후보를 먼저
@@ -88,30 +127,29 @@ rho_joint = Spearman(S_joint(x), d_parent(x))
 결합 score가 두 단독 score보다 얼마나 나은지 측정한다.
 
 ```text
-g_G = rho_joint - Spearman(S0, damage)
-g_H = rho_joint - Spearman(S1, damage)
+g_G = rho_S - Spearman(S0, damage)
+g_H = rho_S - Spearman(S1, damage)
 ```
 
 표에는 두 점 추정치의 최솟값과 두 lower bound의 최솟값을 표시한다. 둘 다
 양수여야 결합 score가 `q_G`, `q_H` 각각보다 낫다고 말할 수 있다.
 
-### f_rho / f_K [margin LB]
+### f_rho / f_K [LB]
 
 Loss-shake가 동일 parameter block의 exact per-candidate gradient energy를
 얼마나 잘 재현하는지 측정한다.
 
 ```text
-f_rho = Spearman(loss_shake_score, exact_gradient_energy)
+f_rho = Spearman(q_G_hat, q_G_exact)
 f_K   = |TopK(loss_shake) intersect TopK(exact)| / K
 
 margin_rho = f_rho - 0.80
 margin_K   = f_K - 0.70
 ```
 
-`K`는 동결된 `Kp`다. 표의 앞 숫자는 실제 `f_rho/f_K`, 대괄호 안 숫자는
-floor 대비 lower-bound margin이다. Setting-level fidelity certificate는
-진단용 fallback일 뿐이며, per-unit `fidelity_raw.jsonl` 없이 RQ2 pass를
-만들 수 없다.
+`K`는 동결된 `Kp`다. PDF 표 머리글은 `[LB]`로 축약하지만 Section 4.7의
+판정 대상은 `LB(f_rho-0.80)`과 `LB(f_K-0.70)`이다. 즉 단순히
+`LB(f_rho)>0`, `LB(f_K)>0`를 보는 것이 아니다.
 
 ### g_ctl [LB]
 
@@ -119,10 +157,11 @@ floor 대비 lower-bound margin이다. Setting-level fidelity certificate는
 Spearman 이득이다.
 
 ```text
-g_ctl = rho_joint - Spearman(S_control, damage)
+g_ctl = rho_S - Spearman(b_star, damage)
 ```
 
-`LB > 0`이면 결합 score가 선택된 최강 단순 control보다 유의하게 낫다.
+`b_star`는 development fold에서 고른 strongest predeclared simple control이다.
+`LB > 0`이면 결합 score가 이 control보다 유의하게 낫다.
 
 ### L_tail [LB]; eligible n/N
 
@@ -131,7 +170,7 @@ g_ctl = rho_joint - Spearman(S_control, damage)
 
 ```text
 H_M = positive-damage candidates 중 damage 상위 M개
-P_M = S_joint 상위 M개
+P_M = S_(alpha_pred) 상위 M개
 Recall_M = |H_M intersect P_M| / M
 q = M / N
 L_tail = Recall_M / q - 1
@@ -145,10 +184,9 @@ L_tail = Recall_M / q - 1
 
 `E/P`는 eligible/pass다.
 
-- `E=y`: prediction selection이 valid/non-fallback이고, profile과 exact
-  common support가 유효하며, support unit이 2개 이상이고, tail coverage가
-  `0.80` 이상이다.
-- `P=y`: `rho_joint`, `g_G`, `g_H`, `L_tail`의 네 lower bound가 모두
+- `E=y`: prediction selection, profile integrity, external gate reach,
+  shared support가 유효하고 tail coverage가 `0.80` 이상이다.
+- `P=y`: `rho_S`, `g_G`, `g_H`, `L_tail`의 네 lower bound가 모두
   `0`보다 크고 four-way IUT가 `alpha=0.05`를 통과한다.
 - 모든 planned trajectory가 완료되지 않으면 pass가 차단된다.
 
@@ -206,11 +244,11 @@ Delta_(a,k) = T_k(joint) - T_k(a)
 ### min_a h_a [LB]
 
 Dataset-native retain metric의 comparator별 non-inferiority margin이다.
-동결된 허용 열화량을 `delta_NI >= 0`이라 하면:
+PDF는 native metric `M_a`를 미리 favorable orientation으로 바꾼 뒤,
+동결된 허용 열화량 `delta_nat >= 0`을 더한다.
 
 ```text
-h_a = native(joint) - native(a) + delta_NI  # higher is better
-h_a = native(a) - native(joint) + delta_NI  # lower is better
+h_a = M_profile - M_a + delta_nat
 ```
 
 표에는 네 comparator 중 가장 작은 점 추정치와 lower bound를 표시한다.
@@ -251,8 +289,8 @@ request-balanced 평균이다. 최적화 진단이며 RQ3 IUT의 구성 효과�
 ## 5. Table 2: robustness와 failure boundary
 
 Table 2는 새로운 candidate metric을 계산하지 않는다. Table 1과 같은
-ledger/decision을 모든 predeclared setting에 대해 요약하며, 미실행 setting도
-분모에서 제거하지 않는다.
+decision을 위에 열거한 PDF의 8개 predeclared setting에 대해 요약하며,
+미실행 setting도 분모에서 제거하지 않는다.
 
 | 열 | 의미 |
 |---|---|
@@ -280,7 +318,7 @@ parent가 필요하다. Primary, model-transfer, dataset-replication group의
 사전 동결 규칙까지 만족해야 최종 transfer 문구가 licensed된다. Stress
 setting은 primary 실패를 구제할 수 없다.
 
-## 6. 구현 위치와 점검 결과
+## 6. 구현 위치와 PDF 일치 상태
 
 | 단계 | 구현 |
 |---|---|
@@ -289,10 +327,20 @@ setting은 primary 실패를 구제할 수 없다.
 | Bootstrap bound와 p-value | `src/rsus/evidence/statistics.py` |
 | RQ1/RQ2/RQ3 IUT와 eligibility | `src/rsus/evidence/pdf_v4.py`, `src/rsus/evidence/decisions.py` |
 | Table 1/2 렌더링 | `src/rsus/evidence/tables.py`, `src/rsus/evidence/table1.py` |
-| 동결된 threshold/roster | `configs/paper/evidence.yaml`, `configs/paper/campaign.yaml` |
+| 현재 동결 config | `configs/paper/evidence.yaml`, `configs/paper/campaign.yaml` |
 
-수식 점검 기준으로 Table 1/2에 표시되는 metric은 모두
-producer -> raw validation -> aggregation -> decision -> renderer 경로가
-연결되어 있다. 현재 남은 `\tblph`는 metric 함수 미구현이 아니라 실제
-target raw evidence 또는 비-TOFU exact producer/roster가 아직 완료되지 않은
-경우다.
+Metric 계산과 RQ1/RQ2/RQ3 IUT의 부호는 PDF와 대응한다. 그러나 저장소 전체가
+최신 PDF와 동기화된 것은 아니다.
+
+| 항목 | 상태 |
+|---|---|
+| Table 1 metric 열과 4/4/12-way IUT | PDF와 대응 |
+| Fractional CVaR.95와 low-tail-support 규칙 | PDF와 대응 |
+| `paper/main.tex`이 컴파일하는 Table 1 | 불일치: 구버전 channel matrix |
+| TOFU primary/scale/family roster | 불일치: PDF는 1.5B/7B/Llama |
+| Table 2 denominator | 불일치: PDF 8행, 현재 config/renderer 9행 |
+| 실제 target evidence | 미생성 |
+
+따라서 현재 생성 renderer의 숫자는 metric-level 진단에는 사용할 수 있지만,
+roster를 PDF와 동기화하기 전에는 최신 PDF Table 1/2를 채운 paper evidence로
+간주할 수 없다.

@@ -6,7 +6,13 @@ only a normalized ledger checked against `configs/paper/evidence.yaml`.
 The formulas and interpretation of every generated Table 1/2 column are
 documented in [`TABLE12_METRICS.md`](TABLE12_METRICS.md).
 
-The config is the denominator. Every configured setting--parent row appears in
+`KDD_UnlearningFail.pdf` is normative. The current config is only the
+implementation denominator and is not yet the paper denominator: it has nine
+setting rows and 7B as primary, whereas the latest PDF has eight Table 2 rows
+and defines TOFU primary/scale/family as 1.5B/7B/Llama. No claim-bearing run
+should start until that roster mismatch is resolved.
+
+Within one config revision, every configured setting--parent row appears in
 the readiness report even if it was never attempted. A row cannot pass while a
 planned trajectory is incomplete, a profile is invalid, a development weight
 is unresolved/fallback, common support is missing, or a protection arm is
@@ -319,4 +325,5 @@ headline macros:
    one-sided bounds exist and clear zero.
 
 Campaign wave -> table mapping and the pre-run outcome forecast live in
-`docs/plan_table12_campaign.md`.
+`docs/plan_table12_campaign.md`, but that July 23 plan predates the normative
+PDF roster and is retained as history rather than an executable paper plan.

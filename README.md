@@ -2,7 +2,7 @@
 
 > **2026-07-25 protocol status:** `KDD_UnlearningFail.pdf` is the latest
 > protocol source of truth. The active paper execution and evidence paths
-> implement its v4 contract: first-reaching
+> implement its metric-level v4 contract: first-reaching
 > damage, Equations (7)--(8), exact `Kp`, fractional CVaR, and separate
 > RQ1/RQ2/RQ3 IUTs including native-metric non-inferiority. See
 > [`docs/PDF_V4_CODE_AUDIT.md`](docs/PDF_V4_CODE_AUDIT.md) and
@@ -10,24 +10,29 @@
 > before running or porting the method. This does not mean results are
 > available: the 1.5B parent freeze still requires real `D_cal` outputs, model
 > paths are unavailable on this host, and non-TOFU adapters/rosters remain
-> incomplete. The editable `paper/sections/*.tex` tree is an older draft and
-> must not override the PDF protocol until it is synchronized.
+> incomplete. The editable `paper/sections/*.tex` tree is an older draft.
+> The current config also disagrees with the PDF setting roster: the PDF uses
+> TOFU primary/scale/family = 1.5B/7B/Llama and an 8-row Table 2, while the
+> config currently encodes 7B-primary plus 1.5B-boundary and 14B in 9 rows.
+> Neither source nor config may override the PDF until synchronized.
 
 > LLM **언러닝(삭제)** 시 어떤 *보존 데이터*가 부수적으로 망가지는지를
 > **미리 예측**하고(Finite-Difference 프로브), 그 예측을 이용해 **보호적 복구**를
 > 수행하는 연구 코드. 논문 *"When Does LLM Unlearning Fail? Predicting and
 > Protecting Susceptible Retained Behavior"*의 구현체.
 >
-> 이 README는 **실제 코드와 최신 PDF 기준**으로 작성됨. 프로토콜과 수식은
-> `KDD_UnlearningFail.pdf`, 실행 동결값은 `configs/paper/*.yaml`과
-> `prereg/constants.yaml`이 근거다. (`paper/sections/*.tex`와 `DESIGN.md`는
-> 현재 구버전 초안이므로 참고용으로만 사용한다.)
+> 프로토콜과 수식의 기준은 `KDD_UnlearningFail.pdf`다.
+> `configs/paper/*.yaml`, `prereg/constants.yaml`, Markdown, LaTeX가 PDF와
+> 충돌하면 PDF가 우선한다. `paper/sections/*.tex`와 `DESIGN.md`는 현재
+> 구버전 초안이며, active config의 setting roster도 아직 PDF와 불일치한다.
 
 ## 문서 찾기
 
 모든 Markdown 문서는 [문서 인덱스](docs/README.md)에서 용도별로 찾을 수 있다.
-Table 1/2 수식은 [metric guide](docs/TABLE12_METRICS.md), 실제 실행 순서는
-[campaign guide](docs/plan_table12_campaign.md)를 바로 보면 된다.
+Table 1/2 수식과 정확한 PDF roster는
+[metric guide](docs/TABLE12_METRICS.md)를 본다. 7월 23일
+[campaign guide](docs/plan_table12_campaign.md)는 현재 PDF와 roster가 다른
+역사 기록이므로 그대로 실행하면 안 된다.
 
 ---
 
@@ -261,10 +266,10 @@ fdmu/  (retain-susceptibility 포크)
 | 언러닝 objectives (ga/graddiff/npo/simnpo/idkdpo/rmu/gru/circuit_breakers/repnoise) | ✅ |
 | **PDF v4 Eq. (7)--(8) repair + first-reaching wrapper** | ✅ **구현·단위테스트** (`repair.py`, `generators/repaired.py`) |
 | **RQ1/RQ2/RQ3 raw aggregation + 4/4/12-way IUT** | ✅ schema v2, fail-closed |
-| **정확 roster paper-stage 오케스트레이터** | ✅ unit 실행·검증·봉인 구현 |
+| **Paper-stage 오케스트레이터** | ✅ config roster 실행·검증·봉인 구현; 최신 PDF roster와 config는 불일치 |
 | **TOFU PDF-v4 model-output unit producer** | ✅ 구현·계약테스트; 실제 GPU campaign 미실행 |
 | **TOFU Table 1 Panel A/B 선택·집계·LaTeX 렌더링** | ✅ 구현·합성 140-unit E2E 검증 |
-| PDF Table 2 breadth/failure-boundary LaTeX 렌더링 | ✅ 9-setting denominator, E/P, funnel, worst RQ1/RQ2/RQ3 bound |
+| PDF Table 2 breadth/failure-boundary LaTeX 렌더링 | ⚠️ metric 렌더링 구현; PDF는 8행인데 현재 config는 9행 |
 | 구버전 Table 3 ablation / Table 4 cost 도구 | ✅ 구현; 최신 PDF appendix와 재매핑 필요 |
 | 데이터셋 **TOFU, RWKU, substrate** | ✅ 어댑터 구현 |
 | 데이터셋 **MUSE (News/Books)** | ✅ corpus-level 어댑터와 registry 구현; 독립 target-request roster는 미지원이라 paper preflight 차단 |
@@ -272,10 +277,10 @@ fdmu/  (retain-susceptibility 포크)
 | 데이터셋 **PISTOL** | ❌ 어댑터·exact roster 미구현 |
 | **KnowUnDo / OpenUnlearning** | related work 인용이며 현재 실험 roster 아님 |
 
-> 요약: **v4 프로브·repair·증거 계약, TOFU model-output producer, Table 1/2
-> renderer와 H100 campaign orchestration이 구현됨**. 실제 target 수치는 아직
-> 없으며, 비-TOFU setting은 어댑터 구현 여부와 별개로 exact roster와
-> PDF-v4 unit producer가 동결되기 전까지 claim-bearing evidence가 아니다.
+> 요약: **v4 metric, repair, evidence 집계와 renderer는 구현됨**. 다만 최신
+> PDF의 1.5B-primary/7B-scale/Llama-family 및 8행 Table 2 roster가 active
+> config에 반영되지 않았다. 실제 target 수치도 아직 없으므로 현재 상태는
+> claim-bearing evidence가 아니다.
 
 ## 6. 설치 & 실행
 
@@ -296,24 +301,21 @@ python experiments/gate_1p5b/gate.py --model <경로> --device cuda --dtype floa
 
 # 최신 PDF-v4 TOFU exact manifest 점검
 python experiments/paper/run_tofu_table1.py \
-  --action plan --setting tofu_qwen25_7b
+  --action plan --setting tofu_qwen25_1p5b
 ```
 
 ### H100 Table 1/2 캠페인
 
-클러스터에서는 [AGENTS.md](AGENTS.md)의 freeze/seal 규칙과
-[클러스터 런북](docs/CLUSTER_FLEET_RUNBOOK.md)을 먼저 따른다. 현재 상태와
-허용된 다음 단계는 추측하지 않고 아래 명령으로 확인한다.
+현재 `enqueue_table12.sh` wave는 7B-primary/14B가 포함된 이전 9행 config용이라
+최신 PDF paper evidence로 enqueue하면 안 된다. 먼저
+`configs/paper/campaign.yaml`과 `configs/paper/evidence.yaml`을 PDF의
+1.5B-primary/7B-scale/Llama-family 및 8행 Table 2에 맞춰야 한다. 그 전에는
+아래 read-only 검사만 허용한다.
 
 ```bash
 python experiments/paper/preflight.py
 python experiments/cluster/next_actions.py
 bash experiments/cluster/enqueue_table12.sh status
-
-# next_actions.py의 allowed_now에 나온 wave만 enqueue
-bash experiments/cluster/enqueue_table12.sh wmdp
-python experiments/cluster/workqueue.py status \
-  --brief --queue runs/cluster_queue/wave_wmdp
 ```
 
 TOFU PDF-v4 target unit이 완료되면 sealed raw 세 종류를 하나의 ledger로
@@ -321,10 +323,10 @@ TOFU PDF-v4 target unit이 완료되면 sealed raw 세 종류를 하나의 ledge
 
 ```bash
 python experiments/paper/aggregate_raw.py \
-  --plan runs/paper/tofu_table1/tofu_qwen25_7b/raw_plan.json \
-  --prediction-raw runs/paper/tofu_table1/tofu_qwen25_7b/target_evaluation/sealed/prediction_raw.jsonl \
-  --fidelity-raw runs/paper/tofu_table1/tofu_qwen25_7b/target_evaluation/sealed/fidelity_raw.jsonl \
-  --protection-raw runs/paper/tofu_table1/tofu_qwen25_7b/target_evaluation/sealed/protection_raw.jsonl \
+  --plan runs/paper/tofu_table1/tofu_qwen25_1p5b/raw_plan.json \
+  --prediction-raw runs/paper/tofu_table1/tofu_qwen25_1p5b/target_evaluation/sealed/prediction_raw.jsonl \
+  --fidelity-raw runs/paper/tofu_table1/tofu_qwen25_1p5b/target_evaluation/sealed/fidelity_raw.jsonl \
+  --protection-raw runs/paper/tofu_table1/tofu_qwen25_1p5b/target_evaluation/sealed/protection_raw.jsonl \
   --out results/paper/evidence_ledger.json
 
 python experiments/paper/build_evidence.py \
@@ -336,10 +338,10 @@ python experiments/paper/build_evidence.py \
 `experiments/paper/export_channel_matrix_raw.py`로 v4 이름의
 prediction/protection shard로 변환할 수 있다. 다만 setting별 RQ2 판정에는
 독립적인 per-unit `fidelity_raw.jsonl`이 필요하며, certificate summary만으로
-RQ2 pass를 만들지 않는다. 전체 순서는
-[Table 1/2 캠페인 문서](docs/plan_table12_campaign.md)에 정리돼 있다.
-표의 숫자를 해석할 때는
-[Table 1/2 metric guide](docs/TABLE12_METRICS.md)를 함께 본다.
+RQ2 pass를 만들지 않는다. 정확한 PDF 계약은
+[Table 1/2 metric guide](docs/TABLE12_METRICS.md)를 본다. 이전
+[7월 23일 캠페인 문서](docs/plan_table12_campaign.md)는 roster가 달라
+실행 지침으로 사용하지 않는다.
 
 `gate.py`는 기본적으로 exact SFT contract별 checkpoint를
 `runs/sft_cache/`에 저장하고 다음 실행에서 자동으로 불러온다. 명시적 파일은
@@ -408,8 +410,8 @@ ledger에서만 `--require-ready`가 성공한다. 이전 `gate.py`
 ### 9.3 실험 커버리지 (구현됐으나 아직 안 돌린 것)
 - **최신 Table 1:** 코드와 합성 evidence 검증만 완료했으며 실제 TOFU target
   campaign은 미실행이다.
-- **최신 Table 2:** LaTeX renderer와 9-setting denominator는 구현됐다.
-  비-TOFU PDF-v4 evidence는 exact roster/producer가 준비된 setting부터 채워야 한다.
+- **최신 Table 2:** PDF는 8행이지만 current config/renderer denominator는
+  9행이다. PDF roster 동기화 후 비-TOFU exact producer를 채워야 한다.
 - **Appendix ablation/cost:** 기존 `analysis/ablation.py`와
   `experiments/cost/bench.py`를 최신 PDF appendix contract에 맞춰 재매핑해야 한다.
 - **통계:** hierarchical bootstrap과 IUT는 구현됐지만 실제 다중 request/seed

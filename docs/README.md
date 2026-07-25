@@ -17,7 +17,6 @@
 
 | 작업 | 문서 |
 |---|---|
-| Table 1/2 전체 캠페인 순서 | [Table 1/2 campaign](plan_table12_campaign.md) |
 | H100 플릿 운영 | [Cluster fleet runbook](CLUSTER_FLEET_RUNBOOK.md) |
 | 새 모델 추가와 캘리브레이션 | [New model calibration](NEW_MODEL_CALIBRATION_GUIDE.md) |
 | 채널 방향과 score 해석 | [Channel direction](channel_direction.md) |
@@ -45,6 +44,7 @@
 | [Paper revision plan](paper_revision_plan.md) | 이전 논문 개정 계획 |
 | [2026-07-23 fleet plan](plan_2026-07-23_fleet.md) | 날짜 고정 플릿 계획 |
 | [2026-07-23 GPU plan](plan_2026-07-23_gpu.md) | 날짜 고정 GPU 작업 기록 |
+| [2026-07-23 Table 1/2 campaign](plan_table12_campaign.md) | 최신 PDF와 roster가 달라 실행 금지 |
 | [DESIGN.md](../DESIGN.md) | 구버전 설계 참고 |
 | [Channel-matrix design](../experiments/channel_matrix/DESIGN.md) | 이전 캠페인 설계 |
 | [Local hyperparameters](../local_run/HYPERPARAMS.md) | 로컬 진단 설정 |

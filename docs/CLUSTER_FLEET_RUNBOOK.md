@@ -152,6 +152,12 @@ audit(모델×저자 3)과 alpha-audit(모델×저자×시드 6) + 복수 모델
 
 ## 부록: enqueue_table12.sh — Table 1/2 잔여 웨이브 원샷 적재
 
+> **이 부록의 Table 1/2 매핑은 최신 PDF paper contract가 아니다.**
+> `audit-7b`, `audit-14b`와 아래 표는 7B-primary/14B를 포함한 이전 9행
+> campaign config를 설명한다. 최신 PDF는 1.5B-primary/7B-scale/Llama-family
+> 및 8행 Table 2를 요구한다. Config가 PDF와 동기화되기 전에는 status 조회
+> 외의 `enqueue_table12.sh` 명령을 paper evidence 목적으로 실행하지 않는다.
+
 `experiments/cluster/enqueue_table12.sh`는 레포 루트에서 실행하는 운영자용
 래퍼다. 워커를 띄우지 않고, `git pull`도 하지 않으며, 큐 상태는
 `make_units.py --enqueue` 외에는 건드리지 않는다. 재실행 안전: 같은 unit id는

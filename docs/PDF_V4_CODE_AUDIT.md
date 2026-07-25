@@ -6,12 +6,13 @@ Normative specification: `KDD_UnlearningFail.pdf` (13 pages)
 
 ## Bottom line
 
-The active code contract is aligned with the July 24 PDF through the TOFU
-model-execution, evidence, and Table 1 rendering boundaries. This remediation
-does not create experimental results and does not make the repository
-claim-ready. Preflight still fails where required model paths or target-free
-freezes are absent, and non-TOFU adapters, request semantics, or rosters remain
-unresolved.
+The active code contract is aligned with the July 24 PDF at the metric,
+repair, evidence-schema, and Table 1 column level. It is not aligned at the
+setting-roster level. The PDF declares TOFU primary/scale/family as
+Qwen2.5-1.5B/Qwen2.5-7B/Llama-3.1-8B and Table 2 has eight rows; the active
+config instead promotes 7B to primary and adds 1.5B-boundary plus 14B to a
+nine-row denominator. This remediation does not create experimental results
+and does not make the repository claim-ready.
 
 Legacy channel-matrix and Stage1/Stage2 programs remain diagnostic tools. They
 are not accepted as paper evidence. The paper path is:
@@ -36,7 +37,7 @@ campaign.yaml
 | Equation (8): damped active-constraint filter, refresh, rollback and retry | Implemented and unit-tested | `src/rsus/repair.py`, `tests/test_repair_v4.py` |
 | `B_tok` repair budget and final feasibility gates | Implemented in v4 repair wrapper | `src/rsus/repair.py`, `src/rsus/generators/repaired.py` |
 | Exact `Kp`, selector-independent neutral data and score-independent folds | Implemented and frozen in manifests/plans | `src/rsus/partition.py`, `src/rsus/local_pdf_v4.py`, `experiments/paper/init_raw_plan.py` |
-| Exact `D_cal`, `D_pred`, `D_prot`, target roster consumption | Implemented in paper orchestrator; external rosters remain unresolved for some datasets | `experiments/paper/run_v4_stage.py`, `configs/paper/campaign.yaml` |
+| Exact `D_cal`, `D_pred`, `D_prot`, target roster consumption | Orchestrator implemented for its config; active setting roster does not match the latest PDF | `experiments/paper/run_v4_stage.py`, `configs/paper/campaign.yaml` |
 | Dataset model execution into paper raw schemas | Implemented for TOFU; other datasets remain blocked | `experiments/paper/tofu_v4_unit.py`, `configs/paper/campaign.yaml` |
 | RQ1 four lower bounds and at least 80% tail eligibility | Implemented in schema-v2 raw aggregation and decision gate | `src/rsus/evidence/raw.py`, `src/rsus/evidence/pdf_v4.py` |
 | RQ2 fidelity/add-value four-way IUT | Implemented | `src/rsus/evidence/raw.py`, `src/rsus/evidence/pdf_v4.py` |
@@ -105,6 +106,9 @@ silently substituted:
   rosters can be frozen.
 - WMDP, MUSE, and PISTOL roster placeholders remain unresolved.
 - No full GPU campaign has produced the candidate-level RQ1/RQ2/RQ3 shards.
+- The active evidence config has nine setting rows, while the PDF Table 2 has
+  eight; primary/scale roles and the extra 14B row must be reconciled to the
+  PDF before a claim-bearing run.
 - The checked-in LaTeX predates the supplied PDF; the generated current-format
   Table 1 is written separately because the PDF's matching source tree is not
   present in this repository.
