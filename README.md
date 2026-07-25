@@ -133,6 +133,9 @@ Circuit Breakers parent를 변경하지 않고 실행한 뒤, direct-forgetting 
   utility 조건을 모두 만족한 공통 support에서 mean damage, fractional
   CVaR.95, dataset-native retain metric을 비교한다.
 
+Table 1/2 각 열의 수식, 방향, bootstrap/IUT 판정과 Table 2 분모 정의는
+[Table 1/2 metric guide](docs/TABLE12_METRICS.md)에 정리돼 있다.
+
 ### 3.4 실행과 산출물
 
 논문 stage 오케스트레이터는 `experiments/paper/run_v4_stage.py`이며 정확한
@@ -329,6 +332,8 @@ prediction/protection shard로 변환할 수 있다. 다만 setting별 RQ2 판�
 독립적인 per-unit `fidelity_raw.jsonl`이 필요하며, certificate summary만으로
 RQ2 pass를 만들지 않는다. 전체 순서는
 [Table 1/2 캠페인 문서](docs/plan_table12_campaign.md)에 정리돼 있다.
+표의 숫자를 해석할 때는
+[Table 1/2 metric guide](docs/TABLE12_METRICS.md)를 함께 본다.
 
 `gate.py`는 기본적으로 exact SFT contract별 checkpoint를
 `runs/sft_cache/`에 저장하고 다음 실행에서 자동으로 불러온다. 명시적 파일은

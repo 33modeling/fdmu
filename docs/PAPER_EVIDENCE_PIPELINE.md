@@ -3,6 +3,8 @@
 `experiments/paper/build_evidence.py` is the only paper-facing result gate.
 Experiment runners may write many diagnostic artifacts, but the paper consumes
 only a normalized ledger checked against `configs/paper/evidence.yaml`.
+The formulas and interpretation of every generated Table 1/2 column are
+documented in [`TABLE12_METRICS.md`](TABLE12_METRICS.md).
 
 The config is the denominator. Every configured setting--parent row appears in
 the readiness report even if it was never attempted. A row cannot pass while a

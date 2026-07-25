@@ -7,6 +7,8 @@
 > `tofu_v4_unit.py → init_raw_plan.py → aggregate_raw.py →
 > build_evidence.py --paper-root`가 전담한다. 기존 channel-matrix run의
 > prediction/protection backfill에만 `export_channel_matrix_raw.py`를 쓴다.
+> 각 표 열의 수식과 E/P 판정은
+> [Table 1/2 metric guide](TABLE12_METRICS.md)를 따른다.
 
 ## 1. 무엇이 어느 테이블 셀을 채우나
 
