@@ -209,6 +209,11 @@ bash experiments/cluster/run_tofu_7b_h100.sh
 bash experiments/cluster/run_tofu_14b_h100.sh
 ```
 
+7B 실행기는 빈 GPU 전체에 worker를 띄운다. 14B 실행기는 host RAM과 model
+load I/O 폭증을 피하기 위해 **GPU 0 worker 1개로 고정**한다. 14B unit 자체도
+`CUDA_VISIBLE_DEVICES=0`인 단일-GPU 실행이며 내부 8-GPU sharding을 사용하지
+않는다.
+
 - `status`: wave2 / wave1_14b / wave_wmdp / wave_llama / wave3_alpha /
   wave4_alpha 큐별 `workqueue.py status --brief` 요약 + `fleet_status.py` 안내.
 - `audit-*`: enqueue 전에 (1) 해당 config의 objective_freeze가

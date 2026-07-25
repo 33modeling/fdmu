@@ -219,6 +219,8 @@ def test_model_launchers_pin_queues_without_force_override():
     assert "FORCE_QUEUE" not in fourteen
     assert 'QUEUE="$CLUSTER_RUNS_ROOT/cluster_queue/wave2"' in seven
     assert 'QUEUE="$CLUSTER_RUNS_ROOT/cluster_queue/wave1_14b"' in fourteen
+    assert "WORKER_COUNT=1" in fourteen
+    assert 'launch_node.sh "$QUEUE" "$WORKER_COUNT"' in fourteen
 
 
 def test_quarantine_moves_only_retryable_partial_audit(tmp_path, monkeypatch):

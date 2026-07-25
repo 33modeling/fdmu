@@ -10,6 +10,7 @@ QUEUE="$CLUSTER_RUNS_ROOT/cluster_queue/wave1_14b"
 VENV="/group-volume/fdmu/.venv"
 PYTHON="$VENV/bin/python"
 MODEL_ID=qwen25_14b
+WORKER_COUNT=1
 LOG_DIR="$CLUSTER_RUNS_ROOT/logs/cluster"
 mkdir -p "$LOG_DIR"
 LOG="$LOG_DIR/launcher_${MODEL_ID}_$(hostname)_$(date -u '+%Y%m%dT%H%M%SZ').out"
@@ -63,7 +64,9 @@ stage fidelity-contract-validation
 stage enqueue
 bash experiments/cluster/enqueue_table12.sh audit-14b
 stage worker-launch
-bash experiments/cluster/launch_node.sh "$QUEUE"
+printf '[CONFIG] model=%s worker_count=%s queue=%s\n' \
+  "$MODEL_ID" "$WORKER_COUNT" "$QUEUE"
+bash experiments/cluster/launch_node.sh "$QUEUE" "$WORKER_COUNT"
 stage queue-monitor
 "$PYTHON" -u experiments/cluster/monitor_queue.py \
   --queue "$QUEUE" --match "$MODEL_ID" \

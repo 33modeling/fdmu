@@ -27,11 +27,13 @@ Examples (on the H100 host)::
 from __future__ import annotations
 
 import argparse
+from datetime import datetime, timezone
 import hashlib
 import itertools
 import json
 import os
 import shlex
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -494,6 +496,23 @@ def _has_artifacts(out: Path) -> bool:
     return out.exists() and any(out.iterdir())
 
 
+def _quarantine_partial_audit(out: Path) -> Path:
+    """Preserve an interrupted sealed audit before an explicit resume retry."""
+    runs_root = Path(os.environ.get("CLUSTER_RUNS_ROOT", ROOT / "runs"))
+    forensics = runs_root / "forensics" / "audit-partials"
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S.%fZ")
+    identity = "__".join(out.parts[-4:])
+    destination = forensics / f"{stamp}__{identity}"
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    shutil.move(str(out), str(destination))
+    print(
+        f"QUARANTINED partial sealed audit: source={out} "
+        f"destination={destination}",
+        flush=True,
+    )
+    return destination
+
+
 def main() -> None:
     p = argparse.ArgumentParser()
     p.add_argument("--config", required=True)
@@ -631,7 +650,9 @@ def main() -> None:
                 if a.limit and n >= a.limit:
                     break
                 continue
-            if _has_artifacts(out):
+            if _has_artifacts(out) and a.resume and not a.dry_run:
+                _quarantine_partial_audit(out)
+            elif _has_artifacts(out):
                 raise RuntimeError(
                     f"partial or pre-existing sealed run: {out}. The append-only seal cannot "
                     "be overwritten; preserve it and choose a new campaign/output_root."

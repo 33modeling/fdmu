@@ -11,6 +11,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 import yaml
 
@@ -102,6 +103,29 @@ class ChannelCampaignContractTest(unittest.TestCase):
             campaign._filter_authors([198, 199], {181}, "calibration")
         with self.assertRaisesRegex(ValueError, "empty"):
             campaign._filter_authors([198, 199], set(), "calibration")
+
+    def test_resume_quarantines_partial_audit_without_deleting_it(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            runs = root / "runs"
+            partial = (
+                runs / "channel_matrix_7b" / "audit" / "qwen25_7b"
+                / "tofu-a181" / "seed-2025"
+            )
+            partial.mkdir(parents=True)
+            (partial / "run_manifest.json").write_text(
+                '{"interrupted": true}', encoding="utf-8"
+            )
+            with mock.patch.dict(
+                campaign.os.environ, {"CLUSTER_RUNS_ROOT": str(runs)}
+            ):
+                destination = campaign._quarantine_partial_audit(partial)
+
+            self.assertFalse(partial.exists())
+            self.assertTrue((destination / "run_manifest.json").is_file())
+            self.assertEqual(
+                destination.parent, runs / "forensics" / "audit-partials"
+            )
 
     def test_fidelity_uses_only_frozen_development_cell(self):
         commands = list(campaign.fidelity_commands(
