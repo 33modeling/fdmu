@@ -6,7 +6,7 @@ cd "$ROOT"
 # shellcheck disable=SC1091
 source "$ROOT/experiments/cluster/cluster_env.sh"
 
-QUEUE="${H100_7B_QUEUE:-$CLUSTER_RUNS_ROOT/cluster_queue/wave2}"
+QUEUE="$CLUSTER_RUNS_ROOT/cluster_queue/wave2"
 VENV="${VENV:-/group-volume/jieuns.shin/venvs/exp}"
 PYTHON="$VENV/bin/python"
 MODEL_ID=qwen25_7b
@@ -94,12 +94,7 @@ stage failed-audit-recovery
 stage enqueue
 bash experiments/cluster/enqueue_table12.sh audit-7b
 stage worker-launch
-# This model-specific launcher is itself an explicit wave2 assignment. Allow
-# replacement hosts not yet listed in fleet.yaml; launch_node still refuses
-# when workers for another queue are actually active on the node.
-FORCE_QUEUE="${FORCE_QUEUE:-1}" \
-REPLACE_IDLE_WORKERS="${REPLACE_IDLE_WORKERS:-1}" \
-  bash experiments/cluster/launch_node.sh "$QUEUE"
+bash experiments/cluster/launch_node.sh "$QUEUE"
 printf '[RESULT] worker-launch complete; active local workers:\n'
 pgrep -af "experiments/cluster/worker.py --queue" || true
 "$PYTHON" experiments/cluster/workqueue.py status --brief --queue "$QUEUE"

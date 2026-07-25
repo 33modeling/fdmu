@@ -1,6 +1,14 @@
 #!/usr/bin/env bash
 # Shared-volume-only cache and temporary paths for H100 cluster jobs.
 
+CLUSTER_REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+CLUSTER_LOCAL_ENV="${CLUSTER_LOCAL_ENV:-$CLUSTER_REPO_ROOT/.cluster_env.local.sh}"
+if [[ -f "$CLUSTER_LOCAL_ENV" ]]; then
+  # shellcheck disable=SC1090
+  source "$CLUSTER_LOCAL_ENV"
+  printf '[cluster-env] loaded local overrides: %s\n' "$CLUSTER_LOCAL_ENV"
+fi
+
 GROUP_VOLUME_ROOT="${GROUP_VOLUME_ROOT:-/group-volume}"
 CLUSTER_USER="${USER:-$(id -un)}"
 export CLUSTER_RUNS_ROOT="${CLUSTER_RUNS_ROOT:-$GROUP_VOLUME_ROOT/jieuns.shin/retain-susceptibility/runs}"

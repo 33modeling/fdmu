@@ -6,7 +6,7 @@ cd "$ROOT"
 # shellcheck disable=SC1091
 source "$ROOT/experiments/cluster/cluster_env.sh"
 
-QUEUE="${H100_14B_QUEUE:-$CLUSTER_RUNS_ROOT/cluster_queue/wave1_14b}"
+QUEUE="$CLUSTER_RUNS_ROOT/cluster_queue/wave1_14b"
 VENV="${VENV:-/group-volume/jieuns.shin/venvs/exp}"
 PYTHON="$VENV/bin/python"
 MODEL_ID=qwen25_14b
