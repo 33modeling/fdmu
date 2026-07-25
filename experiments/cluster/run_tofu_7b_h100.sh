@@ -17,23 +17,60 @@ ln -sfn "$(basename "$LOG")" "$LOG_DIR/launcher_${MODEL_ID}_$(hostname)_current.
 exec > >(tee -a "$LOG") 2>&1
 
 STAGE=bootstrap
+
+print_context() {
+  local workers
+  workers="$(pgrep -af "experiments/cluster/worker.py --queue" || true)"
+  printf '[CONTEXT] host=%s model=%s queue=%s commit=%s python=%s\n' \
+    "$(hostname)" "$MODEL_ID" "$QUEUE" "$(git rev-parse --short HEAD)" "$PYTHON"
+  if [[ -n "$(git status --porcelain --untracked-files=all)" ]]; then
+    printf '[CONTEXT] worktree=dirty\n'
+    git status --short --untracked-files=all
+  else
+    printf '[CONTEXT] worktree=clean\n'
+  fi
+  if [[ -n "$workers" ]]; then
+    printf '[CONTEXT] local_workers:\n%s\n' "$workers"
+  else
+    printf '[CONTEXT] local_workers=none\n'
+  fi
+  nvidia-smi --query-gpu=index,name,memory.total,memory.used,utilization.gpu \
+    --format=csv,noheader 2>&1 || true
+}
+
 on_error() {
   local code=$?
   trap - ERR
   printf '[ERROR] stage=%s exit=%s line=%s command=%s\n' \
     "$STAGE" "$code" "${BASH_LINENO[0]:-unknown}" "${BASH_COMMAND:-unknown}"
-  nvidia-smi --query-gpu=index,name,memory.used,utilization.gpu \
-    --format=csv,noheader 2>&1 || true
+  case "$STAGE" in
+    worker-launch)
+      printf '[ANALYSIS] worker launch failed: inspect local_workers below; '\
+'an active worker for another queue must finish or be stopped on this host.\n'
+      ;;
+    enqueue)
+      printf '[ANALYSIS] enqueue failed: check worktree state and frozen audit configs below.\n'
+      ;;
+    fidelity*)
+      printf '[ANALYSIS] fidelity failed: inspect the final error lines above and GPU state below.\n'
+      ;;
+    *)
+      printf '[ANALYSIS] stage command failed; queue and host summaries follow.\n'
+      ;;
+  esac
+  print_context
   "$PYTHON" experiments/cluster/workqueue.py status --brief --queue "$QUEUE" 2>&1 || true
-  printf '[ERROR] full launcher log: %s\n' "$LOG"
+  printf '[ERROR] launcher log retained at %s\n' "$LOG"
   exit "$code"
 }
 trap on_error ERR
 
 stage() {
   STAGE="$1"
-  printf '[INFO] stage=%s start\n' "$STAGE"
+  printf '[INFO] time=%s stage=%s start\n' "$(date -u '+%FT%TZ')" "$STAGE"
 }
+
+print_context
 
 stage fidelity
 GPU="${FIDELITY_GPU:-0}" \
@@ -61,7 +98,11 @@ stage worker-launch
 # replacement hosts not yet listed in fleet.yaml; launch_node still refuses
 # when workers for another queue are actually active on the node.
 FORCE_QUEUE="${FORCE_QUEUE:-1}" \
+REPLACE_IDLE_WORKERS="${REPLACE_IDLE_WORKERS:-1}" \
   bash experiments/cluster/launch_node.sh "$QUEUE"
+printf '[RESULT] worker-launch complete; active local workers:\n'
+pgrep -af "experiments/cluster/worker.py --queue" || true
+"$PYTHON" experiments/cluster/workqueue.py status --brief --queue "$QUEUE"
 stage queue-monitor
 "$PYTHON" -u experiments/cluster/monitor_queue.py \
   --queue "$QUEUE" --match "$MODEL_ID" \

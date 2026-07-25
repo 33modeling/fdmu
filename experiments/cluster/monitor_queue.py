@@ -9,6 +9,18 @@ import time
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
+ERROR_TOKENS = (
+    "error",
+    "exception",
+    "traceback",
+    "failed",
+    "refusing",
+    "permission denied",
+    "no space left",
+    "out of memory",
+    "modulenotfounderror",
+    "assertionerror",
+)
 
 
 def ids_in(queue: Path, state: str, needle: str) -> list[str]:
@@ -27,6 +39,22 @@ def tail(path: Path, lines: int) -> str:
         return "(log file missing)"
     with path.open(encoding="utf-8", errors="replace") as handle:
         return "".join(deque(handle, maxlen=lines)).rstrip()
+
+
+def error_summary(path: Path | None, scan_lines: int = 400) -> list[str]:
+    if path is None or not path.is_file():
+        return ["log file is missing"]
+    lines = tail(path, scan_lines).splitlines()
+    selected = [
+        line.strip()
+        for line in lines
+        if any(token in line.lower() for token in ERROR_TOKENS)
+    ]
+    unique: list[str] = []
+    for line in selected:
+        if line and line not in unique:
+            unique.append(line)
+    return unique[-8:] or ["no recognized error marker; inspect the retained log tail"]
 
 
 def failed_log(queue: Path, unit_id: str) -> Path | None:
@@ -70,6 +98,12 @@ def main() -> int:
         if states["failed"]:
             for unit_id in states["failed"]:
                 log = failed_log(args.queue, unit_id)
+                print(
+                    f"[ANALYSIS] unit={unit_id} likely_failure_lines:",
+                    flush=True,
+                )
+                for line in error_summary(log):
+                    print(f"[ANALYSIS]   {line}", flush=True)
                 print(
                     f"\n[ERROR] ===== BEGIN FAILED UNIT LOG "
                     f"unit={unit_id} path={log} =====",

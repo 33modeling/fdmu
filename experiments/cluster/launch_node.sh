@@ -70,13 +70,42 @@ fi
 # queue. Queue-specific duplicate checks alone can otherwise double-book all
 # GPUs and make every newly spawned worker fail independently.
 CONFLICTS=()
-while IFS= read -r process; do
+REPLACED_PIDS=()
+while read -r pid process; do
   [[ -n "${process}" ]] || continue
   if [[ "${process}" == *"experiments/cluster/worker.py --queue ${QUEUE} "* ]]; then
     continue
   fi
+  if [[ "${REPLACE_IDLE_WORKERS:-0}" == "1" ]] \
+    && ! pgrep -P "$pid" >/dev/null 2>&1; then
+    printf 'stopping idle worker for another queue: pid=%s cmd=%s\n' \
+      "$pid" "$process"
+    kill -TERM "$pid"
+    REPLACED_PIDS+=("$pid")
+    continue
+  fi
   CONFLICTS+=("${process}")
 done < <(pgrep -af "experiments/cluster/worker.py --queue" || true)
+
+if (( ${#REPLACED_PIDS[@]} > 0 )); then
+  for (( attempt = 0; attempt < 35; attempt++ )); do
+    alive=0
+    for pid in "${REPLACED_PIDS[@]}"; do
+      if kill -0 "$pid" 2>/dev/null; then
+        alive=1
+        break
+      fi
+    done
+    (( alive == 0 )) && break
+    sleep 1
+  done
+  for pid in "${REPLACED_PIDS[@]}"; do
+    if kill -0 "$pid" 2>/dev/null; then
+      CONFLICTS+=("pid=${pid} idle worker did not terminate")
+    fi
+  done
+fi
+
 if (( ${#CONFLICTS[@]} > 0 )); then
   printf 'refusing to double-book this node; workers for another queue are active:\n' >&2
   printf '  %s\n' "${CONFLICTS[@]}" >&2
