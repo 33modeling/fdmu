@@ -67,6 +67,9 @@ calibration/comparator/CI 전체를 대신하지 않으므로
 GPU_IDS=0,1 bash local_run/run_tofu_1p5b_4090x2.sh
 ```
 
+가상환경은 로컬 레포가 아니라
+`/rdata/minsoo3.kim/venvs/fdmu`에 생성되며 세 단계가 같은 Python을 사용한다.
+
 ## Legacy 실행 예시
 ```bash
 # 단일 (TOFU, GPU0)

@@ -3,6 +3,7 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
+export VENV="${VENV:-/rdata/minsoo3.kim/venvs/fdmu}"
 
 timestamp() {
   date -u '+%FT%TZ'
