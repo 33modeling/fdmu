@@ -61,7 +61,9 @@ assert len(gpu_ids) == 2, "the 1.5B local runner requires exactly two GPU ids"
 assert torch.cuda.device_count() > max(gpu_ids), (
     f"requested physical GPU ids {gpu_ids}, visible count={torch.cuda.device_count()}"
 )
-assert torch.version.cuda and torch.version.cuda.startswith("12."), torch.version.cuda
+assert torch.version.cuda, "PyTorch has no CUDA runtime"
+cuda_major = int(torch.version.cuda.split(".", 1)[0])
+assert cuda_major >= 12, f"CUDA 12+ is required, found {torch.version.cuda}"
 print({
     "torch": torch.__version__,
     "cuda": torch.version.cuda,
