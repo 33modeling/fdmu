@@ -1,24 +1,27 @@
 # fdmu — Update-Conditioned Retain Susceptibility (FD probe + guarded repair)
 
-> **2026-07-25 protocol status:** the active paper execution and evidence paths
-> now implement the `KDD_UnlearningFail.pdf` v4 contract: first-reaching
+> **2026-07-25 protocol status:** `KDD_UnlearningFail.pdf` is the latest
+> protocol source of truth. The active paper execution and evidence paths
+> implement its v4 contract: first-reaching
 > damage, Equations (7)--(8), exact `Kp`, fractional CVaR, and separate
 > RQ1/RQ2/RQ3 IUTs including native-metric non-inferiority. See
 > [`docs/PDF_V4_CODE_AUDIT.md`](docs/PDF_V4_CODE_AUDIT.md) and
 > [`docs/NEW_MODEL_CALIBRATION_GUIDE.md`](docs/NEW_MODEL_CALIBRATION_GUIDE.md)
 > before running or porting the method. This does not mean results are
-> available: model paths, the target-free selection freeze, WMDP/PISTOL
-> adapters, and several exact rosters remain unresolved, so preflight correctly
-> exits nonzero on this host.
+> available: the 1.5B parent freeze still requires real `D_cal` outputs, model
+> paths are unavailable on this host, and non-TOFU adapters/rosters remain
+> incomplete. The editable `paper/sections/*.tex` tree is an older draft and
+> must not override the PDF protocol until it is synchronized.
 
 > LLM **언러닝(삭제)** 시 어떤 *보존 데이터*가 부수적으로 망가지는지를
 > **미리 예측**하고(Finite-Difference 프로브), 그 예측을 이용해 **보호적 복구**를
-> 수행하는 연구 코드. 논문 *"When Does LLM Unlearning Fail? Probing
-> Update-Conditioned Retain Susceptibility"* (`paper/` 참고)의 구현체.
+> 수행하는 연구 코드. 논문 *"When Does LLM Unlearning Fail? Predicting and
+> Protecting Susceptible Retained Behavior"*의 구현체.
 >
-> 이 README는 **실제 코드 기준**으로 작성됨. 개념/수식은 `paper/sections/*.tex`,
-> 동결 상수는 `prereg/constants.yaml`이 최종 근거. (`DESIGN.md`는 아카이브된
-> 초안이라 일부 파일명이 실제 트리와 다름 — 참고용으로만.)
+> 이 README는 **실제 코드와 최신 PDF 기준**으로 작성됨. 프로토콜과 수식은
+> `KDD_UnlearningFail.pdf`, 실행 동결값은 `configs/paper/*.yaml`과
+> `prereg/constants.yaml`이 근거다. (`paper/sections/*.tex`와 `DESIGN.md`는
+> 현재 구버전 초안이므로 참고용으로만 사용한다.)
 
 ---
 
@@ -56,38 +59,98 @@ damage  d(x) = ℓ(x; θ_T) − ℓ(x; θ_0)      # 양수 = 손상
 
 ## 3. 어떤 실험인가 (파이프라인)
 
-논문 stage 오케스트레이터는 **`experiments/paper/run_v4_stage.py`**이며,
-정확한 `D_cal/D_pred/D_prot/target` roster와 unit command를 소비하고 후보
-원자료를 검증·봉인한다. TOFU 모델 원자료는
-**`experiments/paper/tofu_v4_unit.py`**가 만들며, Table 1 전체 workflow는
-다음 명령으로 manifest만 점검하거나 실제 순차 실행한다.
+최신 PDF의 단일 순차 workflow는 다음과 같다. 세 개발 fold는 target과
+분리되며, target damage와 sealed audit outcome은 어떠한 설정 선택에도
+사용하지 않는다.
+
+```text
+사전 동결
+  |
+  v
+D_cal -> D_pred -> D_prot
+  |
+  v
+target profile 생성 및 audit score 봉인
+  |
+  v
+변경하지 않은 parent unlearning 실행
+  |
+  v
+direct-forgetting gate를 처음 통과한 checkpoint 선택
+  |
+  +----> RQ1: prospective damage prediction
+  |
+  +----> RQ2: loss-shake fidelity and added value
+  |
+  `----> 동일 checkpoint에서 고정 예산 repair arm 분기
+             |
+             `-> RQ3: constraint-matched protection
+  |
+  v
+raw evidence -> IUT/eligibility 집계 -> Table 1 및 breadth readiness
+```
+
+### 3.1 사전 동결과 target-free 선택
+
+- 요청, 후보 semantic group, discovery/audit/native-audit, 모델, parent,
+  trainable block, seed, checkpoint grid, forgetting/utility 경계를 먼저 고정한다.
+- `D_cal`은 parent hyperparameter를 선택한다. Loss-shake의 `R`, `eta`와
+  engineering floor는 target 전에 runtime/evidence config에 동결한다.
+- `D_pred`는 prediction weight `alpha_pred`와 strongest simple control을 고정한다.
+- `D_prot`는 별도의 protection weight `alpha_prot`, `Kp`, repair 설정을 고정한다.
+- prediction과 protection은 같은 signal family를 쓰지만 선택 fold와 weight가
+  서로 다르다.
+
+### 3.2 Target profile과 parent trajectory
+
+언러닝 전 `theta0`에서 각 retain 후보 `x`에 대해 두 좌표를 계산한다.
+
+```text
+q_G(x): loss-shake susceptibility -- 이 loss가 얼마나 쉽게 움직이는가
+q_H(x): forget-conditioned proximity -- 이 요청에 얼마나 노출됐는가
+S_alpha(x) = (1-alpha) rank(q_G(x)) + alpha rank(q_H(x))
+```
+
+Audit rank는 parent trajectory 전에 봉인하고, discovery rank의 Top-`Kp`만
+repair pool 후보로 사용한다. GradDiff, NPO, SimNPO, GRU, RMU, RepNoise,
+Circuit Breakers parent를 변경하지 않고 실행한 뒤, direct-forgetting 기준을
+처음 통과한 저장 checkpoint `theta_t_dagger`를 선택한다. 통과 checkpoint가
+없으면 non-reaching으로 남기고 claim pass를 허용하지 않는다.
+
+### 3.3 RQ1/RQ2/RQ3
+
+- **RQ1 -- prospective risk:** 봉인된 joint rank와 이후 audit damage의
+  Spearman rho, `q_G`/`q_H` 단독 대비 gain, positive-damage tail lift와
+  tail coverage를 평가한다.
+- **RQ2 -- fidelity and added value:** loss-shake를 동일 block의 exact
+  candidate gradient energy와 비교한다. Fidelity floor는 Spearman 0.80,
+  Top-`Kp` overlap 0.70이며, proximity와 frozen simple control을 넘어서는
+  prediction gain도 별도로 요구한다.
+- **RQ3 -- decision value:** 동일한 `theta_t_dagger`에서 joint, no-repair,
+  repeated-random, `q_G`, `q_H` arm을 분기한다. 모든 active arm은 repair
+  operator, neutral stream, example order, seed, token budget, projection,
+  guard를 공유하고 selector만 다르다. Direct/paraphrase/extraction forgetting과
+  utility 조건을 모두 만족한 공통 support에서 mean damage, fractional
+  CVaR.95, dataset-native retain metric을 비교한다.
+
+### 3.4 실행과 산출물
+
+논문 stage 오케스트레이터는 `experiments/paper/run_v4_stage.py`이며 정확한
+`D_cal/D_pred/D_prot/target` roster와 unit command를 소비하고 원자료를
+검증·봉인한다. TOFU unit producer는 `experiments/paper/tofu_v4_unit.py`,
+전체 진입점은 다음과 같다.
 
 ```bash
 python experiments/paper/run_tofu_table1.py --action plan
 python experiments/paper/run_tofu_table1.py --action run
 ```
 
-`run`은 `D_cal` parent freeze, `D_pred` prediction/control freeze,
-`D_prot` protection `(alpha,Kp)` freeze를 target 전에 기록한 뒤 target raw
-집계와 `paper/sections/generated/table1.tex` 렌더링까지 수행한다.
-`experiments/gate_1p5b/gate.py`는 단일 요청 진단 드라이버로 아래 산출물을 남긴다.
-
-```
-1. floor 보정      : 사전주입 forgetting floor m 계산 (reference 모델)
-2. SFT 주입        : 요청 universe를 모델에 암기시킴 (θ0 정의)
-3. 채점(probe)     : C(q)의 각 후보를 fd/fd_norm/knn_*/grad_norm 등으로 점수화
-                     → discovery/audit fold 분리, audit fold는 seal(봉인)
-4. 제너레이터      : npo/graddiff/rmu 등 언러닝을 실제로 돌려 checkpoint별
-                     realized damage d(x) 기록  ← RQ1 ground truth
-5. Table 1         : 프로브 점수 vs 실제 손상의 순위상관(Spearman ρ),
-                     AUROC(top-K 손상 멤버십), Overlap@K   (analysis/prediction.py)
-6. 파티션 + 복구   : profile로 보호풀 P 구성 → Stage1(제약 망각) + Stage2(guarded
-                     repair) = "ours" 및 baseline 보호법 실행
-7. Table 2         : reach, 손상 mean/CVaR.95, paraphrase recall  (evalx/protection.py)
-```
-
-**Table 1 성공 신호:** `fd` 행의 ρ/AUROC가 knn_*·grad_norm보다 명확히 높음.
-**Table 2 성공 신호:** `ours`/`npo_transplant`가 plain `npo`보다 audit 손상 낮음.
+`plan`은 네 stage의 exact manifest를 만들고, `run`은 freeze 순서를 강제한 뒤
+raw evidence를 집계한다. 최종 Table 1은 Panel A(RQ1/RQ2)와 Panel B(RQ3)로
+`paper/sections/generated/table1.tex`에 생성된다. Breadth 판정 자료는
+`evidence_readiness.json`에 기록된다. `experiments/gate_1p5b/gate.py`는 이
+claim workflow의 라이브러리가 아니라 이전 단일 요청 진단 CLI다. 다만 현재
+TOFU unit producer가 모델 로딩/SFT helper를 재사용하므로 파일 의존성은 남아 있다.
 
 ## 4. 코드 구조 (실제 트리)
 
@@ -121,11 +184,12 @@ fdmu/  (retain-susceptibility 포크)
 │   │   └── s2s.py                 Cheng split-aware 2-stage baseline
 │   │
 │   ├── evalx/
-│   │   ├── protection.py         Table 2 결과 (reach·mean·CVaR·utility)
+│   │   ├── protection.py         이전 gate 보호 요약 (reach·mean·CVaR·utility)
 │   │   └── metrics.py            teacher-forced recall / retention
 │   │
 │   ├── analysis/
-│   │   ├── prediction.py         Table 1 (Spearman·AUROC·Overlap@K + bootstrap)
+│   │   ├── prediction.py         예측 metric (Spearman·AUROC·Overlap@K)
+│   │   ├── table1_selection.py   target-free alpha/control/Kp 선택 계약
 │   │   ├── ablation.py           Table 3 matched-parent 대조
 │   │   └── channels.py · mixture.py · stats.py
 │   │
@@ -138,15 +202,21 @@ fdmu/  (retain-susceptibility 포크)
 │   │   ├── muse.py       ✅       MUSE-News/Books knowmem (forget_qa→Df, retain_qa→C(q)) — 이 포크 추가
 │   │   └── (wmdp / pistol ❌ 미구현 — 논문엔 있음)
 │   │
-│   └── evidence/                 v4 RQ1/RQ2/RQ3 raw · schemas · decisions · rendering
+│   └── evidence/                 v4 raw/schema/decision + Table 1 렌더링
 │
 ├── experiments/
-│   ├── gate_1p5b/                ★ gate.py — 메인 게이트 실험 + RUNBOOK
+│   ├── gate_1p5b/                gate.py — 이전 단일 요청 진단 + 공용 helper(분리 예정)
 │   ├── channel_matrix/           채널 상호작용 캠페인 (objective/alpha freeze)
 │   ├── cost/bench.py             Table 4 프로파일링 비용
 │   ├── stability/                수치 안정성 스윕 (η·precision·block)
 │   ├── diag/                     프로브 일치·채널 리포트·피규어
-│   └── pilot/ · cluster/ · paper/  파일럿 · 멀티노드 큐 · 논문 산출
+│   ├── paper/
+│   │   ├── run_tofu_table1.py    D_cal→D_pred→D_prot→target 전체 진입점
+│   │   ├── init_v4_stage.py      exact stage manifest 생성
+│   │   ├── run_v4_stage.py       unit 실행·검증·봉인
+│   │   ├── select_tofu_v4.py     parent/claim freeze 생성
+│   │   └── tofu_v4_unit.py       TOFU model-output unit producer
+│   └── pilot/ · cluster/          파일럿 · 멀티노드 큐
 │
 ├── local_run/                   ◀ 이 포크 추가: RTX 4090 로컬 캠페인 도구
 │   ├── run_one.sh                모델×데이터셋 1건 실행 + 요약
@@ -163,7 +233,7 @@ fdmu/  (retain-susceptibility 포크)
 ├── configs/                     channel_matrix/ · cluster/ · paper/  (실험 YAML)
 ├── docs/                        RUNBOOK · 계획 · data/ 산출 CSV·figure
 ├── prereg/                      constants.yaml (동결 상수) + seal_ledger.jsonl
-├── tests/                       CPU 단위 배터리 24개 (195 passed / 2 skipped)
+├── tests/                       CPU 단위·계약·evidence 파이프라인 테스트
 │
 ├── README.md                    ◀ 이 포크 추가 (프로젝트 상세 설명)
 ├── CLAUDE.md · DESIGN.md         클러스터 노트 · 아카이브 설계노트
@@ -183,16 +253,19 @@ fdmu/  (retain-susceptibility 포크)
 | **PDF v4 Eq. (7)--(8) repair + first-reaching wrapper** | ✅ **구현·단위테스트** (`repair.py`, `generators/repaired.py`) |
 | **RQ1/RQ2/RQ3 raw aggregation + 4/4/12-way IUT** | ✅ schema v2, fail-closed |
 | **정확 roster paper-stage 오케스트레이터** | ✅ unit 실행·검증·봉인 구현 |
-| **TOFU PDF-v4 model-output unit producer** | ❌ 미구현; preflight가 명시적으로 차단 |
-| Table 1 예측 분석 / Table 2 보호 / Table 3 ablation / Table 4 cost | ✅ |
+| **TOFU PDF-v4 model-output unit producer** | ✅ 구현·계약테스트; 실제 GPU campaign 미실행 |
+| **TOFU Table 1 Panel A/B 선택·집계·LaTeX 렌더링** | ✅ 구현·합성 140-unit E2E 검증 |
+| PDF Table 2 breadth/failure-boundary LaTeX 렌더링 | ❌ readiness JSON까지만 구현 |
+| 구버전 Table 3 ablation / Table 4 cost 도구 | ✅ 구현; 최신 PDF appendix와 재매핑 필요 |
 | 데이터셋 **TOFU, RWKU, substrate** | ✅ 어댑터 구현 |
 | 데이터셋 **MUSE (News/Books)** | ✅ corpus-level 어댑터와 registry 구현; 독립 target-request roster는 미지원이라 paper preflight 차단 |
-| 데이터셋 **WMDP / PISTOL / KnowUnDo** | ❌ **미구현** (논문엔 있음) |
+| 데이터셋 **WMDP / PISTOL** | ❌ **미구현** (PDF 실험 roster) |
+| **KnowUnDo / OpenUnlearning** | related work 인용이며 현재 실험 roster 아님 |
 
-> 요약: **v4 프로브·repair·증거 계약과 TOFU/RWKU/MUSE 로더는 구현됨**.
-> 다만 이 조각들을 paper raw schema로 실행하는 dataset unit producer는 아직
-> 없으며, 외부 모델/roster/freeze와 함께 `experiments/paper/preflight.py`가
-> 준비되지 않은 상태로 판정한다.
+> 요약: **v4 프로브·repair·증거 계약과 TOFU model-output producer 및 Table 1
+> workflow는 구현됨**. 실제 수치는 아직 없으며, 1.5B parent freeze는 real
+> `D_cal` 결과가 필요한 draft다. 비-TOFU setting의 exact roster와 producer,
+> 외부 모델 경로도 아직 준비되지 않았다.
 
 ## 6. 설치 & 실행
 
@@ -204,12 +277,15 @@ uv pip install -e .
 
 python -m pytest                 # CPU 단위 배터리
 
-# CPU smoke (tiny 랜덤 모델로 파이프라인 검증)
+# 이전 단일 요청 진단 CPU smoke
 python experiments/gate_1p5b/gate.py --smoke --model <로컬 모델 경로>
 
-# 실제 게이트 (예: TOFU, 단일 GPU)
+# 이전 단일 요청 진단 GPU run
 python experiments/gate_1p5b/gate.py --model <경로> --device cuda --dtype float32 \
   --dataset tofu --universe-authors 20 --trainable-scope probe_block
+
+# 최신 PDF-v4 TOFU exact manifest 점검
+python experiments/paper/run_tofu_table1.py --action plan
 ```
 
 로컬 멀티모델/데이터셋 캠페인은 **`local_run/`** 참고 (경로 규약: 모델
@@ -227,14 +303,18 @@ GPU=0,1 DMAP=split:8 bash local_run/run_one.sh 7b_fp32 Qwen2.5-7B-Instruct float
 - `--trainable-scope probe_block`가 1-GPU 모드. ≤4B는 fp32 단일 GPU, 7B fp32는
   `--device-map split:8`(마지막 8레이어를 cuda:1)로 2-GPU 분산.
 - **bf16은 fd를 무너뜨림**(eta=3e-4 유한차분이 정밀도 바닥에 삼켜짐) → 프로브는 fp32.
-- **Table 2 repair는 구현돼 있으나 24GB에서 실행 불가**: Stage1이 full-model fp32
-  AdamW(1.5B도 ~25GB) → OOM. **H100급(80GB) 필요.** (프로브 Table 1은 4090에서 정상.)
+- **RQ3 repair는 구현돼 있으나 24GB에서 실행 불가**: Stage1이 full-model fp32
+  AdamW(1.5B도 ~25GB) → OOM. **H100급(80GB) 필요.** (RQ1/RQ2 프로파일링은
+  4090에서 실행 가능.)
 
 ## 8. 재현 산출물
 
-`runs/<...>/`: `table1.json`, `table2.json`, `gate.log`, `run_manifest.json`,
-`seal_ledger.jsonl`(순서 증명). 로컬 캠페인 요약은
-`/rdata/minsoo3.kim/results/<dataset>/CAMPAIGN_REPORT.md`.
+최신 TOFU workflow는 `runs/paper/tofu_table1/` 아래에 stage manifest,
+unit별 `run_manifest.json`, sealed JSONL, `raw_plan.json`,
+`evidence_ledger.json`, `evidence_readiness.json`을 남긴다. 완전한 ledger가
+있을 때 `paper/sections/generated/table1.tex`을 생성한다. 이전 `gate.py`
+캠페인의 `table1.json`, `table2.json`, `gate.log`, `seal_ledger.jsonl`과는
+별도 산출물이다.
 
 ## 9. 미구현 / 앞으로 필요한 것 (Roadmap)
 
@@ -242,31 +322,34 @@ GPU=0,1 DMAP=split:8 bash local_run/run_one.sh 7b_fp32 Qwen2.5-7B-Instruct float
 그것을 채우기 위해 필요한 작업.
 
 ### 9.1 데이터셋 확장
-- **WMDP, PISTOL, KnowUnDo** — 논문엔 등장하나 `data/`와 registry에 어댑터 없음.
+- **WMDP, PISTOL** — 최신 PDF 실험 roster지만 `data/`와 registry에 어댑터 없음.
+- **KnowUnDo, OpenUnlearning** — related work 인용이며 현재 실험 구현 대상이 아님.
 - **MUSE(News/Books)** — corpus-level 로더는 등록됐지만, 현재 knowmem 구조는
   독립적인 `D_cal/D_pred/D_prot/target` 삭제 요청 roster를 제공하지 않는다.
 - 필요 작업: 데이터셋별 `src/rsus/data/<name>.py`(forget→`Df`, retain→`C(q)` 매핑 +
-  fold/native-audit) → `registry.py`에 `register_adapter` → `gate.py --dataset` choices 추가.
+  fold/native-audit) → `registry.py` 등록 → exact stage roster와 dataset unit
+  producer 추가.
   - MUSE는 요청 단위를 문서/토픽 수준으로 정의하고 결과와 무관하게 네 roster를
     동결하기 전까지 corpus 하나를 여러 요청으로 가장하면 안 된다.
   - WMDP는 MMLU와 함께 MCQA 언러닝 세팅, PISTOL은 구조적 삭제 — 요청 의미 설계 필요.
 
 ### 9.2 repair(Stage2)를 24GB에서 실행 (구현은 됨, 메모리 이슈)
 - 현재 Stage1이 `AdamW(model.parameters())` full-model fp32라 1.5B도 ~25GB → 4090 OOM.
-  (H100 80GB 전제.) Table 1(프로브)은 4090 정상, **Table 2만 못 돌림**.
+  (H100 80GB 전제.) RQ1/RQ2 프로파일링은 4090에서 가능하지만 **RQ3 repair는
+  실행하지 못함**.
 - 필요 작업(택1 이상): Stage1 옵티마이저를 블록 스코프로 제한 / 8-bit·paged AdamW
   (bitsandbytes) / gradient checkpointing / FSDP·ZeRO 멀티-GPU 샤딩 / bf16 마스터-가중치.
   단, 프로브의 fd는 fp32 필요 → 정밀도-메모리 트레이드오프 설계.
 
 ### 9.3 실험 커버리지 (구현됐으나 아직 안 돌린 것)
-- **Table 2 reach**: single-stage(npo/npo_transplant)가 기본 gen 예산에서 forget
-  게이트(0.10) 미도달 → 목적함수별 gen-lr/steps 튜닝(RUNBOOK 노브) 필요.
-- **Table 3(ablation)**: `analysis/ablation.py` 있으나 로컬 캠페인 미실행 —
-  partition source swap / projection·guard off 매트릭스 구성 필요.
-- **Table 4(cost)**: `experiments/cost/bench.py` 있으나 fd/jvp/vmap/streaming 4종
-  비용 측정 미실행 (7B/14B 타겟).
-- **통계**: `analysis`가 seed 평균·hierarchical bootstrap·LOTO 지원하나 현 캠페인은
-  단일 seed(2025). 다중 seed로 Table 1 ρ 노이즈 축소 필요.
+- **최신 Table 1:** 코드와 합성 evidence 검증만 완료했으며 실제 TOFU target
+  campaign은 미실행이다.
+- **최신 Table 2:** breadth/failure-boundary readiness는 계산하지만 LaTeX
+  renderer와 비-TOFU evidence가 없다.
+- **Appendix ablation/cost:** 기존 `analysis/ablation.py`와
+  `experiments/cost/bench.py`를 최신 PDF appendix contract에 맞춰 재매핑해야 한다.
+- **통계:** hierarchical bootstrap과 IUT는 구현됐지만 실제 다중 request/seed
+  evidence로 실행하지 않았다.
 
 ### 9.4 정리·인프라
 - `local_run/`은 이 포크 전용 도구 — 상류(retain-susceptibility)엔 없음.
