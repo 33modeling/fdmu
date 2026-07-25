@@ -85,6 +85,17 @@ def test_retry_failed_restores_full_attempt_budget(tmp_path):
     assert claim is not None and claim.attempts == 0
 
 
+def test_retry_failed_can_target_specific_units(tmp_path):
+    q = WorkQueue(tmp_path / "q")
+    q.enqueue([_unit("a", max_attempts=1), _unit("b", max_attempts=1)])
+    q.fail(q.claim(), {"exit_code": 2})
+    q.fail(q.claim(), {"exit_code": 2})
+    assert q.retry_failed({"b"}) == ["b"]
+    report = q.status()
+    assert report["counts"]["pending"] == 1
+    assert [row["unit_id"] for row in report["failed"]] == ["a"]
+
+
 def test_requeue_stale_by_heartbeat_age(tmp_path):
     q = WorkQueue(tmp_path / "q")
     q.enqueue([_unit("a"), _unit("b")])

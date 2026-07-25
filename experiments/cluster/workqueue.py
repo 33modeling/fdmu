@@ -254,10 +254,12 @@ class WorkQueue:
             return state
         raise FileNotFoundError(f"unit {unit_id} is not pending or claimed")
 
-    def retry_failed(self) -> list[str]:
-        """Move every failed unit back to pending with a fresh attempt budget."""
+    def retry_failed(self, unit_ids: set[str] | None = None) -> list[str]:
+        """Move selected failed units, or all failed units, back to pending."""
         retried = []
         for path in sorted(self._state_dir("failed").glob("*.json")):
+            if unit_ids is not None and path.stem not in unit_ids:
+                continue
             payload = json.loads(path.read_text(encoding="utf-8"))
             self._write_json(
                 self._entry("pending", path.stem),
@@ -369,7 +371,7 @@ def main() -> None:
         requeued = queue.requeue_stale(args.stale_after)
         print(f"requeued {len(requeued)} stale unit(s): {requeued}")
     elif args.action == "retry-failed":
-        retried = queue.retry_failed()
+        retried = queue.retry_failed(set(args.unit) if args.unit else None)
         print(f"retried {len(retried)} failed unit(s): {retried}")
     elif args.action == "cancel":
         if not args.unit:

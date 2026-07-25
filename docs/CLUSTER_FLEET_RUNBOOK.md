@@ -173,6 +173,8 @@ bash experiments/cluster/enqueue_table12.sh rwku-audit   # RWKU audit → wave_r
 ```
 
 7B와 14B TOFU는 각각 다른 H100 머신에서 별도 큐와 원클릭 실행기를 사용한다.
+각 실행기는 GPU 0에서 fidelity certificate를 먼저 생성·검증한 뒤 audit을
+적재하며, certificate 누락으로 실패했던 해당 모델 audit unit만 재대기시킨다.
 중복 unit id는 다시 적재되지 않으며 빈 GPU마다 워커 하나가 시작된다.
 
 ```bash
