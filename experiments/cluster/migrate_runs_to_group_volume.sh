@@ -20,7 +20,6 @@ if pgrep -af "experiments/cluster/(worker.py|node_watch.py|monitor_queue.py)" \
   fail "cluster processes are active; stop them before moving runs"
 fi
 
-command -v rsync >/dev/null 2>&1 || fail "rsync is required"
 mkdir -p "$TARGET" || fail "cannot create target: $TARGET"
 [[ -w "$TARGET" ]] || fail "target is not writable: $TARGET"
 
@@ -36,12 +35,13 @@ if [[ -d "$SOURCE" ]]; then
   log "source usage before migration:"
   du -sh "$SOURCE"
   log "moving files to $TARGET"
-  rsync -a --remove-source-files --info=progress2 "$SOURCE/" "$TARGET/"
-
-  if find "$SOURCE" -type f -o -type l | grep -q .; then
-    fail "source still contains files; inspect $SOURCE before retrying"
+  PYTHON="/group-volume/fdmu/.venv/bin/python"
+  if [[ ! -x "$PYTHON" ]]; then
+    PYTHON="$(command -v python3)" \
+      || fail "python3 is required when the group-volume venv is unavailable"
   fi
-  find "$SOURCE" -depth -type d -empty -delete
+  "$PYTHON" experiments/cluster/move_runs.py "$SOURCE" "$TARGET" \
+    || fail "Python migration failed; source files were not discarded"
 fi
 
 [[ ! -e "$SOURCE" ]] || fail "source path is not empty: $SOURCE"
