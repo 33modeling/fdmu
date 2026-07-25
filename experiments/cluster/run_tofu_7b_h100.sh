@@ -87,10 +87,7 @@ stage failed-audit-partial-quarantine
 
 stage failed-audit-recovery
 "$PYTHON" experiments/cluster/workqueue.py retry-failed \
-  --queue "$QUEUE" \
-  --unit aud__qwen25_7b__a181 \
-  --unit aud__qwen25_7b__a186 \
-  --unit aud__qwen25_7b__a191
+  --queue "$QUEUE"
 
 stage fidelity-contract-validation
 "$PYTHON" experiments/channel_matrix/run_campaign.py \
