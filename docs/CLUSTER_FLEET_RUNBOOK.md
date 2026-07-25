@@ -151,7 +151,7 @@ calibration 유닛 1개 = gate 런 14개(7 objective × 2 설정) 직렬 ≈ GPU
 다른 config 유닛을 같이 적재해 채우는 게 맞다. 플릿이 진짜로 넓게 도는 건
 audit(모델×저자 3)과 alpha-audit(모델×저자×시드 6) + 복수 모델부터다.
 
-## 주의 (기존 CLAUDE.md 규칙과의 접점)
+## 운영 주의
 
 - audit 계열 unit은 러너 자체의 dirty-worktree 가드를 그대로 통과해야 하므로,
   **enqueue 전에 커밋 상태를 정리**할 것. 워커가 뜬 뒤 레포를 고치면 이후

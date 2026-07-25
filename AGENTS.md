@@ -1,207 +1,149 @@
-# AGENTS.md — autonomous-agent operating contract for this repository
+# Agent operating contract
 
-Audience: autonomous coding/ops agents (OpenCode, Hermes, Claude, Codex, ...)
-running ON the H100 cluster to fill the paper's Table 1/2. Read this whole
-file before your first command. Korean human-facing detail lives in
-`CLAUDE.md`, `docs/CLUSTER_FLEET_RUNBOOK.md`, and `docs/plan_2026-07-23_fleet.md`;
-this file is the binding subset for agents.
+This is the only repository-wide instruction file for coding and experiment
+agents. `CLAUDE.md` is a pointer to this file. User-facing documentation starts
+at `docs/README.md`.
 
-## 0. Why you cannot "just remove" the seals (read this once, believe it)
+## 1. Identify the task and machine
 
-This paper's claim is **prospective** prediction and **predeclared** decision
-value. The seal/freeze machinery is not infrastructure friction — it IS the
-scientific claim:
-
-- RQ1 claims a profile sealed BEFORE unlearning predicts damage AFTER. If any
-  parameter, weight, or checkpoint is chosen after seeing audit damage, the
-  word "prospective" becomes false and Table 1 becomes unpublishable.
-- Table 2's denominators ("every planned row stays in the denominator") are
-  the anti-cherry-picking guarantee. Re-running variants until one looks good
-  and reporting that one is exactly what the design exists to prevent.
-- The runners enforce this mechanically: seals are append-only, audit runners
-  refuse dirty worktrees and reused run-tags, `aggregate_raw` refuses
-  unplanned units. **A guard firing is a signal, never a bug. Do not patch,
-  weaken, bypass, or "fix" a guard to make a run proceed.**
-
-Your hundreds of experiments belong in the pre-freeze lanes and across
-settings (§3), where wide autonomous sweeps are exactly what the design wants.
-
-## 1. Session bootstrap (every session, verbatim)
+Before running anything:
 
 ```bash
-source /group-volume/jieuns.shin/venvs/exp/bin/activate
-cd /group-volume/jieuns.shin/retain-susceptibility
-export HF_HOME=/group-volume/data/hf_home
-git pull --ff-only          # NEVER during a sealed phase with workers running
-python -m pytest -q         # expect all green before touching queues
-python experiments/cluster/next_actions.py   # what you may do right now
+git status --short
+git rev-parse --show-toplevel
+python experiments/paper/preflight.py
 ```
 
-Environment facts (do not rediscover, do not "fix"):
+Choose one supported path:
 
-- GPUs: H100 80GB, 8 per node. fp32 7B uses a whole GPU — one unit per GPU,
-  never co-schedule. Check `nvidia-smi` before any manual launch.
-- Models are LOCAL under `/group-volume/models/` — always pass local paths.
-  HF Hub is blocked/unstable: keep `HF_HUB_OFFLINE=1` semantics (runners set
-  their own offline flags; never add online calls).
-- GitHub: pull only. **Push from the cluster is impossible (egress-blocked)
-  and committing on the cluster is forbidden** — deliver artifacts back to
-  the human/session via the handoff in §6.
-- The official venv is `/group-volume/jieuns.shin/venvs/exp`. Do not create
-  or recommend another environment, and do not `pip install` into it.
-
-## 2. Hard rules (violating any of these invalidates the campaign)
-
-NEVER, under any framing or "temporary" justification:
-
-1. Edit, delete, or regenerate anything under `prereg/`, any
-   `configs/channel_matrix/*freeze*.yaml` whose `status: frozen`, or
-   `configs/paper/{campaign,evidence}.yaml` frozen blocks. Amendments are a
-   HUMAN step (dated block, committed by the session before target runs).
-2. Modify `src/rsus/sealing.py`, seal ledgers, `DONE` markers, run manifests,
-   or anything inside an existing `runs/**` output directory (move partial
-   dirs to `runs/forensics/` during triage — never delete, never reuse).
-3. Re-run, re-tune, or extend a TARGET/audit cell after its outcome exists —
-   including "one more seed", "slightly better lr", or re-enqueueing a done
-   unit with new parameters. Frozen means frozen.
-4. Select or tune ANY value (alpha, lr, steps, thresholds, pool size) using
-   sealed-audit outcomes. Development folds only (D_cal/D_pred/D_prot,
-   authors a198/a199 for TOFU).
-5. Flip a freeze file to `status: frozen` yourself, or enqueue a phase that
-   `next_actions.py` did not list under `allowed_now`.
-6. `git push`, `git commit` on the cluster, force-`git pull` while sealed
-   workers run, or hand-edit queue JSON (attempts, max_attempts, cmd).
-7. Weaken a failing guard/test to green (worktree-dirty refusal, run-tag
-   refusal, partial-dir refusal, bootstrap rejection cap, fidelity floors).
-
-ALWAYS:
-
-- New run = NEW run-tag / unit id (append-only everywhere). Deliberate
-  re-runs use `make_units.py --unit-suffix rN`, nothing else.
-- Logs carry the hostname automatically; never redirect two runs to one file.
-- Custom `gate.py`-family units: `"max_attempts": 1` (run-tags cannot retry).
-- Before enqueueing audit-family phases the worktree must be clean.
-
-## 3. Where your autonomy IS wanted (the sanctioned sweep lanes)
-
-Everything below is target-free by construction. Scale these as wide as the
-fleet allows — this is where "hundreds of runs" legitimately live:
-
-| Lane | What you may vary freely | Runner / phase |
+| Task | Entry point | Runbook |
 |---|---|---|
-| Objective calibration grids | lr, steps, per-objective hyperparams (e.g. npo beta), grid extensions via `--unit-suffix r2` | `--phase calibration` per model×dataset config |
-| Loss-shake fidelity | R (directions), eta, repeats, block depth checks | `--phase fidelity`, `experiments/diag/fd_fidelity.py` |
-| Alpha development | alpha grid on DEV requests/seeds only | `--phase alpha-development` |
-| Stage-2 capacity response | eta2, steps, guard params on DEV folds | dev-fold runs of `alpha_protection.py` / `gate.py` |
-| New settings (breadth) | whole W1→W4 chains for 14B, Llama-8B, WMDP, RWKU — each its own queue | `enqueue_table12.sh {audit-14b,wmdp,wmdp-14b,llama,rwku-audit}` |
-| Mechanism replication | 1.5B seed replicates via manifest-exact tool | `make_replicate_units.py --source-run ... --seeds ...` |
-| CPU analysis | export→aggregate→build_evidence, readiness checks, plots | §6 (login node, no GPU) |
+| RTX 4090 x2, TOFU 1.5B development | `GPU_IDS=0,1 bash local_run/run_tofu_1p5b_4090x2.sh` | `local_run/README.md` |
+| Local single-arm diagnostic | `bash local_run.sh <action>` | `local_run/README.md` |
+| H100 7B diagnostic campaign | `bash experiments/cluster/run_tofu_7b_h100.sh` | `docs/CLUSTER_FLEET_RUNBOOK.md` |
+| H100 14B diagnostic campaign | `bash experiments/cluster/run_tofu_14b_h100.sh` | `docs/CLUSTER_FLEET_RUNBOOK.md` |
+| Paper evidence and LaTeX | `experiments/paper/` | `docs/FINAL_RESULTS_RUNBOOK.md` |
 
-The selection criterion inside calibration is predeclared (forget recall
-<= 0.10 reached AND utility floors held) — an agent may propose the operating
-point per objective, but the freeze commit is human.
+The H100 7B/14B scripts run the older channel-matrix campaign. They are not the
+latest PDF-v4 complete Table 1/2 workflow. Never relabel their output.
 
-Idle-GPU rule: fill idle GPUs ONLY from these lanes (other configs' units,
-replicates, fidelity). Never fill them by widening a sealed phase.
+## 2. Source of truth
 
-## 4. The per-setting state machine (what "next" means)
+Use this precedence:
 
-```
-W1  fidelity + calibration      (agent, queue)      <- wide sweeps OK
-W1.5 select-freeze -> commit objective_freeze       <- HUMAN GATE
-W2  audit                       (agent, queue)      <- frozen configs only
-W3  alpha-development           (agent, queue)      <- dev folds, parallel w/ W2
-W3.5 select-alpha-freeze -> commit alpha_freeze     <- HUMAN GATE
-W4  alpha-audit                 (agent, queue)      <- frozen alpha only
-W5  CPU evidence chain          (agent, login node) <- §6
-```
+1. The latest paper PDF and frozen paper configs
+2. `configs/paper/{campaign,evidence,tofu_v4}.yaml`
+3. Freeze files and `prereg/`
+4. Current code and tests
+5. Current runbooks indexed by `docs/README.md`
 
-Query the machine, don't infer it:
+Do not use deleted plans, old prompts, chat history, or Git history as current
+execution instructions. If a document disagrees with code/config, stop the
+launch, verify the contract, and update the existing runbook.
+
+## 3. Scientific invariants
+
+The paper claims prospective selection and fixed denominators. Therefore:
+
+- Select parent hyperparameters only on `D_cal`.
+- Select predictor values only on `D_pred`.
+- Select protection values only on `D_prot`.
+- Never tune, add seeds, or extend a grid after viewing target/audit outcomes.
+- Use the first saved checkpoint that reaches the direct-forgetting gate.
+- Compare repair arms from the same parent checkpoint, candidate support,
+  token/example budget, seed, and guard contract.
+- Keep non-reaching, infeasible, and incomplete planned rows in the
+  denominator.
+- Treat a failed guard as a result to investigate, not a condition to bypass.
+
+Never edit an existing seal, `DONE` marker, run manifest, frozen block, or run
+artifact to make a command pass. Never silently replace an unavailable model,
+dataset, dtype, metric, or comparator.
+
+## 4. Filesystem and environment
+
+### RTX 4090 workstation
+
+- Reuse `<repo>/.venv`; do not replace a working environment.
+- Default model/cache/results paths are documented in `local_run/README.md`.
+- Use environment variables for machine-local path overrides.
+- Keep generated results out of tracked source directories.
+
+### H100 cluster
+
+- Repository: `/group-volume/jieuns.shin/retain-susceptibility`
+- Environment: `/group-volume/jieuns.shin/venvs/exp`
+- Shared state/results: `<repo>/runs`
+- Host scratch/cache: `<repo>/.cluster-runtime/<user>/<host>`
+- Model cache: `/group-volume/data/hf_home`
+
+The cluster has no GitHub egress. Do not commit or push there. Do not create a
+replacement venv or install packages into the shared environment. Use
+`.cluster_env.local.sh` only for supported machine-local path overrides.
+
+Never write cluster results to a home filesystem, `/tmp`, or a shared directory
+you do not own. `cluster_env.sh` validates the effective paths and permissions.
+
+## 5. Safe execution
+
+Before GPU work:
 
 ```bash
-python experiments/cluster/next_actions.py --json
+python -m pytest -q
+nvidia-smi
 ```
 
-It reports, per setting: model provisioned, objective/alpha freeze state,
-queue counts, `allowed_now` phases, and which human gate blocks the rest.
-Enqueue only what appears in `allowed_now`.
-
-## 5. Queue operations (the only way you run GPU work)
+On the cluster also run:
 
 ```bash
-# status overview of all Table 1/2 waves
-bash experiments/cluster/enqueue_table12.sh status
-
-# enqueue a wave (idempotent; duplicates are refused and reported)
-bash experiments/cluster/enqueue_table12.sh audit-7b     # -> wave2 (Table 1)
-bash experiments/cluster/enqueue_table12.sh wmdp         # -> wave_wmdp
-# ... see the script header for the full subcommand list
-
-# start workers on THIS node (8 workers, one per GPU; returns immediately)
-bash experiments/cluster/launch_node.sh runs/cluster_queue/wave2
-
-# monitor / recover
-python experiments/cluster/workqueue.py status --brief --queue runs/cluster_queue/wave2
-python experiments/cluster/workqueue.py requeue-stale --queue <Q>   # only after
-#   verifying on the owning host that the worker process is truly dead
-python experiments/cluster/workqueue.py retry-failed  --queue <Q>   # only after
-#   root-causing the failure and moving partial run dirs to runs/forensics/
-python experiments/cluster/fleet_status.py                          # fleet view
+python experiments/cluster/next_actions.py
 ```
 
-Failure triage, in order: read the failed unit's log path from `status`;
-classify (OOM / node death / partial-dir refusal / guard refusal); partial-dir
-refusal means move the partial run dir to `runs/forensics/<name>.<epoch>` then
-`retry-failed`; guard refusal means STOP and report to the human — it is
-usually rule §2 protecting you.
+Only enqueue a phase listed as allowed. A dirty worktree blocks sealed audit
+by design. Do not weaken that check; commit/push from a networked workstation,
+then pull onto the cluster before workers start.
 
-## 6. CPU evidence chain and result handoff (no GPU needed)
+Existing results are append-only:
 
-After audit/alpha waves drain (run on a login node or any node, CPU):
+- Resume only through a runner's validated resume mechanism.
+- Move partial output to `runs/forensics/<name>.<timestamp>` before retrying.
+- Never delete a partial run just to reuse its tag.
+- Verify a worker is dead on its owning host before `requeue-stale`.
+- Read the unit log and classify the root cause before `retry-failed`.
+
+## 6. Result completion
+
+Implementation completion requires tests and syntax checks. Experiment
+completion additionally requires all planned units, seals, raw shards, ledger,
+readiness report, and generated LaTeX.
+
+Do not report "Table 1/2 complete" unless:
 
 ```bash
-# 1) immutable plan (requires the HUMAN-committed selection freeze)
-python experiments/paper/init_raw_plan.py \
-  --selection-freeze configs/paper/selection_freeze.yaml \
-  --setting tofu_qwen25_7b --out results/paper/raw_plan.json
-# 2) legacy channel-matrix outputs -> v4 prediction/protection backfill.
-# The claim-bearing tofu_v4 target producer writes prediction/fidelity/
-# protection raw directly; do not substitute the summary below for fidelity_raw.
-python experiments/paper/export_channel_matrix_raw.py \
-  --campaign-config configs/channel_matrix/7b_tofu.yaml \
-  --setting-id tofu_qwen25_7b \
-  --prediction-alpha-freeze configs/channel_matrix/prediction_alpha_freeze_7b.yaml \
-  --control-predictor knn_feature \
-  --fidelity-certificate runs/channel_matrix_7b/fidelity/qwen25_7b.json \
-  --out-dir results/paper/raw/tofu_qwen25_7b
-# 3) normalized ledger
-python experiments/paper/aggregate_raw.py --plan results/paper/raw_plan.json \
-  --prediction-raw results/paper/raw/tofu_qwen25_7b/prediction.jsonl \
-  --fidelity-raw <target_evaluation/sealed/fidelity_raw.jsonl> \
-  --protection-raw results/paper/raw/tofu_qwen25_7b/protection.jsonl \
-  --out results/paper/evidence_ledger.json
-# 4) readiness + tables (point --paper-root at a scratch copy on the cluster)
 python experiments/paper/build_evidence.py \
-  --ledger results/paper/evidence_ledger.json --paper-root paper
+  --config configs/paper/evidence.yaml \
+  --ledger results/paper/evidence_ledger.json \
+  --paper-root paper \
+  --require-ready
 ```
 
-For the authoritative TOFU path, use the three sealed shards emitted by
-`tofu_v4_unit.py` together. The channel-matrix certificate summary may populate
-diagnostic display cells, but it never licenses RQ2.
+exits successfully for the intended frozen roster. Placeholder cells and
+`all_tables_ready: false` mean incomplete evidence.
 
-Handoff (cluster cannot push): paste back to the human/session, verbatim —
-`results/paper/evidence_ledger.json`, `evidence_readiness.json`, the two
-generated `.tex` tables, fidelity summaries, and the per-wave
-`workqueue.py status` output. The session recreates and commits them.
-Placeholders (`\tblph`) remaining in tables while `--require-ready` is unmet
-is the designed honest state — never hand-fill a number.
+## 7. Documentation discipline
 
-## 7. Reporting discipline
+- Update an existing canonical document instead of creating a dated plan.
+- Keep `docs/README.md` as the complete documentation index.
+- Keep commands beside the environment that runs them: local commands in
+  `local_run/README.md`, cluster commands in the cluster runbook.
+- Do not commit generated Markdown reports or session journals.
+- Check relative Markdown links after renaming or deleting files.
 
-- Report failures as failures (exit codes, log paths). A non-reaching parent,
-  an infeasible arm, or a NOT LICENSED multi-setting verdict is a valid
-  scientific result — record it, do not retry it into silence.
-- Keep a per-session run journal (what was enqueued, drained, triaged) in
-  chat output; do not write ad-hoc notes into the repo.
-- When in doubt between "act" and "ask the human": every freeze, every config
-  authored from scratch, every amendment, every deletion — ask.
+## 8. Coding and Git
+
+- Preserve unrelated user changes in a dirty worktree.
+- Keep edits scoped and add tests proportional to behavior changed.
+- Run focused tests first, then the full CPU suite when practical.
+- Run `git diff --check` and shell syntax checks for modified scripts.
+- On a networked development machine, commit only verified changes and push
+  with a normal fast-forward update. Never force-push unless explicitly asked.

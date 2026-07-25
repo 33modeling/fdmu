@@ -39,5 +39,6 @@ audit·프로브 결과 존재 전 채택, 양 기준 병행 보고).
 7. **SFT 암기 예산의 스케일 의존**: probe_block 계약에서 1.5B=1200 / 7B=400 /
    14B=800 / RWKU-7B=200스텝 조기 도달(예산 800).
 
-관련 커밋 재료: `docs/data/fidelity/`(7B bf16 게이트 실패 인증서),
-`prereg/AMENDMENT-2026-07-23-cvar-bound.md`, `docs/plan_2026-07-23_fleet.md`(전 과정 기록).
+관련 근거: `docs/data/fidelity/`(7B bf16 게이트 실패 인증서)와
+`prereg/AMENDMENT-2026-07-23-cvar-bound.md`. 당시 전체 작업 순서는 Git
+history에 보존돼 있다.

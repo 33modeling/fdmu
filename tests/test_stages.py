@@ -1,5 +1,5 @@
-"""Stage 1 + Stage 2 invariants and the toy end-to-end flow
-(DESIGN.md §7, items 6-10): memorize -> forget to the calibrated floor ->
+"""Stage 1 + Stage 2 invariants and the toy end-to-end flow:
+memorize -> forget to the calibrated floor ->
 repair adjacent behavior without breaching the anchored budgets."""
 import math
 

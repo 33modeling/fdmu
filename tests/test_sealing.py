@@ -1,4 +1,4 @@
-"""Seal ledger discipline (DESIGN.md §6, §7 item 12)."""
+"""Append-only seal ledger discipline."""
 import pytest
 
 from rsus.sealing import SealedError, read_scores, seal_scores, unseal

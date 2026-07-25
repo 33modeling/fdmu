@@ -23,9 +23,9 @@ license prose.
 
 From the repository root:
 
-```powershell
+```bash
 python experiments/paper/build_evidence.py
-python experiments/paper/build_evidence.py --paper-root ../paper --require-ready
+python experiments/paper/build_evidence.py --paper-root paper --require-ready
 ```
 
 The first command always writes `results/paper/evidence_readiness.json` and is
@@ -108,15 +108,15 @@ and repeated-random draw roster before results are inspected.
 
 Create that plan only after development selections are frozen:
 
-```powershell
+```bash
 # First run writes a deliberately invalid draft; fill every selected parent.
-python experiments/paper/init_raw_plan.py `
+python experiments/paper/init_raw_plan.py \
   --write-selection-template configs/paper/selection_freeze.yaml
 
 # Set status: frozen, a final non-PENDING freeze_id, and
 # frozen_before_target: true, then freeze the executable denominator.
-python experiments/paper/init_raw_plan.py `
-  --selection-freeze configs/paper/selection_freeze.yaml `
+python experiments/paper/init_raw_plan.py \
+  --selection-freeze configs/paper/selection_freeze.yaml \
   --out results/paper/raw_plan.json
 ```
 
@@ -133,15 +133,15 @@ repeat. Therefore the cost runner must pass the
 campaign model key explicitly (its path-basename default is intentionally not
 accepted). For the current Qwen2.5-7B cell:
 
-```powershell
-python experiments/cost/bench.py `
-  --model /group-volume/models/Qwen2.5-7B-Instruct `
-  --model-id Qwen2.5-7B --device cuda --dtype float32 `
-  --author 198 --candidate-authors 0-29 --n-candidates 128 `
-  --candidate-seed 314159 --block-last-n 8 --norm-eta 0.003 `
-  --dirs 16,32,64 --batch-size 4 --repeats 3 --seed 0 --k 0 `
-  --min-rho 0.8 --min-overlap 0.7 --min-split-half 0.7 `
-  --min-perturbation-survival 0.9 `
+```bash
+python experiments/cost/bench.py \
+  --model /group-volume/models/Qwen2.5-7B-Instruct \
+  --model-id Qwen2.5-7B --device cuda --dtype float32 \
+  --author 198 --candidate-authors 0-29 --n-candidates 128 \
+  --candidate-seed 314159 --block-last-n 8 --norm-eta 0.003 \
+  --dirs 16,32,64 --batch-size 4 --repeats 3 --seed 0 --k 0 \
+  --min-rho 0.8 --min-overlap 0.7 --min-split-half 0.7 \
+  --min-perturbation-survival 0.9 \
   --out runs/paper/lse_qwen25_7b.jsonl
 ```
 
@@ -151,16 +151,16 @@ checks precision, the runtime-emitted block regex, and the protocol hash, so a
 wrong dtype, radius, threshold, roster seed, or `--block-last-n` cannot fill
 the planned cell.
 
-```powershell
-python experiments/paper/aggregate_raw.py `
-  --plan results/paper/raw_plan.json `
-  --prediction-raw runs/tofu/prediction.jsonl `
-  --fidelity-raw runs/tofu/fidelity.jsonl `
-  --protection-raw runs/tofu/protection.jsonl `
-  --artifact-raw lse_fidelity_cost=runs/paper/lse.jsonl `
-  --artifact-raw protection_budget_sweep=runs/paper/budget.jsonl `
-  --artifact-raw specificity_negative_controls=runs/paper/specificity.jsonl `
-  --artifact-raw tail_structure=runs/paper/prediction_supplement.jsonl `
+```bash
+python experiments/paper/aggregate_raw.py \
+  --plan results/paper/raw_plan.json \
+  --prediction-raw runs/tofu/prediction.jsonl \
+  --fidelity-raw runs/tofu/fidelity.jsonl \
+  --protection-raw runs/tofu/protection.jsonl \
+  --artifact-raw lse_fidelity_cost=runs/paper/lse.jsonl \
+  --artifact-raw protection_budget_sweep=runs/paper/budget.jsonl \
+  --artifact-raw specificity_negative_controls=runs/paper/specificity.jsonl \
+  --artifact-raw tail_structure=runs/paper/prediction_supplement.jsonl \
   --out results/paper/evidence_ledger.json
 ```
 
@@ -220,10 +220,10 @@ command, validates its outputs, and seals them. A frozen stage manifest contains
 the exact `(parent, request, seed)` Cartesian roster, a shell-free argv command
 per unit, and its output shard paths:
 
-```powershell
-python experiments/paper/run_v4_stage.py `
-  --manifest configs/paper/stages/tofu_target.yaml `
-  --output-dir runs/paper/tofu_target `
+```bash
+python experiments/paper/run_v4_stage.py \
+  --manifest runs/paper/tofu_table1/manifests/tofu_qwen25_1p5b__target_evaluation.yaml \
+  --output-dir runs/paper/tofu_target \
   --action run
 ```
 
@@ -326,6 +326,6 @@ headline macros:
    (`f_rho-0.80`, `f_K-0.70`, `g_H`, `g_ctl`) and only report pass when all
    one-sided bounds exist and clear zero.
 
-Campaign wave -> table mapping and the pre-run outcome forecast live in
-`docs/plan_table12_campaign.md`, but that July 23 plan predates the normative
-PDF roster and is retained as history rather than an executable paper plan.
+Current launch commands live in `local_run/README.md` and
+`docs/CLUSTER_FLEET_RUNBOOK.md`. The frozen paper configs, not a dated campaign
+plan, define the roster consumed by this pipeline.

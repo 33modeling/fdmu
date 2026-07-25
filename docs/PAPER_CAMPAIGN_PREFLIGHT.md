@@ -2,7 +2,7 @@
 
 Run the preflight before submitting **any** paper-campaign GPU job:
 
-```powershell
+```bash
 python experiments/paper/preflight.py
 ```
 

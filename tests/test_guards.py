@@ -1,4 +1,4 @@
-"""Guard algebra invariants (DESIGN.md §7, item 5)."""
+"""Guard algebra invariants for constrained repair."""
 import pytest
 import torch
 

@@ -1,4 +1,4 @@
-"""Probe invariants 1-4 of DESIGN.md §7."""
+"""Finite-difference probe invariants."""
 import dataclasses
 
 import torch
