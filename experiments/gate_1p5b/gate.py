@@ -47,6 +47,7 @@ from rsus.losses import seq_mean_answer_nll  # noqa: E402
 from rsus.partition import PartitionParams, build_partition, make_folds  # noqa: E402
 from rsus.probe.base import ProbeSpec, get_scorer, scorer_names  # noqa: E402
 from rsus.sealing import seal_scores, unseal  # noqa: E402
+from rsus.sft_cache import contract_sha256, resolve_sft_cache_path  # noqa: E402
 from rsus.stage1 import Stage1Config, calibrate_floor  # noqa: E402
 from rsus.stage2 import Stage2Config  # noqa: E402
 
@@ -106,9 +107,12 @@ def parse_args():
                    help="full memorization-set gate interval; avoids stopping on a lucky minibatch")
     p.add_argument(
         "--sft-cache",
-        default="",
-        help="optional development-only CPU state cache (.pt); validated against request, "
-             "model and SFT protocol before reuse",
+        default="auto",
+        help=(
+            "request-level CPU state cache: 'auto' (default) stores under "
+            "runs/sft_cache using the full SFT contract, an explicit .pt path "
+            "uses that file, and 'off' disables reuse"
+        ),
     )
     p.add_argument(
         "--require-sft-target",
@@ -342,9 +346,11 @@ def sft(model, examples, a, log, trainable_block=None) -> dict[str, float | int 
 
 def _sft_cache_contract(a, req, probe_block) -> dict:
     return {
-        "schema": "sft-cache-v1",
+        "schema": "sft-cache-v2",
         "model": a.model,
         "dtype": a.dtype,
+        "attn_impl": a.attn_impl,
+        "smoke": a.smoke,
         "request": req.request_id,
         "candidate_universe_sha": req.universe.sha,
         "forget_sha": req.forget_sha,
@@ -356,6 +362,7 @@ def _sft_cache_contract(a, req, probe_block) -> dict:
         "sft_steps": a.sft_steps,
         "sft_target_loss": a.sft_target_loss,
         "sft_eval_every": a.sft_eval_every,
+        "batch_size": a.batch_size,
         "seed": a.seed,
     }
 
@@ -486,14 +493,28 @@ def main():
     }
     del selected_probe_params
     sft_examples = list(req.forget) + list(req.universe.examples)
-    cache_path = Path(a.sft_cache).resolve() if a.sft_cache else None
     cache_contract = _sft_cache_contract(a, req, probe_block)
+    cache_path = resolve_sft_cache_path(
+        a.sft_cache,
+        automatic_root=ROOT / "runs" / "sft_cache",
+        model=str(a.model),
+        model_id=str(a.model_id),
+        dataset=str(a.dataset),
+        request_id=req.request_id,
+        contract=cache_contract,
+    )
+    if cache_path is not None:
+        log(f"SFT cache path: {cache_path}")
     sft_result = (
         _load_sft_cache(model0, cache_path, cache_contract, log)
         if cache_path is not None else None
     )
+    sft_cache_hit = sft_result is not None
     if sft_result is None:
-        log("SFT-memorizing the request universe ...")
+        if cache_path is not None:
+            log("SFT cache miss; memorizing the request universe ...")
+        else:
+            log("SFT cache disabled; memorizing the request universe ...")
         sft_result = sft(model0, sft_examples, a, log,
                          probe_block if a.trainable_scope == "probe_block" else None)
     if a.require_sft_target and not sft_result["reached"]:
@@ -681,6 +702,12 @@ def main():
         ),
         "objectives": gens,
         "sft": sft_result,
+        "sft_cache": {
+            "enabled": cache_path is not None,
+            "hit": sft_cache_hit,
+            "path": str(cache_path) if cache_path is not None else None,
+            "contract_sha256": contract_sha256(cache_contract),
+        },
         "objective_configs": {
             g: {
                 field.name: getattr(cfg, field.name)

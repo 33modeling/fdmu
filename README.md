@@ -288,6 +288,14 @@ python experiments/gate_1p5b/gate.py --model <경로> --device cuda --dtype floa
 python experiments/paper/run_tofu_table1.py --action plan
 ```
 
+`gate.py`는 기본적으로 exact SFT contract별 checkpoint를
+`runs/sft_cache/`에 저장하고 다음 실행에서 자동으로 불러온다. 명시적 파일은
+`--sft-cache /path/theta0.pt`, 캐시 비활성화는 `--sft-cache off`를 사용한다.
+PDF-v4 TOFU workflow는 `runs/paper/tofu_v4/sft_cache/`의 request/seed별
+checkpoint를 모든 parent가 공유하며, 각 unit manifest의 `sft_cache.hit`로
+재사용 여부를 감사할 수 있다. Forget 요청이나 seed, candidate universe,
+모델 또는 SFT 설정이 다르면 같은 초기 상태가 아니므로 별도 cache를 사용한다.
+
 로컬 멀티모델/데이터셋 캠페인은 **`local_run/`** 참고 (경로 규약: 모델
 `/rdata/models`, 데이터 `/rdata/minsoo3.kim/hf_home`, 결과
 `/rdata/minsoo3.kim/results/<dataset>/`):

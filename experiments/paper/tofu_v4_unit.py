@@ -24,6 +24,8 @@ import yaml
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "src"))
 
+from rsus.sft_cache import contract_sha256  # noqa: E402
+
 
 PAPER_UNIT_CONTRACT = {
     "schema_version": 1,
@@ -33,6 +35,7 @@ PAPER_UNIT_CONTRACT = {
     "consumes_frozen_unit_identity": True,
     "uses_adapter_registry": True,
     "executes_model": True,
+    "reuses_request_level_sft_cache": True,
     "emits_fidelity_raw": True,
     "emits_parent_selection_inputs": True,
     "computes_exact_gradient_reference": True,
@@ -587,7 +590,7 @@ def run_unit(args: argparse.Namespace) -> None:
     if runtime_args.trainable_scope != "probe_block":
         raise TOFUUnitError("paper parent and repair must share probe_block scope")
 
-    log("loading/SFT-memorizing theta0")
+    log("loading theta0 base model and checking the request-level SFT cache")
     model0 = gate_runtime.load_model(runtime_args, tokenizer)
     block = mlp_down_last_layers(model0, int(common["block_last_n"]))
     sft_examples = (
@@ -608,7 +611,9 @@ def run_unit(args: argparse.Namespace) -> None:
     sft_result = gate_runtime._load_sft_cache(
         model0, cache_path, cache_contract, log
     )
+    sft_cache_hit = sft_result is not None
     if sft_result is None:
+        log(f"SFT cache miss; training theta0 once for {args.request}/seed-{args.seed}")
         sft_result = gate_runtime.sft(
             model0, sft_examples, runtime_args, log, block
         )
@@ -1380,6 +1385,11 @@ def run_unit(args: argparse.Namespace) -> None:
         "semantic_eligibility_sha256": _sha256(eligibility_path),
         "block": identity,
         "sft": sft_result,
+        "sft_cache": {
+            "hit": sft_cache_hit,
+            "path": str(cache_path),
+            "contract_sha256": contract_sha256(cache_contract),
+        },
         "native_metric": dict(native_metric),
         "native_utility_ids_sha256": _json_sha(
             [example.example_id for example in native_utility]

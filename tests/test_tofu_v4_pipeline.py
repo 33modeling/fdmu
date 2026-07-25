@@ -27,6 +27,7 @@ def test_tofu_unit_declares_the_complete_literal_contract():
     assert marker["adapters"] == ["tofu"]
     assert marker["runs_pdf_v4_repair"]
     assert marker["runs_all_comparator_arms"]
+    assert marker["reuses_request_level_sft_cache"]
     assert marker["computes_exact_gradient_reference"]
     assert marker["emits_parent_selection_inputs"]
     assert marker["emits_dataset_native_retention"]
