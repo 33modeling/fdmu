@@ -4,8 +4,9 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 
+unset PYTHONHOME PYTHONPATH PIP_TARGET PIP_PREFIX
 PYTHON_BOOTSTRAP="${PYTHON_BOOTSTRAP:-python3.11}"
-VENV="${VENV:-$ROOT/.venv}"
+VENV="$ROOT/.venv"
 PYTHON="$VENV/bin/python"
 export PIP_NO_CACHE_DIR=1
 GPU_IDS="${GPU_IDS:-0,1}"
@@ -36,9 +37,11 @@ elif ! "$PYTHON" -c 'import torch, transformers, datasets, yaml' >/dev/null 2>&1
   "$PYTHON" -m pip install -e ".[dev]" "datasets>=2.19" "PyYAML>=6.0"
 fi
 if ! "$PYTHON" -c 'import yaml' >/dev/null 2>&1; then
-  "$PYTHON" -m pip install --no-cache-dir "PyYAML>=6.0"
+  "$PYTHON" -m pip install --no-cache-dir --upgrade "PyYAML>=6.0"
 fi
-"$PYTHON" -c 'import datasets, torch, transformers, yaml; print(
+"$PYTHON" -c 'import datasets, site, sys, torch, transformers, yaml; print(
+    f"[deps] python={sys.executable} prefix={sys.prefix} "
+    f"site={site.getsitepackages()} yaml_file={yaml.__file__} "
     f"[deps] torch={torch.__version__} transformers={transformers.__version__} "
     f"datasets={datasets.__version__} pyyaml={yaml.__version__}"
 )'

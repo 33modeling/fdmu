@@ -3,15 +3,17 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
-export VENV="${VENV:-$ROOT/.venv}"
+unset PYTHONHOME PYTHONPATH PIP_TARGET PIP_PREFIX
+export VENV="$ROOT/.venv"
 PYTHON="$VENV/bin/python"
 
 if [[ -x "$PYTHON" ]]; then
   if ! "$PYTHON" -c 'import yaml' >/dev/null 2>&1; then
-    "$PYTHON" -m pip install --no-cache-dir "PyYAML>=6.0"
+    "$PYTHON" -m pip install --no-cache-dir --upgrade "PyYAML>=6.0"
   fi
-  "$PYTHON" -c 'import sys, yaml; print(
-      f"[deps] python={sys.executable} pyyaml={yaml.__version__}"
+  "$PYTHON" -c 'import site, sys, yaml; print(
+      f"[deps] python={sys.executable} prefix={sys.prefix} "
+      f"site={site.getsitepackages()} pyyaml={yaml.__version__} file={yaml.__file__}"
   )'
 fi
 
