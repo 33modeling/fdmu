@@ -29,10 +29,14 @@ if [[ ! -x "$PYTHON" ]]; then
   "$PYTHON_BOOTSTRAP" -m venv "$VENV"
   "$PYTHON" -m pip install --upgrade pip setuptools wheel
   "$PYTHON" -m pip install "torch==2.7.1"
-  "$PYTHON" -m pip install -e ".[dev]" "datasets>=2.19"
+  "$PYTHON" -m pip install -e ".[dev]" "datasets>=2.19" "PyYAML>=6.0"
 elif ! "$PYTHON" -c 'import torch, transformers, datasets, yaml' >/dev/null 2>&1; then
-  "$PYTHON" -m pip install -e ".[dev]" "datasets>=2.19"
+  "$PYTHON" -m pip install -e ".[dev]" "datasets>=2.19" "PyYAML>=6.0"
 fi
+"$PYTHON" -c 'import datasets, torch, transformers, yaml; print(
+    f"[deps] torch={torch.__version__} transformers={transformers.__version__} "
+    f"datasets={datasets.__version__} pyyaml={yaml.__version__}"
+)'
 
 export HF_HOME="${HF_HOME:-/rdata/minsoo3.kim/hf_home}"
 export HF_HUB_OFFLINE="${HF_HUB_OFFLINE:-1}"

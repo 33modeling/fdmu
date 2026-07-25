@@ -222,7 +222,9 @@ def main() -> None:
               "at this dtype/eta. Re-run --dtype float32 and/or larger --etas.")
     print()
 
+    print("[INFO] [fidelity] exact-gradient/projection phase start", flush=True)
     A, projsq, d = exact_A_and_projsq(model, req, spec, seeds, max(Rs))
+    print("[INFO] [fidelity] exact-gradient/projection phase complete", flush=True)
 
     hdr = f"{'seed':>4} {'R':>4} {'eta':>8} | {'rho(A,B)':>9} {'rho(B,C)':>9} {'rho(A,C)':>9}" \
           f" | {'ov(A,C)':>8} | {'medB/A':>7} {'medC/A':>7} {'medC/B':>7}"
@@ -235,7 +237,17 @@ def main() -> None:
             B = B_scores(projsq, s, R, d)
             rab, _ = agree(A, B, k)
             for eta in etas:
+                print(
+                    f"[INFO] [fidelity] finite-difference cell start "
+                    f"seed={s} R={R} eta={eta:.0e}",
+                    flush=True,
+                )
                 C = C_scores(model, req, spec, s, R, eta, d)
+                print(
+                    f"[INFO] [fidelity] finite-difference cell complete "
+                    f"seed={s} R={R} eta={eta:.0e}",
+                    flush=True,
+                )
                 if (
                     R == a.gate_r
                     and s == a.gate_seed
@@ -278,7 +290,7 @@ def main() -> None:
         w = csv.DictWriter(f, fieldnames=list(rows[0]))
         w.writeheader()
         w.writerows(rows)
-    print(f"\nwrote {out}")
+    print(f"\nwrote {out}", flush=True)
 
     passed = (
         gate["rho_AB"] >= a.min_rho_ab
@@ -323,7 +335,7 @@ def main() -> None:
     cert_path = Path(a.certificate) if a.certificate else out.with_suffix(".certificate.json")
     cert_path.parent.mkdir(parents=True, exist_ok=True)
     cert_path.write_text(json.dumps(certificate, indent=2, sort_keys=True), encoding="utf-8")
-    print(f"wrote {cert_path}; passed={passed}")
+    print(f"wrote {cert_path}; passed={passed}", flush=True)
     if a.enforce_gate and not passed:
         raise SystemExit("frozen fd_norm fidelity cell failed; do not start sealed audit")
 
