@@ -12,9 +12,12 @@ complete candidate distribution.
 """
 from __future__ import annotations
 
+from pathlib import Path
+
 import torch
 
 from rsus.data.base import CandidateUniverse, Example, Request
+from rsus.data.hf_cache import find_cached_arrow_shards, writable_datasets_cache
 from rsus.losses import IGNORE
 
 QA_PER_AUTHOR = 20
@@ -25,14 +28,52 @@ FORGET10_FIRST_AUTHOR = 180
 QUESTION_PREFIX = "Question: "
 ANSWER_PREFIX = "\nAnswer:"
 
+TOFU_REPO = "locuslab/TOFU"
+TOFU_CACHE_REPO_DIR = "locuslab___tofu"
+TRAIN_SPLIT = "train"
 
-def load_tofu_rows():
+
+def find_cached_arrows(
+    config: str,
+    hf_home: str | Path | None = None,
+) -> list[Path]:
+    """Find prepared TOFU Arrow shards without touching builder lock files."""
+    return find_cached_arrow_shards(
+        TOFU_CACHE_REPO_DIR,
+        config,
+        TRAIN_SPLIT,
+        hf_home=hf_home,
+    )
+
+
+def _load_tofu_config(config: str) -> list[dict]:
+    arrows = find_cached_arrows(config)
+    if arrows:
+        from datasets import Dataset
+
+        rows: list[dict] = []
+        for arrow in arrows:
+            rows.extend(Dataset.from_file(str(arrow)))
+        return rows
+
+    # A cache miss may require dataset preparation. Keep its FileLock in a
+    # user-writable location instead of the shared HF_HOME dataset cache.
     from datasets import load_dataset
 
-    ds = load_dataset("locuslab/TOFU", "full")["train"]
-    if len(ds) != FULL_SIZE:
-        raise ValueError(f"TOFU full has {len(ds)} rows, expected {FULL_SIZE}")
-    return ds
+    dataset = load_dataset(
+        TOFU_REPO,
+        config,
+        split=TRAIN_SPLIT,
+        cache_dir=str(writable_datasets_cache()),
+    )
+    return list(dataset)
+
+
+def load_tofu_rows() -> list[dict]:
+    rows = _load_tofu_config("full")
+    if len(rows) != FULL_SIZE:
+        raise ValueError(f"TOFU full has {len(rows)} rows, expected {FULL_SIZE}")
+    return rows
 
 
 def format_qa(question: str, answer: str, tokenizer, max_length: int = 256) -> tuple[torch.Tensor, torch.Tensor]:
@@ -78,9 +119,7 @@ def load_tofu_paraphrases(tokenizer, max_length: int = 256) -> dict[str, Example
 
     ``forget10_perturbed`` row i corresponds to ``full`` row 3600+i. Returns
     original example_id -> paraphrased Example (same group)."""
-    from datasets import load_dataset
-
-    ds = load_dataset("locuslab/TOFU", "forget10_perturbed")["train"]
+    ds = _load_tofu_config("forget10_perturbed")
     first_row = FORGET10_FIRST_AUTHOR * QA_PER_AUTHOR
     if len(ds) != FULL_SIZE - first_row:
         raise ValueError(f"forget10_perturbed has {len(ds)} rows, expected {FULL_SIZE - first_row}")
