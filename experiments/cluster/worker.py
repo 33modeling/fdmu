@@ -45,7 +45,26 @@ def gpu_memory_used_mib(gpu: int) -> int | None:
 
 def build_env(base: dict[str, str], unit_env: dict[str, str], gpu: int, needs_gpu: bool) -> dict[str, str]:
     env = dict(base)
+    protected_storage = {
+        name: env.get(name)
+        for name in (
+            "GROUP_VOLUME_ROOT",
+            "CLUSTER_RUNS_ROOT",
+            "CLUSTER_WORK_ROOT",
+            "CLUSTER_HF_HOME",
+            "CLUSTER_HF_DATASETS_CACHE",
+            "CLUSTER_RSUS_DATASETS_CACHE",
+            "CLUSTER_TORCH_HOME",
+            "CLUSTER_XDG_CACHE_HOME",
+            "CLUSTER_TMPDIR",
+        )
+    }
     env.update(unit_env)
+    for name, value in protected_storage.items():
+        if value is not None:
+            env[name] = value
+        else:
+            env.pop(name, None)
     if needs_gpu:
         env["CUDA_VISIBLE_DEVICES"] = str(gpu)
         env["GPU"] = str(gpu)  # h100_campaign.sh reads GPU=
@@ -53,13 +72,17 @@ def build_env(base: dict[str, str], unit_env: dict[str, str], gpu: int, needs_gp
     group_root = env.get("GROUP_VOLUME_ROOT", "/group-volume")
     runs_root = env.get(
         "CLUSTER_RUNS_ROOT",
-        f"{group_root}/jieuns.shin/retain-susceptibility/runs",
+        str(ROOT / "runs"),
     )
+    user = env.get("USER", "unknown")
+    host = env.get("HOSTNAME", socket.gethostname())
     work_root = env.get(
         "CLUSTER_WORK_ROOT",
-        f"{runs_root}/_runtime",
+        str(ROOT / ".cluster-runtime" / user / host),
     )
     hf_home = env.get("CLUSTER_HF_HOME", f"{group_root}/data/hf_home")
+    env["CLUSTER_RUNS_ROOT"] = runs_root
+    env["CLUSTER_WORK_ROOT"] = work_root
     env["HF_HOME"] = hf_home
     env["HF_DATASETS_CACHE"] = env.get(
         "CLUSTER_HF_DATASETS_CACHE", f"{hf_home}/datasets"
@@ -165,7 +188,7 @@ def main() -> None:
     runs_root = Path(
         os.environ.get(
             "CLUSTER_RUNS_ROOT",
-            "/group-volume/jieuns.shin/retain-susceptibility/runs",
+            ROOT / "runs",
         )
     )
     parser.add_argument("--log-dir", default=str(runs_root / "logs" / "cluster"))

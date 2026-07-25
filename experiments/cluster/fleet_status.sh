@@ -7,4 +7,7 @@ set -euo pipefail
 #   bash /group-volume/jieuns.shin/retain-susceptibility/experiments/cluster/fleet_status.sh
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-exec python "${ROOT}/experiments/cluster/fleet_status.py"
+# shellcheck disable=SC1091
+source "${ROOT}/experiments/cluster/cluster_env.sh"
+VENV="${VENV:-/group-volume/jieuns.shin/venvs/exp}"
+exec "${VENV}/bin/python" "${ROOT}/experiments/cluster/fleet_status.py"

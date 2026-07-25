@@ -16,9 +16,8 @@ set -euo pipefail
 # Wave -> table mapping: Table 1 <- wave2 (7B audit + alpha waves, all in
 # wave2); Table 2 rows <- wave1_14b, wave_rwku, wave_wmdp, wave_wmdp14b,
 # wave_llama.
-# New queues (wave_wmdp/wave_llama/wave_rwku) need a node assignment in
-# configs/cluster/fleet.yaml (or FORCE_QUEUE=1 on an unassigned node)
-# before launch_node.sh will serve them.
+# New queues (wave_wmdp/wave_llama/wave_rwku) need a committed node assignment
+# in configs/cluster/fleet.yaml before launch_node.sh will serve them.
 #
 # This script NEVER launches workers, NEVER git-pulls, and never touches queue
 # state beyond `make_units.py --enqueue`.  Queues are append-only per unit id,

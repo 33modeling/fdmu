@@ -24,7 +24,7 @@ def test_critical_paths_not_ignored():
 
 
 def test_runs_and_caches_are_ignored():
-    for rel in ["runs/x", "checkpoints/x", "__pycache__/x"]:
+    for rel in ["runs/x", ".cluster-runtime/x", "checkpoints/x", "__pycache__/x"]:
         r = subprocess.run(
             ["git", "check-ignore", "-q", rel], cwd=ROOT, capture_output=True
         )

@@ -7,7 +7,6 @@ set -Eeuo pipefail
 #
 #   bash experiments/cluster/launch_node.sh              # queue from configs/cluster/fleet.yaml
 #   bash experiments/cluster/launch_node.sh <queue-dir>  # explicit (must match assignment)
-#   FORCE_QUEUE=1 bash ... <queue-dir>                   # override the assignment guard
 #   WAIT=0 ...                                           # workers exit when queue drains
 #
 # Stop this node's workers:  pkill -f "experiments/cluster/worker.py --queue"
@@ -40,15 +39,16 @@ if [[ "${ASSIGNED}" == runs/* ]]; then
 fi
 
 QUEUE="${1:-}"
+if [[ -z "${ASSIGNED}" ]]; then
+  echo "node ${HOST} has no assignment in configs/cluster/fleet.yaml" >&2
+  echo "Add and commit the exact queue assignment before launching this node." >&2
+  exit 2
+fi
 if [[ -z "${QUEUE}" ]]; then
   QUEUE="${ASSIGNED}"
-  if [[ -z "${QUEUE}" ]]; then
-    echo "node ${HOST} has no assignment in configs/cluster/fleet.yaml and no queue was given" >&2
-    exit 2
-  fi
-elif [[ -n "${ASSIGNED}" && "${QUEUE%/}" != "${ASSIGNED%/}" && "${FORCE_QUEUE:-0}" != "1" ]]; then
+elif [[ "${QUEUE%/}" != "${ASSIGNED%/}" ]]; then
   echo "refusing: ${HOST} is assigned to ${ASSIGNED}, not ${QUEUE}." >&2
-  echo "Fix configs/cluster/fleet.yaml or rerun with FORCE_QUEUE=1." >&2
+  echo "Fix and commit configs/cluster/fleet.yaml before launching this node." >&2
   exit 2
 fi
 if [[ "${QUEUE}" == runs/* ]]; then

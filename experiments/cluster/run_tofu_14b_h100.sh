@@ -57,8 +57,7 @@ stage failed-audit-recovery
 stage enqueue
 bash experiments/cluster/enqueue_table12.sh audit-14b
 stage worker-launch
-FORCE_QUEUE="${FORCE_QUEUE:-0}" \
-  bash experiments/cluster/launch_node.sh "$QUEUE"
+bash experiments/cluster/launch_node.sh "$QUEUE"
 stage queue-monitor
 "$PYTHON" -u experiments/cluster/monitor_queue.py \
   --queue "$QUEUE" --match "$MODEL_ID" \

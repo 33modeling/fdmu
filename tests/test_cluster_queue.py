@@ -131,14 +131,17 @@ def test_worker_env_isolates_one_gpu_per_unit():
     assert env["MODEL_ID"] == "qwen25_7b"
     cpu_env = worker.build_env({}, {}, gpu=5, needs_gpu=False)
     assert "CUDA_VISIBLE_DEVICES" not in cpu_env
-    assert cpu_env["TMPDIR"].startswith("/group-volume/")
-    assert cpu_env["RSUS_DATASETS_CACHE"].startswith("/group-volume/")
+    assert cpu_env["TMPDIR"].startswith(str(ROOT / ".cluster-runtime"))
+    assert cpu_env["RSUS_DATASETS_CACHE"].startswith(str(ROOT / ".cluster-runtime"))
 
 
 def test_worker_env_replaces_node_local_tmpdir():
     env = worker.build_env(
         {
             "USER": "researcher",
+            "HOSTNAME": "node-7b",
+            "CLUSTER_RUNS_ROOT": "/group-volume/shared/runs",
+            "CLUSTER_WORK_ROOT": "/group-volume/shared/scratch/researcher/node-7b",
             "TMPDIR": "/tmp",
             "HF_HOME": "/home/researcher/.cache/huggingface",
             "TORCH_HOME": "/home/researcher/.cache/torch",
@@ -147,11 +150,45 @@ def test_worker_env_replaces_node_local_tmpdir():
         gpu=0,
         needs_gpu=True,
     )
-    runtime = "/group-volume/jieuns.shin/retain-susceptibility/runs/_runtime"
+    runtime = "/group-volume/shared/scratch/researcher/node-7b"
     assert env["TMPDIR"] == f"{runtime}/tmp"
     assert env["HF_HOME"] == "/group-volume/data/hf_home"
     assert env["TORCH_HOME"] == f"{runtime}/torch_home"
     assert env["XDG_CACHE_HOME"] == f"{runtime}/xdg_cache"
+
+
+def test_worker_unit_env_cannot_redirect_shared_cluster_roots():
+    env = worker.build_env(
+        {
+            "CLUSTER_RUNS_ROOT": "/group-volume/shared/runs",
+            "CLUSTER_WORK_ROOT": "/group-volume/shared/scratch/node-a",
+        },
+        {
+            "CLUSTER_RUNS_ROOT": "/group-volume/wrong/14b",
+            "CLUSTER_WORK_ROOT": "/group-volume/wrong/runtime",
+            "CLUSTER_TMPDIR": "/tmp/wrong",
+        },
+        gpu=0,
+        needs_gpu=True,
+    )
+    assert env["CLUSTER_RUNS_ROOT"] == "/group-volume/shared/runs"
+    assert env["CLUSTER_WORK_ROOT"] == "/group-volume/shared/scratch/node-a"
+    assert env["TMPDIR"] == "/group-volume/shared/scratch/node-a/tmp"
+
+
+def test_model_launchers_pin_queues_without_force_override():
+    launch = (ROOT / "experiments/cluster/launch_node.sh").read_text(encoding="utf-8")
+    seven = (ROOT / "experiments/cluster/run_tofu_7b_h100.sh").read_text(
+        encoding="utf-8"
+    )
+    fourteen = (ROOT / "experiments/cluster/run_tofu_14b_h100.sh").read_text(
+        encoding="utf-8"
+    )
+    assert "FORCE_QUEUE" not in launch
+    assert "FORCE_QUEUE" not in seven
+    assert "FORCE_QUEUE" not in fourteen
+    assert 'QUEUE="$CLUSTER_RUNS_ROOT/cluster_queue/wave2"' in seven
+    assert 'QUEUE="$CLUSTER_RUNS_ROOT/cluster_queue/wave1_14b"' in fourteen
 
 
 def test_worker_executes_units_and_records_results(tmp_path):
@@ -340,7 +377,7 @@ def test_fleet_assignment_mismatch_detection(tmp_path):
     # node serving its own queue: fine (relative or absolute path spelling)
     assert not fs.assignment_mismatch(assignments, "node-a", "runs/cluster_queue/wave1")
     assert not fs.assignment_mismatch(
-        assignments, "node-a", fs.ROOT / "runs/cluster_queue/wave1")
+        assignments, "node-a", fs.RUNS_ROOT / "cluster_queue/wave1")
     # node grabbing another campaign's queue: flagged
     assert fs.assignment_mismatch(assignments, "node-b", "runs/cluster_queue/wave1")
     # unknown host: never flagged

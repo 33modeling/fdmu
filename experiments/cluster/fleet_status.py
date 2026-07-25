@@ -9,6 +9,7 @@ working directory.
 from __future__ import annotations
 
 import json
+import os
 import sys
 import time
 from pathlib import Path
@@ -16,6 +17,7 @@ from pathlib import Path
 import yaml
 
 ROOT = Path(__file__).resolve().parents[2]
+RUNS_ROOT = Path(os.environ.get("CLUSTER_RUNS_ROOT", ROOT / "runs")).resolve()
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from workqueue import WorkQueue  # noqa: E402
@@ -28,14 +30,17 @@ def load_assignments(path: Path) -> dict[str, str]:
     return {str(host): str(queue) for host, queue in (data.get("assignments") or {}).items()}
 
 
-def queue_key(queue_path: str | Path) -> str:
+def queue_key(queue_path: str | Path, *, runs_root: Path = RUNS_ROOT) -> str:
     """Normalize a queue reference to 'runs/cluster_queue/<name>' when possible."""
     path = Path(queue_path)
     if path.is_absolute():
         try:
-            path = path.relative_to(ROOT)
+            path = Path("runs") / path.relative_to(runs_root)
         except ValueError:
-            return str(path)
+            try:
+                path = path.relative_to(ROOT)
+            except ValueError:
+                return str(path)
     return str(path).rstrip("/")
 
 
@@ -56,7 +61,7 @@ def main() -> None:
     now = time.time()
 
     print("========== NODES ==========")
-    status_dir = ROOT / "runs" / "cluster_status"
+    status_dir = RUNS_ROOT / "cluster_status"
     snapshots = sorted(status_dir.glob("*.json")) if status_dir.exists() else []
     if not snapshots:
         print("(no node snapshots yet — launch_node.sh starts the watcher)")
@@ -81,7 +86,7 @@ def main() -> None:
 
     print()
     print("========== QUEUES ==========")
-    queue_root = ROOT / "runs" / "cluster_queue"
+    queue_root = RUNS_ROOT / "cluster_queue"
     queues = sorted(p for p in queue_root.iterdir() if p.is_dir()) if queue_root.exists() else []
     if not queues:
         print("(no queues)")

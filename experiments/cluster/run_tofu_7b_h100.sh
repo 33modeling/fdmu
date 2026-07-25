@@ -4,13 +4,6 @@ set -Eeuo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$ROOT"
 
-# Keep the 7B fleet isolated from inherited 14B/local overrides. The cluster
-# checkout itself is on group-volume, so this remains shared and writable
-# without depending on the permission-conflicted legacy runs directory.
-export CLUSTER_LOCAL_ENV=/dev/null
-export CLUSTER_RUNS_ROOT="$ROOT/.cluster-runs/7b"
-export CLUSTER_WORK_ROOT="$CLUSTER_RUNS_ROOT/_runtime"
-
 # shellcheck disable=SC1091
 source "$ROOT/experiments/cluster/cluster_env.sh"
 
