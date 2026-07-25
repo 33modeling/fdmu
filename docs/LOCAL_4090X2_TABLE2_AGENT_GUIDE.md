@@ -5,6 +5,21 @@
 제안하고 끝내지 말고, 환경 설치, 코드 구현, 테스트, GPU 실행, evidence
 집계와 LaTeX 생성까지 가능한 범위에서 계속 진행한다.
 
+## 구현된 joint 개발 스윕
+
+Table 2 전체 state machine과 별도로, 1.5B `D_prot`에서 joint가 comparator
+전체보다 좋은 trial을 찾는 재개 가능한 실행기는 구현되어 있다.
+
+```bash
+GPU_IDS=0,1 bash local_run/sweep_joint_1p5b_4090x2.sh
+```
+
+설정은 `configs/local/joint_sweep_1p5b_4090x2.yaml`, controller는
+`experiments/paper/run_joint_dev_sweep.py`다. joint가 feasible이고 모든
+개발 셀에서 `s0`, `s1`, `no_repair`, 반복 난수 5개보다 mean/CVaR damage가
+모두 작을 때만 멈춘다. 성공해도 target을 실행하지 않고 human freeze용
+draft recommendation만 만든다.
+
 ## 0. Agent 실행 원칙
 
 1. 먼저 `AGENTS.md`, 이 문서, `configs/paper/tofu_v4.yaml`을 읽는다.

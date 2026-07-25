@@ -1,0 +1,86 @@
+schema_version: 1
+contract: tofu-pdf-v4-joint-dev-sweep
+development_only: true
+setting: tofu_qwen25_1p5b
+
+paths:
+  campaign: configs/paper/campaign.yaml
+  evidence: configs/paper/evidence.yaml
+  runtime: configs/paper/tofu_v4.yaml
+  python: .venv/bin/python
+  model_source: /rdata/models/Qwen2.5-1.5B-Instruct
+  sentence_encoder: /rdata/models/all-MiniLM-L6-v2
+  sft_cache_root: /rdata/minsoo3.kim/results/paper/tofu_qwen25_1p5b/sft_cache
+  output_root: /rdata/minsoo3.kim/results/paper/tofu_qwen25_1p5b/joint_sweep
+
+gpus: [0, 1]
+
+# This is deliberately stricter than a feasibility-only win. On every D_prot
+# request/seed cell, joint must be feasible and have lower mean and CVaR damage
+# than s0, s1, no_repair, and every frozen repeated-random draw.
+stop:
+  require_all_development_cells: true
+  require_joint_feasible: true
+  repeated_random_rule: beat_every_draw
+  mean_damage_margin: 0.0
+  cvar95_damage_margin: 0.0
+  parent_groups:
+    output_readout:
+      members: [graddiff, npo, simnpo, gru]
+      minimum_passing: 1
+    representation_readout:
+      members: [rmu, repnoise, circuit_breakers]
+      minimum_passing: 1
+
+# Ordered, finite, target-free search. Each trial fixes one global alpha/Kp pair
+# across every D_prot cell, so the joint/comparator comparison is commensurate.
+# Add reviewed trials at the end after SWEEP_EXHAUSTED; never tune from target.
+trials:
+  - id: a050-k40-lr3e5-s120-m4
+    alpha: 0.50
+    Kp: 40
+    repair: {step_size: 3.0e-5, max_steps: 120, m_ref: 4, ridge_lambda: 1.0e-4}
+  - id: a025-k40-lr3e5-s120-m4
+    alpha: 0.25
+    Kp: 40
+    repair: {step_size: 3.0e-5, max_steps: 120, m_ref: 4, ridge_lambda: 1.0e-4}
+  - id: a075-k40-lr3e5-s120-m4
+    alpha: 0.75
+    Kp: 40
+    repair: {step_size: 3.0e-5, max_steps: 120, m_ref: 4, ridge_lambda: 1.0e-4}
+  - id: a050-k20-lr3e5-s120-m4
+    alpha: 0.50
+    Kp: 20
+    repair: {step_size: 3.0e-5, max_steps: 120, m_ref: 4, ridge_lambda: 1.0e-4}
+  - id: a050-k80-lr3e5-s120-m4
+    alpha: 0.50
+    Kp: 80
+    repair: {step_size: 3.0e-5, max_steps: 120, m_ref: 4, ridge_lambda: 1.0e-4}
+  - id: a050-k40-lr1e5-s240-m4
+    alpha: 0.50
+    Kp: 40
+    repair: {step_size: 1.0e-5, max_steps: 240, m_ref: 4, ridge_lambda: 1.0e-4}
+  - id: a050-k40-lr3e5-s240-m4
+    alpha: 0.50
+    Kp: 40
+    repair: {step_size: 3.0e-5, max_steps: 240, m_ref: 4, ridge_lambda: 1.0e-4}
+  - id: a050-k40-lr1e4-s120-m4
+    alpha: 0.50
+    Kp: 40
+    repair: {step_size: 1.0e-4, max_steps: 120, m_ref: 4, ridge_lambda: 1.0e-4}
+  - id: a025-k80-lr1e5-s240-m8
+    alpha: 0.25
+    Kp: 80
+    repair: {step_size: 1.0e-5, max_steps: 240, m_ref: 8, ridge_lambda: 1.0e-4}
+  - id: a075-k80-lr1e5-s240-m8
+    alpha: 0.75
+    Kp: 80
+    repair: {step_size: 1.0e-5, max_steps: 240, m_ref: 8, ridge_lambda: 1.0e-4}
+  - id: a050-k80-lr3e5-s240-m8
+    alpha: 0.50
+    Kp: 80
+    repair: {step_size: 3.0e-5, max_steps: 240, m_ref: 8, ridge_lambda: 1.0e-3}
+  - id: a050-k40-lr1e5-s360-m8
+    alpha: 0.50
+    Kp: 40
+    repair: {step_size: 1.0e-5, max_steps: 360, m_ref: 8, ridge_lambda: 1.0e-3}

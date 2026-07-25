@@ -21,6 +21,10 @@
 |---|---|
 | H100 플릿 운영 | [Cluster fleet runbook](CLUSTER_FLEET_RUNBOOK.md) |
 | 새 모델 추가와 캘리브레이션 | [New model calibration](NEW_MODEL_CALIBRATION_GUIDE.md) |
+| 1.5B RTX 4090 x2 Table 2 | [1.5B local agent guide](LOCAL_4090X2_TABLE2_AGENT_GUIDE.md) |
+| 7B RTX 4090 x2 joint sweep | [7B joint sweep agent guide](LOCAL_4090X2_7B_JOINT_SWEEP_AGENT_GUIDE.md) |
+| 14B RTX 4090 x2 하드웨어 판정 | [14B 4090 x2 decision guide](LOCAL_4090X2_14B_HARDWARE_GUIDE.md) |
+| 14B H100 joint sweep | [14B joint sweep agent guide](H100_14B_JOINT_SWEEP_AGENT_GUIDE.md) |
 | 채널 방향과 score 해석 | [Channel direction](channel_direction.md) |
 | 로컬 GPU 실행 | [Local run](../local_run/README.md) |
 | 이전 1.5B gate 진단 | [Gate 1.5B runbook](../experiments/gate_1p5b/RUNBOOK.md) |

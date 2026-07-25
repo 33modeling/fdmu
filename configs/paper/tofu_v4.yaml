@@ -23,6 +23,16 @@ settings:
       steps: 400
       target_loss: 0.8
       eval_every: 100
+  tofu_qwen25_14b:
+    model: Qwen2.5-14B
+    channel_config: configs/channel_matrix/14b_tofu.yaml
+    channel_model_id: qwen25_14b
+    parent_freeze: configs/channel_matrix/objective_freeze_14b.yaml
+    sft:
+      lr: 1.0e-5
+      steps: 800
+      target_loss: 0.8
+      eval_every: 100
 
 runtime:
   device: cuda
