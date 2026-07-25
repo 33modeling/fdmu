@@ -42,7 +42,12 @@ SCHEMA = "dev-prediction-probe-v1"
 
 def _output_root(cfg: dict) -> Path:
     root = Path(cfg["output_root"])
-    return root if root.is_absolute() else (ROOT / root)
+    runs_root = os.environ.get("CLUSTER_RUNS_ROOT")
+    if root.is_absolute():
+        return root
+    if runs_root and root.parts and root.parts[0] == "runs":
+        return Path(runs_root) / Path(*root.parts[1:])
+    return ROOT / root
 
 
 def _default_out_dir(cfg: dict, model_id: str, author: int) -> Path:

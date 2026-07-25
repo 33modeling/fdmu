@@ -50,6 +50,27 @@ def build_env(base: dict[str, str], unit_env: dict[str, str], gpu: int, needs_gp
         env["CUDA_VISIBLE_DEVICES"] = str(gpu)
         env["GPU"] = str(gpu)  # h100_campaign.sh reads GPU=
     env.setdefault("PYTHONUNBUFFERED", "1")
+    group_root = env.get("GROUP_VOLUME_ROOT", "/group-volume")
+    cluster_user = env.get("USER", "cluster")
+    hf_home = env.get("CLUSTER_HF_HOME", f"{group_root}/data/hf_home")
+    env["HF_HOME"] = hf_home
+    env["HF_DATASETS_CACHE"] = env.get(
+        "CLUSTER_HF_DATASETS_CACHE", f"{hf_home}/datasets"
+    )
+    env["RSUS_DATASETS_CACHE"] = env.get(
+        "CLUSTER_RSUS_DATASETS_CACHE", f"{hf_home}/rsus_datasets_cache"
+    )
+    env["TORCH_HOME"] = env.get(
+        "CLUSTER_TORCH_HOME", f"{group_root}/data/torch_home"
+    )
+    env["XDG_CACHE_HOME"] = env.get(
+        "CLUSTER_XDG_CACHE_HOME",
+        f"{group_root}/data/xdg_cache/{cluster_user}",
+    )
+    env["TMPDIR"] = env.get(
+        "CLUSTER_TMPDIR",
+        f"{group_root}/tmp/{cluster_user}",
+    )
     # HF Hub is blocked/unstable from the cluster (2026-07-23); every queued
     # unit must run cache-only unless its own env explicitly opts back in
     # (e.g. a provisioning unit setting HF_HUB_OFFLINE=0).
@@ -134,7 +155,13 @@ def main() -> None:
     parser.add_argument("--poll-s", type=float, default=30.0)
     parser.add_argument("--allow-busy-gpu", action="store_true")
     parser.add_argument("--busy-threshold-mib", type=int, default=1024)
-    parser.add_argument("--log-dir", default=str(ROOT / "runs" / "logs" / "cluster"))
+    runs_root = Path(
+        os.environ.get(
+            "CLUSTER_RUNS_ROOT",
+            "/group-volume/jieuns.shin/retain-susceptibility/runs",
+        )
+    )
+    parser.add_argument("--log-dir", default=str(runs_root / "logs" / "cluster"))
     args = parser.parse_args()
 
     used = gpu_memory_used_mib(args.gpu)

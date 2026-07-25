@@ -45,6 +45,16 @@ REPORT = ROOT / "experiments" / "diag" / "channel_report.py"
 FIDELITY = ROOT / "experiments" / "diag" / "fd_fidelity.py"
 
 
+def _runtime_path(raw: str | Path) -> Path:
+    path = Path(raw)
+    if path.is_absolute():
+        return path
+    runs_root = os.environ.get("CLUSTER_RUNS_ROOT")
+    if runs_root and path.parts and path.parts[0] == "runs":
+        return (Path(runs_root) / Path(*path.parts[1:])).resolve()
+    return (ROOT / path).resolve()
+
+
 def _load_yaml(path: Path) -> dict:
     with open(path, encoding="utf-8") as f:
         value = yaml.safe_load(f)
@@ -280,9 +290,7 @@ def fidelity_commands(cfg: dict, models: list[dict], output_root: Path):
     declared = cfg["audit"]["fidelity_certificates"]
     for model in models:
         csv_path = output_root / "fidelity" / f"{model['id']}.csv"
-        certificate = Path(declared[model["id"]])
-        if not certificate.is_absolute():
-            certificate = (ROOT / certificate).resolve()
+        certificate = _runtime_path(declared[model["id"]])
         cmd = [
             sys.executable,
             str(FIDELITY),
@@ -368,9 +376,7 @@ def _load_fidelity_certificates(config_path: Path, cfg: dict, models: list[dict]
     for model in models:
         if model["id"] not in declared:
             raise ValueError(f"no fidelity certificate declared for model {model['id']}")
-        path = Path(declared[model["id"]])
-        if not path.is_absolute():
-            path = (ROOT / path).resolve()
+        path = _runtime_path(declared[model["id"]])
         if not path.exists():
             raise FileNotFoundError(
                 f"missing fidelity certificate for {model['id']}: {path}; run the "
@@ -537,9 +543,7 @@ def main() -> None:
                 f"--only-objectives outside the configured grid: {sorted(unknown_objectives)}; "
                 f"allowed={sorted(grid_objectives)}"
             )
-    output_root = Path(cfg["output_root"])
-    if not output_root.is_absolute():
-        output_root = (ROOT / output_root).resolve()
+    output_root = _runtime_path(cfg["output_root"])
     env = os.environ.copy()
     env.setdefault("PYTHONHASHSEED", "0")
     if a.phase == "audit" and cfg["audit"].get("offline", True):

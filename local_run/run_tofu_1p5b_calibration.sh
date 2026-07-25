@@ -7,6 +7,7 @@ cd "$ROOT"
 PYTHON_BOOTSTRAP="${PYTHON_BOOTSTRAP:-python3.11}"
 VENV="${VENV:-$ROOT/.venv}"
 PYTHON="$VENV/bin/python"
+export PIP_NO_CACHE_DIR=1
 GPU_IDS="${GPU_IDS:-0,1}"
 MODEL_PATH="${MODEL_PATH:-/rdata/models/Qwen2.5-1.5B-Instruct}"
 CALIBRATION_ROOT="${CALIBRATION_ROOT:-/rdata/minsoo3.kim/results/paper/tofu_qwen25_1p5b/parent_calibration}"
@@ -33,12 +34,16 @@ if [[ ! -x "$PYTHON" ]]; then
 elif ! "$PYTHON" -c 'import torch, transformers, datasets, yaml' >/dev/null 2>&1; then
   "$PYTHON" -m pip install -e ".[dev]" "datasets>=2.19" "PyYAML>=6.0"
 fi
+if ! "$PYTHON" -c 'import yaml' >/dev/null 2>&1; then
+  "$PYTHON" -m pip install --no-cache-dir "PyYAML>=6.0"
+fi
 "$PYTHON" -c 'import datasets, torch, transformers, yaml; print(
     f"[deps] torch={torch.__version__} transformers={transformers.__version__} "
     f"datasets={datasets.__version__} pyyaml={yaml.__version__}"
 )'
 
 export HF_HOME="${HF_HOME:-/rdata/minsoo3.kim/hf_home}"
+export RSUS_DATASETS_CACHE="${RSUS_DATASETS_CACHE:-$HF_HOME/rsus_datasets_cache}"
 export HF_HUB_OFFLINE="${HF_HUB_OFFLINE:-1}"
 export TRANSFORMERS_OFFLINE="${TRANSFORMERS_OFFLINE:-1}"
 export HF_DATASETS_OFFLINE="${HF_DATASETS_OFFLINE:-1}"

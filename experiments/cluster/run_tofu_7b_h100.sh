@@ -3,12 +3,14 @@ set -Eeuo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$ROOT"
+# shellcheck disable=SC1091
+source "$ROOT/experiments/cluster/cluster_env.sh"
 
-QUEUE="${H100_7B_QUEUE:-runs/cluster_queue/wave2}"
+QUEUE="${H100_7B_QUEUE:-$CLUSTER_RUNS_ROOT/cluster_queue/wave2}"
 VENV="${VENV:-/group-volume/jieuns.shin/venvs/exp}"
 PYTHON="$VENV/bin/python"
 MODEL_ID=qwen25_7b
-LOG_DIR="$ROOT/runs/logs/cluster"
+LOG_DIR="$CLUSTER_RUNS_ROOT/logs/cluster"
 mkdir -p "$LOG_DIR"
 LOG="$LOG_DIR/launcher_${MODEL_ID}_$(hostname)_$(date -u '+%Y%m%dT%H%M%SZ').out"
 ln -sfn "$(basename "$LOG")" "$LOG_DIR/launcher_${MODEL_ID}_$(hostname)_current.out"

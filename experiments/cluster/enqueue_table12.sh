@@ -36,7 +36,8 @@ if [[ ! -f "${VENV}/bin/activate" ]]; then
 fi
 # shellcheck disable=SC1090
 source "${VENV}/bin/activate"
-export HF_HOME="${HF_HOME:-/group-volume/data/hf_home}"
+# shellcheck disable=SC1091
+source "${ROOT}/experiments/cluster/cluster_env.sh"
 
 CFG_DIR="configs/channel_matrix"
 STATUS_QUEUES=(wave1 wave2 wave1_14b wave_wmdp wave_wmdp14b wave_llama wave_rwku)
@@ -122,7 +123,7 @@ case "${cmd}" in
 
   status)
     for q in "${STATUS_QUEUES[@]}"; do
-      root="runs/cluster_queue/${q}"
+      root="$CLUSTER_RUNS_ROOT/cluster_queue/${q}"
       echo "== ${root} =="
       if [[ -d "${root}" ]]; then
         python experiments/cluster/workqueue.py status --brief --queue "${root}" \
@@ -140,7 +141,7 @@ case "${cmd}" in
     require_config "${cfg}"
     require_clean_tree
     require_frozen "$(freeze_path_of "${cfg}" objective_freeze)" "7B audit"
-    queue="runs/cluster_queue/wave2"
+    queue="$CLUSTER_RUNS_ROOT/cluster_queue/wave2"
     enqueue_phase "7B TOFU audit" "${queue}" "${cfg}" audit
     alpha_freeze="$(freeze_path_of "${cfg}" alpha_freeze)"
     if [[ -f "${alpha_freeze}" ]] && freeze_is_frozen "${alpha_freeze}"; then
@@ -158,7 +159,7 @@ case "${cmd}" in
     require_config "${cfg}"
     require_clean_tree
     require_frozen "$(freeze_path_of "${cfg}" objective_freeze)" "14B audit"
-    queue="runs/cluster_queue/wave1_14b"
+    queue="$CLUSTER_RUNS_ROOT/cluster_queue/wave1_14b"
     enqueue_phase "14B TOFU audit" "${queue}" "${cfg}" audit
     alpha_freeze="$(freeze_path_of "${cfg}" alpha_freeze)"
     if [[ -f "${alpha_freeze}" ]] && freeze_is_frozen "${alpha_freeze}"; then
@@ -175,7 +176,7 @@ case "${cmd}" in
     cfg="${CFG_DIR}/wmdp_7b.yaml"
     require_config "${cfg}"
     require_clean_tree
-    queue="runs/cluster_queue/wave_wmdp"
+    queue="$CLUSTER_RUNS_ROOT/cluster_queue/wave_wmdp"
     enqueue_phase "WMDP fidelity" "${queue}" "${cfg}" fidelity
     enqueue_phase "WMDP calibration" "${queue}" "${cfg}" calibration
     post_enqueue_notes "${queue}"
@@ -185,7 +186,7 @@ case "${cmd}" in
     cfg="${CFG_DIR}/wmdp_14b.yaml"
     require_config "${cfg}"
     require_clean_tree
-    queue="runs/cluster_queue/wave_wmdp14b"
+    queue="$CLUSTER_RUNS_ROOT/cluster_queue/wave_wmdp14b"
     enqueue_phase "WMDP-14B fidelity" "${queue}" "${cfg}" fidelity
     enqueue_phase "WMDP-14B calibration" "${queue}" "${cfg}" calibration
     post_enqueue_notes "${queue}"
@@ -199,7 +200,7 @@ case "${cmd}" in
       die "model not provisioned at ${model_path} — run: bash experiments/cluster/provision_llama.sh"
     fi
     require_clean_tree
-    queue="runs/cluster_queue/wave_llama"
+    queue="$CLUSTER_RUNS_ROOT/cluster_queue/wave_llama"
     enqueue_phase "Llama-8B fidelity" "${queue}" "${cfg}" fidelity
     enqueue_phase "Llama-8B calibration" "${queue}" "${cfg}" calibration
     post_enqueue_notes "${queue}"
@@ -214,7 +215,7 @@ case "${cmd}" in
     fi
     require_clean_tree
     require_frozen "$(freeze_path_of "${cfg}" objective_freeze)" "RWKU audit"
-    queue="runs/cluster_queue/wave_rwku"
+    queue="$CLUSTER_RUNS_ROOT/cluster_queue/wave_rwku"
     enqueue_phase "RWKU 7B audit" "${queue}" "${cfg}" audit
     post_enqueue_notes "${queue}"
     ;;

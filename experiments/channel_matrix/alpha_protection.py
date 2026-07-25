@@ -34,6 +34,16 @@ SELF = Path(__file__).resolve()
 sys.path.insert(0, str(ROOT / "src"))
 
 
+def _runtime_output_root(cfg: dict) -> Path:
+    root = Path(cfg["output_root"])
+    runs_root = os.environ.get("CLUSTER_RUNS_ROOT")
+    if root.is_absolute():
+        return root
+    if runs_root and root.parts and root.parts[0] == "runs":
+        return Path(runs_root) / Path(*root.parts[1:])
+    return ROOT / root
+
+
 def _load_yaml(path: Path) -> dict:
     value = yaml.safe_load(path.read_text(encoding="utf-8"))
     if not isinstance(value, dict):
@@ -524,9 +534,7 @@ def _candidate_pool(cfg: dict, phase: str, author: int) -> str:
 
 
 def _output_dir(cfg: dict, phase: str, model_id: str, author: int, seed: int) -> Path:
-    root = Path(cfg["output_root"])
-    if not root.is_absolute():
-        root = ROOT / root
+    root = _runtime_output_root(cfg)
     return (root / "alpha_protection" / phase / model_id
             / f"tofu-a{author}" / f"seed-{seed}")
 
@@ -814,9 +822,7 @@ def _run_worker(
     model0 = gate_runtime.load_model(runtime, tokenizer)
     probe_block = mlp_down_last_layers(model0, int(common["block_last_n"]))
     sft_examples = list(req.forget) + list(req.universe.examples)
-    root = Path(cfg["output_root"])
-    if not root.is_absolute():
-        root = ROOT / root
+    root = _runtime_output_root(cfg)
     cache_path = root / "sft_cache" / model_id / f"tofu-a{author}_seed-{seed}.pt"
     contract = gate_runtime._sft_cache_contract(runtime, req, probe_block)
     sft_result = gate_runtime._load_sft_cache(model0, cache_path, contract, log)

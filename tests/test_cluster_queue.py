@@ -131,6 +131,26 @@ def test_worker_env_isolates_one_gpu_per_unit():
     assert env["MODEL_ID"] == "qwen25_7b"
     cpu_env = worker.build_env({}, {}, gpu=5, needs_gpu=False)
     assert "CUDA_VISIBLE_DEVICES" not in cpu_env
+    assert cpu_env["TMPDIR"].startswith("/group-volume/")
+    assert cpu_env["RSUS_DATASETS_CACHE"].startswith("/group-volume/")
+
+
+def test_worker_env_replaces_node_local_tmpdir():
+    env = worker.build_env(
+        {
+            "USER": "researcher",
+            "TMPDIR": "/tmp",
+            "HF_HOME": "/home/researcher/.cache/huggingface",
+            "TORCH_HOME": "/home/researcher/.cache/torch",
+        },
+        {},
+        gpu=0,
+        needs_gpu=True,
+    )
+    assert env["TMPDIR"] == "/group-volume/tmp/researcher"
+    assert env["HF_HOME"] == "/group-volume/data/hf_home"
+    assert env["TORCH_HOME"] == "/group-volume/data/torch_home"
+    assert env["XDG_CACHE_HOME"] == "/group-volume/data/xdg_cache/researcher"
 
 
 def test_worker_executes_units_and_records_results(tmp_path):

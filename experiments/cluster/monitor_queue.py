@@ -4,6 +4,7 @@ from __future__ import annotations
 import argparse
 from collections import deque
 import json
+import os
 import time
 from pathlib import Path
 
@@ -38,7 +39,10 @@ def failed_log(queue: Path, unit_id: str) -> Path | None:
 
 
 def latest_running_log(unit_id: str) -> Path | None:
-    matches = list((ROOT / "runs/logs/cluster").glob(f"{unit_id}__*.out"))
+    runs_root = Path(
+        os.environ.get("CLUSTER_RUNS_ROOT", ROOT / "runs")
+    )
+    matches = list((runs_root / "logs/cluster").glob(f"{unit_id}__*.out"))
     return max(matches, key=lambda path: path.stat().st_mtime) if matches else None
 
 

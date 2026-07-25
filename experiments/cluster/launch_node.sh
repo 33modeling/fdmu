@@ -24,7 +24,8 @@ fi
 # shellcheck disable=SC1090
 source "${VENV}/bin/activate"
 cd "${ROOT}"
-export HF_HOME="${HF_HOME:-/group-volume/data/hf_home}"
+# shellcheck disable=SC1091
+source "${ROOT}/experiments/cluster/cluster_env.sh"
 export PYTHONUNBUFFERED=1
 
 ASSIGNED="$(python - <<PY
@@ -34,6 +35,9 @@ data = yaml.safe_load(cfg.read_text(encoding="utf-8")) if cfg.exists() else {}
 print((data.get("assignments") or {}).get("${HOST}", ""))
 PY
 )"
+if [[ "${ASSIGNED}" == runs/* ]]; then
+  ASSIGNED="$CLUSTER_RUNS_ROOT/${ASSIGNED#runs/}"
+fi
 
 QUEUE="${1:-}"
 if [[ -z "${QUEUE}" ]]; then
@@ -46,6 +50,9 @@ elif [[ -n "${ASSIGNED}" && "${QUEUE%/}" != "${ASSIGNED%/}" && "${FORCE_QUEUE:-0
   echo "refusing: ${HOST} is assigned to ${ASSIGNED}, not ${QUEUE}." >&2
   echo "Fix configs/cluster/fleet.yaml or rerun with FORCE_QUEUE=1." >&2
   exit 2
+fi
+if [[ "${QUEUE}" == runs/* ]]; then
+  QUEUE="$CLUSTER_RUNS_ROOT/${QUEUE#runs/}"
 fi
 
 if ! command -v nvidia-smi >/dev/null; then
@@ -77,11 +84,12 @@ if (( ${#CONFLICTS[@]} > 0 )); then
   exit 2
 fi
 
-LOGDIR="runs/logs/cluster"
+LOGDIR="$CLUSTER_RUNS_ROOT/logs/cluster"
 mkdir -p "${LOGDIR}"
 python experiments/cluster/workqueue.py init --queue "${QUEUE}"
 
 nohup python -u experiments/cluster/node_watch.py --replace \
+  --status-dir "$CLUSTER_RUNS_ROOT/cluster_status" \
   >> "${LOGDIR}/watch_${HOST}.out" 2>&1 &
 echo "node=${HOST} queue=${QUEUE} gpus=${NGPU}/${DETECTED} wait=${WAIT} watcher_pid=$!"
 
@@ -98,6 +106,7 @@ for (( g = 0; g < NGPU; g++ )); do
   out="${LOGDIR}/worker_${HOST}_gpu${g}.out"
   nohup python -u experiments/cluster/worker.py \
     --queue "${QUEUE}" --gpu "${g}" "${wait_flag[@]}" \
+    --log-dir "$LOGDIR" \
     >> "${out}" 2>&1 &
   echo "  worker gpu${g}: started pid=$! log=${out}"
 done

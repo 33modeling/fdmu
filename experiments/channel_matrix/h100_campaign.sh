@@ -39,9 +39,10 @@ fi
 # shellcheck disable=SC1090
 source "${VENV}/bin/activate"
 cd "${ROOT}"
-export HF_HOME="${HF_HOME:-/group-volume/data/hf_home}"
+# shellcheck disable=SC1091
+source "${ROOT}/experiments/cluster/cluster_env.sh"
 export PYTHONUNBUFFERED=1
-mkdir -p runs/logs
+mkdir -p "$CLUSTER_RUNS_ROOT/logs"
 
 model_args=()
 if [[ "${MODEL_ID}" != "all" ]]; then
