@@ -57,7 +57,10 @@ stage failed-audit-recovery
 stage enqueue
 bash experiments/cluster/enqueue_table12.sh audit-7b
 stage worker-launch
-FORCE_QUEUE="${FORCE_QUEUE:-0}" \
+# This model-specific launcher is itself an explicit wave2 assignment. Allow
+# replacement hosts not yet listed in fleet.yaml; launch_node still refuses
+# when workers for another queue are actually active on the node.
+FORCE_QUEUE="${FORCE_QUEUE:-1}" \
   bash experiments/cluster/launch_node.sh "$QUEUE"
 stage queue-monitor
 "$PYTHON" -u experiments/cluster/monitor_queue.py \
