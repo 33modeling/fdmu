@@ -107,8 +107,8 @@ D_cal 실행
 
 ```text
 runs/paper/tofu_v4/sft_cache/
-  <setting>/<request>__seed-<seed>.pt
-  <setting>/<request>__seed-<seed>.pt.json
+  <setting>/<request>__seed-<seed>__<contract-digest>.pt
+  <setting>/<request>__seed-<seed>__<contract-digest>.pt.json
 ```
 
 동일한 model, request, seed, candidate universe, trainable block, SFT
@@ -130,6 +130,9 @@ loaded validated development SFT cache ...
 ```
 
 Contract가 다른 cache를 같은 checkpoint로 조용히 재사용하지 않는다.
+이전 고정 이름 `<request>__seed-<seed>.pt` 캐시는 metadata contract가 현재
+실행과 정확히 일치할 때만 계속 사용한다. 불일치하거나 불완전한 이전 캐시는
+삭제하지 않고 보존하며, 현재 contract digest 경로에 새 checkpoint를 만든다.
 
 ## 5. 최종 결과 파일
 

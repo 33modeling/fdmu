@@ -48,6 +48,49 @@ def automatic_sft_cache_path(
     )
 
 
+def request_sft_cache_path(
+    root: str | Path,
+    *,
+    setting: str,
+    request_id: str,
+    seed: str | int,
+    contract: Mapping[str, object],
+) -> Path:
+    """Return the paper runner's exact-contract request/seed cache path."""
+    contract_digest = contract_sha256(contract)[:16]
+    request = _component(request_id, "request")
+    seed_label = _component(str(seed), "seed")
+    return (
+        Path(root)
+        / _component(setting, "setting")
+        / f"{request}__seed-{seed_label}__{contract_digest}.pt"
+    )
+
+
+def sft_cache_pair_status(
+    path: str | Path,
+    contract: Mapping[str, object],
+) -> str:
+    """Inspect a cache pair without loading model weights.
+
+    This is used only to adopt legacy fixed-name caches. New cache paths
+    already contain the contract digest and remain fail-closed when corrupted.
+    """
+    cache_path = Path(path)
+    meta_path = cache_path.with_suffix(cache_path.suffix + ".json")
+    if not cache_path.exists() and not meta_path.exists():
+        return "missing"
+    if not cache_path.exists() or not meta_path.exists():
+        return "incomplete"
+    try:
+        metadata = json.loads(meta_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return "invalid-metadata"
+    if not isinstance(metadata, dict) or metadata.get("contract") != dict(contract):
+        return "contract-mismatch"
+    return "match"
+
+
 def resolve_sft_cache_path(
     option: str | None,
     *,

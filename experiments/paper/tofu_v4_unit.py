@@ -24,7 +24,11 @@ import yaml
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "src"))
 
-from rsus.sft_cache import contract_sha256  # noqa: E402
+from rsus.sft_cache import (  # noqa: E402
+    contract_sha256,
+    request_sft_cache_path,
+    sft_cache_pair_status,
+)
 
 
 PAPER_UNIT_CONTRACT = {
@@ -599,7 +603,7 @@ def run_unit(args: argparse.Namespace) -> None:
         + list(native_utility)
     )
     cache_root = _resolve(str(common["sft_cache_root"]))
-    cache_path = (
+    legacy_cache_path = (
         cache_root
         / args.setting
         / f"{args.request}__seed-{args.seed}.pt"
@@ -608,6 +612,23 @@ def run_unit(args: argparse.Namespace) -> None:
     cache_contract["paper_native_utility_ids_sha256"] = _json_sha(
         [example.example_id for example in native_utility]
     )
+    cache_path = request_sft_cache_path(
+        cache_root,
+        setting=args.setting,
+        request_id=args.request,
+        seed=args.seed,
+        contract=cache_contract,
+    )
+    if sft_cache_pair_status(cache_path, cache_contract) == "missing":
+        legacy_status = sft_cache_pair_status(legacy_cache_path, cache_contract)
+        if legacy_status == "match":
+            cache_path = legacy_cache_path
+            log(f"using compatible legacy SFT cache {legacy_cache_path}")
+        elif legacy_status != "missing":
+            log(
+                f"preserving legacy SFT cache with status={legacy_status}; "
+                f"using exact-contract path {cache_path}"
+            )
     sft_result = gate_runtime._load_sft_cache(
         model0, cache_path, cache_contract, log
     )

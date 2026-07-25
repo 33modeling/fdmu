@@ -1,7 +1,11 @@
+import json
+
 from rsus.sft_cache import (
     automatic_sft_cache_path,
     contract_sha256,
+    request_sft_cache_path,
     resolve_sft_cache_path,
+    sft_cache_pair_status,
 )
 
 
@@ -47,7 +51,7 @@ def test_automatic_cache_path_reuses_only_the_exact_contract(tmp_path):
     assert first == repeated
     assert first != changed
     assert first.suffix == ".pt"
-    assert "qwen25-1p5b" in first.parts
+    assert any(part.startswith("qwen25-1p5b-") for part in first.parts)
 
 
 def test_cache_resolution_supports_auto_explicit_and_off(tmp_path, monkeypatch):
@@ -91,3 +95,54 @@ def test_contract_hash_is_order_independent():
     left = _contract()
     right = dict(reversed(list(left.items())))
     assert contract_sha256(left) == contract_sha256(right)
+
+
+def test_request_cache_path_separates_changed_contracts(tmp_path):
+    first = request_sft_cache_path(
+        tmp_path,
+        setting="tofu_qwen25_1p5b",
+        request_id="tofu-a188",
+        seed=2025,
+        contract=_contract(),
+    )
+    repeated = request_sft_cache_path(
+        tmp_path,
+        setting="tofu_qwen25_1p5b",
+        request_id="tofu-a188",
+        seed=2025,
+        contract=_contract(),
+    )
+    changed = request_sft_cache_path(
+        tmp_path,
+        setting="tofu_qwen25_1p5b",
+        request_id="tofu-a188",
+        seed=2025,
+        contract=_contract(sft_steps=1200),
+    )
+
+    assert first == repeated
+    assert first != changed
+    assert first.parent == tmp_path / "tofu_qwen25_1p5b"
+    assert first.name.startswith("tofu-a188__seed-2025__")
+
+
+def test_cache_pair_status_adopts_only_complete_matching_legacy_pair(tmp_path):
+    path = tmp_path / "legacy.pt"
+    meta = path.with_suffix(".pt.json")
+    contract = _contract()
+
+    assert sft_cache_pair_status(path, contract) == "missing"
+    path.write_bytes(b"weights")
+    assert sft_cache_pair_status(path, contract) == "incomplete"
+    meta.write_text("{", encoding="utf-8")
+    assert sft_cache_pair_status(path, contract) == "invalid-metadata"
+    meta.write_text(
+        json.dumps({"contract": _contract(seed=2026), "sft_result": {}}),
+        encoding="utf-8",
+    )
+    assert sft_cache_pair_status(path, contract) == "contract-mismatch"
+    meta.write_text(
+        json.dumps({"contract": contract, "sft_result": {}}),
+        encoding="utf-8",
+    )
+    assert sft_cache_pair_status(path, contract) == "match"
