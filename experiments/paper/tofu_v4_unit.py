@@ -441,7 +441,6 @@ def run_unit(args: argparse.Namespace) -> None:
     from rsus.losses import IGNORE, seq_mean_answer_nll
     from rsus.partition import PartitionParams, build_pdf_protection_partition
     from rsus.probe import ProbeSpec, ScoreProfile, get_scorer
-    from rsus.probe.baselines import set_embed_encoder
     from rsus.probe.fidelity import perturbation_report
     from rsus.repair import RepairConfig
 
@@ -694,26 +693,6 @@ def run_unit(args: argparse.Namespace) -> None:
     }
     if "knn_lexical" in probe_cfg["simple_controls"]:
         controls["knn_lexical"] = get_scorer("knn_lexical")(
-            model0, request, spec
-        ).scores
-    if "knn_embed" in probe_cfg["simple_controls"]:
-        from sentence_transformers import SentenceTransformer
-
-        encoder = SentenceTransformer(
-            str(probe_cfg["sentence_encoder"]), device="cpu"
-        )
-
-        def encode_text(items):
-            return torch.as_tensor(
-                encoder.encode(
-                    [item.text for item in items],
-                    batch_size=int(common["batch_size"]),
-                    convert_to_numpy=True,
-                )
-            )
-
-        set_embed_encoder(encode_text)
-        controls["knn_embed"] = get_scorer("knn_embed")(
             model0, request, spec
         ).scores
     expected_controls = tuple(str(value) for value in probe_cfg["simple_controls"])

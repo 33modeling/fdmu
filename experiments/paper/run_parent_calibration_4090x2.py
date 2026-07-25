@@ -65,7 +65,6 @@ def _overlay(
     *,
     model: str,
     model_source: Path,
-    encoder: Path,
     sft_cache_root: Path,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     campaign_local = json.loads(json.dumps(campaign))
@@ -75,7 +74,6 @@ def _overlay(
         raise SweepError(f"campaign has no model {model!r}")
     model_config["source"] = str(model_source)
     model_config["source_kind"] = "local_path"
-    runtime_local["probe"]["sentence_encoder"] = str(encoder)
     runtime_local["runtime"]["sft_cache_root"] = str(sft_cache_root)
     return campaign_local, runtime_local
 
@@ -120,7 +118,6 @@ def run(args: argparse.Namespace) -> int:
     runtime_source = args.runtime.resolve()
     python = args.python.resolve()
     model_source = args.model_source.resolve()
-    encoder = args.sentence_encoder.resolve()
     output_root = args.output_root.resolve()
     sft_cache_root = args.sft_cache_root.resolve()
     _status(
@@ -130,7 +127,6 @@ def run(args: argparse.Namespace) -> int:
     for name, path in (
         ("python", python),
         ("model", model_source),
-        ("sentence encoder", encoder),
     ):
         if not path.exists():
             raise SweepError(f"{name} is missing: {path}")
@@ -144,7 +140,6 @@ def run(args: argparse.Namespace) -> int:
         runtime,
         model=model,
         model_source=model_source,
-        encoder=encoder,
         sft_cache_root=sft_cache_root,
     )
 
@@ -274,7 +269,6 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     )
     parser.add_argument("--python", type=Path, default=ROOT / ".venv/bin/python")
     parser.add_argument("--model-source", type=Path, required=True)
-    parser.add_argument("--sentence-encoder", type=Path, required=True)
     parser.add_argument("--sft-cache-root", type=Path, required=True)
     parser.add_argument("--output-root", type=Path, required=True)
     parser.add_argument("--gpus", default="0,1")

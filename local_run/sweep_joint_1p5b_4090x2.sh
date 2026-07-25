@@ -9,7 +9,6 @@ VENV="${VENV:-$ROOT/.venv}"
 PYTHON="$VENV/bin/python"
 GPU_IDS="${GPU_IDS:-0,1}"
 MODEL_PATH="${MODEL_PATH:-/rdata/models/Qwen2.5-1.5B-Instruct}"
-ENCODER_PATH="${ENCODER_PATH:-/rdata/models/all-MiniLM-L6-v2}"
 RESULTS_ROOT="${RESULTS_ROOT:-/rdata/minsoo3.kim/results/paper/tofu_qwen25_1p5b/joint_sweep}"
 SFT_CACHE_ROOT="${SFT_CACHE_ROOT:-/rdata/minsoo3.kim/results/paper/tofu_qwen25_1p5b/sft_cache}"
 SPEC="${SPEC:-$ROOT/configs/local/joint_sweep_1p5b_4090x2.yaml}"
@@ -58,7 +57,7 @@ print({
 })
 PY
 
-for required in "$MODEL_PATH" "$ENCODER_PATH"; do
+for required in "$MODEL_PATH"; do
   if [[ ! -e "$required" ]]; then
     printf 'required offline path is missing: %s\n' "$required" >&2
     exit 2
@@ -84,7 +83,6 @@ exec "$PYTHON" -u experiments/paper/run_joint_dev_sweep.py \
   --spec "$SPEC" \
   --gpus "$GPU_IDS" \
   --model-source "$MODEL_PATH" \
-  --sentence-encoder "$ENCODER_PATH" \
   --sft-cache-root "$SFT_CACHE_ROOT" \
   --output-root "$RESULTS_ROOT" \
   --progress-interval "$PROGRESS_INTERVAL_SECONDS" \

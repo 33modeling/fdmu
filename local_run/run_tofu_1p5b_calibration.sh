@@ -9,7 +9,6 @@ VENV="${VENV:-$ROOT/.venv}"
 PYTHON="$VENV/bin/python"
 GPU_IDS="${GPU_IDS:-0,1}"
 MODEL_PATH="${MODEL_PATH:-/rdata/models/Qwen2.5-1.5B-Instruct}"
-ENCODER_PATH="${ENCODER_PATH:-/rdata/models/all-MiniLM-L6-v2}"
 CALIBRATION_ROOT="${CALIBRATION_ROOT:-/rdata/minsoo3.kim/results/paper/tofu_qwen25_1p5b/parent_calibration}"
 SFT_CACHE_ROOT="${SFT_CACHE_ROOT:-/rdata/minsoo3.kim/results/paper/tofu_qwen25_1p5b/sft_cache}"
 PROGRESS_INTERVAL_SECONDS="${PROGRESS_INTERVAL_SECONDS:-15}"
@@ -57,7 +56,7 @@ print({
 })
 PY
 
-for required in "$MODEL_PATH" "$ENCODER_PATH"; do
+for required in "$MODEL_PATH"; do
   if [[ ! -e "$required" ]]; then
     printf 'required offline path is missing: %s\n' "$required" >&2
     exit 2
@@ -81,7 +80,6 @@ fi
 exec "$PYTHON" -u experiments/paper/run_parent_calibration_4090x2.py \
   --python "$PYTHON" \
   --model-source "$MODEL_PATH" \
-  --sentence-encoder "$ENCODER_PATH" \
   --sft-cache-root "$SFT_CACHE_ROOT" \
   --output-root "$CALIBRATION_ROOT" \
   --gpus "$GPU_IDS" \

@@ -9,7 +9,6 @@ paths:
   runtime: configs/paper/tofu_v4.yaml
   python: .venv/bin/python
   model_source: /rdata/models/Qwen2.5-1.5B-Instruct
-  sentence_encoder: /rdata/models/all-MiniLM-L6-v2
   sft_cache_root: /rdata/minsoo3.kim/results/paper/tofu_qwen25_1p5b/sft_cache
   output_root: /rdata/minsoo3.kim/results/paper/tofu_qwen25_1p5b/joint_sweep
 

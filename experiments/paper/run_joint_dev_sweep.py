@@ -146,7 +146,6 @@ def validate_spec(raw: Mapping[str, Any]) -> dict[str, Any]:
         "runtime",
         "python",
         "model_source",
-        "sentence_encoder",
         "sft_cache_root",
         "output_root",
     )
@@ -924,9 +923,6 @@ def _prepare_trial(
         _resolve(spec["paths"]["model_source"])
     )
     campaign_local["models"][model]["source_kind"] = "local_path"
-    runtime_local["probe"]["sentence_encoder"] = str(
-        _resolve(spec["paths"]["sentence_encoder"])
-    )
     runtime_local["runtime"]["sft_cache_root"] = str(
         _resolve(spec["paths"]["sft_cache_root"])
     )
@@ -942,7 +938,6 @@ def _prepare_trial(
             "evidence_sha256": _sha256(evidence_source),
             "runtime_sha256": _sha256(_resolve(spec["paths"]["runtime"])),
             "model_source": str(_resolve(spec["paths"]["model_source"])),
-            "sentence_encoder": str(_resolve(spec["paths"]["sentence_encoder"])),
             "sft_cache_root": str(_resolve(spec["paths"]["sft_cache_root"])),
         }
     )
@@ -1135,7 +1130,6 @@ def run(args: argparse.Namespace) -> int:
         raise SweepError("--progress-interval must be at least 1 second")
     for name, value in (
         ("model_source", args.model_source),
-        ("sentence_encoder", args.sentence_encoder),
         ("sft_cache_root", args.sft_cache_root),
         ("output_root", args.output_root),
     ):
@@ -1152,8 +1146,7 @@ def run(args: argparse.Namespace) -> int:
         f"gpus={spec['gpus']} progress_interval={args.progress_interval}s"
     )
     _status(
-        f"PATHS output={output_root} model={_resolve(spec['paths']['model_source'])} "
-        f"encoder={_resolve(spec['paths']['sentence_encoder'])}"
+        f"PATHS output={output_root} model={_resolve(spec['paths']['model_source'])}"
     )
     campaign = _load_yaml(campaign_path)
     evidence = _load_yaml(evidence_path)
@@ -1166,7 +1159,7 @@ def run(args: argparse.Namespace) -> int:
 
     if not python.is_file():
         raise SweepError(f"Python executable is missing: {python}")
-    for name in ("model_source", "sentence_encoder"):
+    for name in ("model_source",):
         path = _resolve(spec["paths"][name])
         if not path.exists():
             raise SweepError(f"{name} is missing: {path}")
@@ -1472,7 +1465,6 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     )
     parser.add_argument("--gpus", default=None, help="physical GPU ids, e.g. 0,1")
     parser.add_argument("--model-source", type=Path, default=None)
-    parser.add_argument("--sentence-encoder", type=Path, default=None)
     parser.add_argument("--sft-cache-root", type=Path, default=None)
     parser.add_argument("--output-root", type=Path, default=None)
     parser.add_argument("--max-trials", type=int, default=None)

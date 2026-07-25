@@ -66,7 +66,6 @@ def _spec():
                 "runtime",
                 "python",
                 "model_source",
-                "sentence_encoder",
                 "sft_cache_root",
                 "output_root",
             )

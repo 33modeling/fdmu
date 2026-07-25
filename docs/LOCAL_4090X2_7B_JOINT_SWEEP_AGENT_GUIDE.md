@@ -142,7 +142,6 @@ child에는 `CUDA_VISIBLE_DEVICES=0,1`을 전달한다. `gpu_sets` 수만큼만 
 setting: tofu_qwen25_7b
 paths:
   model_source: /rdata/models/Qwen2.5-7B-Instruct
-  sentence_encoder: /rdata/models/all-MiniLM-L6-v2
   sft_cache_root: /rdata/minsoo3.kim/results/paper/tofu_qwen25_7b/sft_cache
   output_root: /rdata/minsoo3.kim/results/paper/tofu_qwen25_7b/joint_sweep
 gpu_sets:

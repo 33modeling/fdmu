@@ -107,7 +107,6 @@ Section 2의 설치를 수행한 다음 preflight와 state machine으로 이어�
 repo:              /home/minsoo3.kim/dev/retain-susceptibility
 venv:              <repo>/.venv
 model:             /rdata/models/Qwen2.5-1.5B-Instruct
-sentence encoder:  /rdata/models/all-MiniLM-L6-v2
 HF_HOME:           /rdata/minsoo3.kim/hf_home
 results root:      /rdata/minsoo3.kim/results/paper/tofu_qwen25_1p5b
 GPU:               physical GPU 0,1, RTX 4090 24GB each
@@ -298,7 +297,6 @@ YAML을 읽고 아래 operational field만 바꾼 파생 config를 results root�
 
 ```text
 models.Qwen2.5-1.5B.source
-probe.sentence_encoder
 runtime.sft_cache_root
 ```
 

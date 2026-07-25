@@ -87,7 +87,6 @@ config에 host별 절대 경로를 커밋하지 않는다.
 ```bash
 export REPO=/path/to/retain-susceptibility
 export MODEL_PATH=/group-volume/models/Qwen2.5-14B-Instruct
-export ENCODER_PATH=/group-volume/models/all-MiniLM-L6-v2
 export RESULTS_ROOT=/group-volume/results/paper/tofu_qwen25_14b/joint_sweep
 export SFT_CACHE_ROOT=/group-volume/results/paper/tofu_qwen25_14b/sft_cache
 export HF_HOME=/group-volume/hf_home
@@ -120,7 +119,6 @@ export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 setting: tofu_qwen25_14b
 paths:
   model_source: /group-volume/models/Qwen2.5-14B-Instruct
-  sentence_encoder: /group-volume/models/all-MiniLM-L6-v2
   sft_cache_root: /group-volume/results/paper/tofu_qwen25_14b/sft_cache
   output_root: /group-volume/results/paper/tofu_qwen25_14b/joint_sweep
 gpus: [0, 1]  # 실제로 할당받은 free H100 id만 기록
@@ -143,7 +141,6 @@ controller CLI의 표준 호출:
   --spec configs/local/joint_sweep_14b_h100.local.yaml \
   --gpus 0,1 \
   --model-source "$MODEL_PATH" \
-  --sentence-encoder "$ENCODER_PATH" \
   --sft-cache-root "$SFT_CACHE_ROOT" \
   --output-root "$RESULTS_ROOT"
 ```
