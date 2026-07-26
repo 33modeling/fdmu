@@ -109,7 +109,7 @@ enqueue/monitor, aggregate, LaTeX 생성을 수행한다. Fidelity certificate�
 freeze 설정을 검증해 사용하며 실행 중 키보드 승인 입력을 요구하지 않는다.
 
 ```bash
-bash experiments/cluster/run_tofu_7b_h100.sh
+bash experiments/cluster/run_tofu_7b_h100.sh experiment
 bash experiments/cluster/run_tofu_14b_h100.sh
 ```
 

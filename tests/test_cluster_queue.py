@@ -467,6 +467,9 @@ def test_model_launchers_pin_queues_without_force_override():
     fourteen = (ROOT / "experiments/cluster/run_tofu_14b_h100.sh").read_text(
         encoding="utf-8"
     )
+    seven_render = (
+        ROOT / "experiments/cluster/render_tofu_7b_h100.sh"
+    ).read_text(encoding="utf-8")
     assert "FORCE_QUEUE" not in launch
     assert "FORCE_QUEUE" not in seven
     assert "FORCE_QUEUE" not in fourteen
@@ -483,6 +486,18 @@ def test_model_launchers_pin_queues_without_force_override():
     assert "experiments/cluster/monitor_queue.py" in fourteen
     assert "setup_group_volume.sh" in seven
     assert "setup_group_volume.sh" in fourteen
+    assert 'exec bash "$ROOT/experiments/cluster/render_tofu_7b_h100.sh"' in seven
+    assert "usage: $0 {experiment|render-only}" in seven
+    assert "experiment|--experiment)" in seven
+    assert "h100_campaign.sh paper-v4" in seven_render
+    for forbidden in (
+        "workqueue.py",
+        "enqueue_table12.sh",
+        "launch_node.sh",
+        "monitor_queue.py",
+        "worker.py",
+    ):
+        assert forbidden not in seven_render
     assert 'bash "$ROOT/experiments/cluster/setup_group_volume.sh"' in seven
     assert 'bash "$ROOT/experiments/cluster/setup_group_volume.sh"' in fourteen
     assert "stage aggregate-latex" in seven

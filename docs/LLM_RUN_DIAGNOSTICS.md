@@ -248,9 +248,13 @@ campaign 산출물이다. 최신 PDF-v4의 최종 Table 1/2 evidence와 동일�
 
 최종 논문형 표는 반드시 `aggregate/paper_v4/` 아래 파일을 사용한다. 이미
 완료된 7B run에는 GPU나 channel-matrix bootstrap 재실행이 필요 없으며
-`CONFIG=configs/channel_matrix/7b_tofu.yaml MODEL_ID=qwen25_7b bash
-experiments/channel_matrix/h100_campaign.sh paper-v4`만 실행한다. 후처리는
+`bash experiments/cluster/render_tofu_7b_h100.sh`만 실행한다. 동일하게
+`bash experiments/cluster/run_tofu_7b_h100.sh render-only`도 사용할 수 있다.
+두 경로는 queue/retry/enqueue/worker를 실행하지 않는다. 후처리는
 완료된 evidence cell을 유지하고 누락 block만 placeholder로 남긴다.
+전체 7B 실험을 의도한 경우에만
+`bash experiments/cluster/run_tofu_7b_h100.sh experiment`를 실행한다.
+옵션 없는 호출은 GPU 작업을 시작하지 않는다.
 
 Per-setting ledger는 `<MODEL_ROOT>/aggregate/paper_v4/`에 보존된다. 기본
 `MODEL_ROOT`는

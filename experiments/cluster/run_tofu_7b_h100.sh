@@ -4,6 +4,34 @@ set -Eeuo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$ROOT"
 
+MODE="${1:-}"
+case "$MODE" in
+  render-only|--render-only)
+    shift
+    if (( $# != 0 )); then
+      echo "render-only takes no additional arguments" >&2
+      exit 2
+    fi
+    exec bash "$ROOT/experiments/cluster/render_tofu_7b_h100.sh"
+    ;;
+  experiment|--experiment)
+    shift
+    if (( $# != 0 )); then
+      echo "experiment takes no additional arguments" >&2
+      exit 2
+    fi
+    ;;
+  "")
+    echo "usage: $0 {experiment|render-only}" >&2
+    exit 2
+    ;;
+  *)
+    echo "unknown mode: $MODE" >&2
+    echo "usage: $0 {experiment|render-only}" >&2
+    exit 2
+    ;;
+esac
+
 MODEL_ID=qwen25_7b
 AUDIT_MATCH="aud__${MODEL_ID}"
 STORAGE_ROOT=/group-volume/fdmu

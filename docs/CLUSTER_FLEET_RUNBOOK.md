@@ -99,8 +99,23 @@ python -m pytest -q
 
 ```bash
 FDMU_SHARED_LEGACY_RUNS=1 \
-  CONFIG=configs/channel_matrix/7b_tofu.yaml MODEL_ID=qwen25_7b \
-  bash experiments/channel_matrix/h100_campaign.sh paper-v4
+  bash experiments/cluster/render_tofu_7b_h100.sh
+```
+
+기존 7B 결과의 LaTeX만 다시 만들 때는 전체 원클릭 런처를 실행하지 않는다.
+아래 두 명령은 동일한 render-only 경로이며 queue/retry/enqueue/worker를 전혀
+실행하지 않는다.
+
+```bash
+bash experiments/cluster/render_tofu_7b_h100.sh
+bash experiments/cluster/run_tofu_7b_h100.sh render-only
+```
+
+7B 전체 실험을 재개하거나 다시 수행할 때만 `experiment`를 명시한다. 옵션을
+생략하면 비용이 큰 GPU 작업을 실수로 시작하지 않고 사용법과 함께 종료한다.
+
+```bash
+bash experiments/cluster/run_tofu_7b_h100.sh experiment
 ```
 
 ### 실험 전 필수 확인
