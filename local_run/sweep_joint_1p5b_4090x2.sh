@@ -5,14 +5,15 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 
 unset PYTHONHOME PYTHONPATH PIP_TARGET PIP_PREFIX
-PYTHON_BOOTSTRAP="${PYTHON_BOOTSTRAP:-python3.11}"
 VENV="$ROOT/.venv"
 PYTHON="$VENV/bin/python"
-export PIP_NO_CACHE_DIR=1
 GPU_IDS="${GPU_IDS:-0,1}"
 MODEL_PATH="${MODEL_PATH:-/rdata/models/Qwen2.5-1.5B-Instruct}"
-RESULTS_ROOT="${RESULTS_ROOT:-/rdata/minsoo3.kim/results/paper/tofu_qwen25_1p5b/joint_sweep}"
-SFT_CACHE_ROOT="${SFT_CACHE_ROOT:-/rdata/minsoo3.kim/results/paper/tofu_qwen25_1p5b/sft_cache}"
+RUN_ROOT="${RUN_ROOT:-/rdata/minsoo3.kim/results/paper/tofu_qwen25_1p5b}"
+RESULTS_ROOT="${RESULTS_ROOT:-$RUN_ROOT/joint_sweep}"
+SFT_CACHE_ROOT="${SFT_CACHE_ROOT:-$RUN_ROOT/sft_cache}"
+CALIBRATION_ROOT="${CALIBRATION_ROOT:-$RUN_ROOT/parent_calibration}"
+PARENT_FREEZE="${PARENT_FREEZE:-$CALIBRATION_ROOT/freeze/tofu_parent_freeze_1p5b.yaml}"
 SPEC="${SPEC:-$ROOT/configs/local/joint_sweep_1p5b_4090x2.yaml}"
 PROGRESS_INTERVAL_SECONDS="${PROGRESS_INTERVAL_SECONDS:-15}"
 
@@ -26,17 +27,10 @@ printf '[%s] launcher start pid=%s log=%s\n' \
   "$(date -u '+%FT%TZ')" "$$" "$LAUNCH_LOG"
 printf '[config] repo=%s spec=%s gpus=%s results=%s progress=%ss\n' \
   "$ROOT" "$SPEC" "$GPU_IDS" "$RESULTS_ROOT" "$PROGRESS_INTERVAL_SECONDS"
+printf '[config] model=%s sft_cache=%s parent_freeze=%s\n' \
+  "$MODEL_PATH" "$SFT_CACHE_ROOT" "$PARENT_FREEZE"
 
-if [[ ! -x "$PYTHON" ]]; then
-  command -v "$PYTHON_BOOTSTRAP" >/dev/null
-  "$PYTHON_BOOTSTRAP" -m venv "$VENV"
-  "$PYTHON" -m pip install --upgrade pip setuptools wheel
-  "$PYTHON" -m pip install "torch==2.7.1"
-  "$PYTHON" -m pip install -e ".[dev]" "datasets>=2.19" "PyYAML>=6.0"
-elif ! "$PYTHON" -c 'import torch, transformers, datasets, yaml' >/dev/null 2>&1; then
-  "$PYTHON" -m pip install -e ".[dev]" "datasets>=2.19" "PyYAML>=6.0"
-fi
-bash local_run/ensure_4090_yaml.sh
+bash local_run/bootstrap_4090_env.sh
 "$PYTHON" -c 'import datasets, site, sys, torch, transformers, yaml; print(
     f"[deps] python={sys.executable} prefix={sys.prefix} "
     f"site={site.getsitepackages()} yaml_file={yaml.__file__} "
@@ -121,6 +115,7 @@ exec "$PYTHON" -u experiments/paper/run_joint_dev_sweep.py \
   --python "$PYTHON" \
   --model-source "$MODEL_PATH" \
   --sft-cache-root "$SFT_CACHE_ROOT" \
+  --parent-freeze "$PARENT_FREEZE" \
   --output-root "$RESULTS_ROOT" \
   --progress-interval "$PROGRESS_INTERVAL_SECONDS" \
   "$@"

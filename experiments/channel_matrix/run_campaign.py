@@ -27,7 +27,9 @@ Examples (on the H100 host)::
 from __future__ import annotations
 
 import argparse
+from contextlib import contextmanager
 from datetime import datetime, timezone
+import fcntl
 import hashlib
 import itertools
 import json
@@ -327,6 +329,150 @@ def fidelity_commands(cfg: dict, models: list[dict], output_root: Path):
         yield csv_path, certificate, cmd
 
 
+def _fidelity_certificate_path(cfg: dict, model: dict) -> Path:
+    declared = cfg["audit"].get("fidelity_certificates", {})
+    if model["id"] not in declared:
+        raise ValueError(f"no fidelity certificate declared for model {model['id']}")
+    return _runtime_path(declared[model["id"]])
+
+
+def validate_fidelity_certificate(cfg: dict, model: dict) -> dict:
+    """Load one certificate and validate the complete current frozen cell."""
+    path = _fidelity_certificate_path(cfg, model)
+    try:
+        cert = json.loads(path.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        raise
+    except (OSError, json.JSONDecodeError) as exc:
+        raise ValueError(
+            f"invalid fidelity certificate for {model['id']}: {path}: {exc}"
+        ) from exc
+
+    common = cfg["common"]
+    phase = cfg["fidelity"]
+    expected = {
+        "schema": "fd-fidelity-certificate-v1",
+        "passed": True,
+        "model": str(model["path"]),
+        "dtype": str(common["dtype"]),
+        "block_last_n": int(common["block_last_n"]),
+        "R": int(common["probe_dirs"]),
+        "eta": float(common["probe_norm_eta"]),
+        "probe_seed": int(common["probe_seed"]),
+    }
+    for key, value in expected.items():
+        if cert.get(key) != value:
+            raise ValueError(
+                f"fidelity certificate mismatch for {model['id']}/{key}: "
+                f"expected {value!r}, got {cert.get(key)!r}"
+            )
+
+    development_pool = _expand_int_ranges(
+        str(common["candidate_author_pools"]["calibration"])
+    )
+    if set(cert.get("candidate_authors") or []) != development_pool:
+        raise ValueError(
+            f"fidelity certificate for {model['id']} did not use the frozen "
+            "development candidate pool"
+        )
+    minimum = int(phase.get("n_candidates", 128))
+    try:
+        actual_candidates = int(cert.get("n_candidates", 0))
+    except (TypeError, ValueError) as exc:
+        raise ValueError(
+            f"fidelity certificate for {model['id']} has invalid n_candidates: "
+            f"{cert.get('n_candidates')!r}"
+        ) from exc
+    if actual_candidates < minimum:
+        raise ValueError(
+            f"fidelity certificate for {model['id']} has too few candidates: "
+            f"{actual_candidates} < {minimum}"
+        )
+    return {
+        "path": str(path),
+        "sha256": _sha256(path),
+        "payload": cert,
+    }
+
+
+def validate_fidelity_artifact_pair(cfg: dict, model: dict) -> dict:
+    """Validate the non-empty CSV plus its current-contract certificate."""
+    csv_path = (
+        _runtime_path(cfg["output_root"])
+        / "fidelity"
+        / f"{model['id']}.csv"
+    )
+    if not csv_path.is_file() or csv_path.stat().st_size == 0:
+        raise ValueError(
+            f"missing or empty fidelity CSV for {model['id']}: {csv_path}"
+        )
+    validated = validate_fidelity_certificate(cfg, model)
+    return {**validated, "csv_path": str(csv_path)}
+
+
+@contextmanager
+def _exclusive_fidelity_build_lock(certificate: Path):
+    """Serialize a certificate build across hosts sharing the runs volume."""
+    lock_path = certificate.with_name(f"{certificate.name}.lock")
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(lock_path, "a+", encoding="utf-8") as lock:
+        print(f"WAIT exclusive fidelity build lock: {lock_path}", flush=True)
+        fcntl.flock(lock.fileno(), fcntl.LOCK_EX)
+        try:
+            lock.seek(0)
+            lock.truncate()
+            lock.write(
+                json.dumps(
+                    {
+                        "pid": os.getpid(),
+                        "acquired_at_utc": datetime.now(timezone.utc).isoformat(),
+                    },
+                    sort_keys=True,
+                )
+                + "\n"
+            )
+            lock.flush()
+            os.fsync(lock.fileno())
+            print(f"ACQUIRED exclusive fidelity build lock: {lock_path}", flush=True)
+            yield lock_path
+        finally:
+            fcntl.flock(lock.fileno(), fcntl.LOCK_UN)
+            print(f"RELEASED exclusive fidelity build lock: {lock_path}", flush=True)
+
+
+def _preserve_fidelity_artifacts(
+    csv_path: Path,
+    certificate: Path,
+    *,
+    reason: str,
+) -> Path:
+    runs_root = Path(os.environ.get("CLUSTER_RUNS_ROOT", ROOT / "runs"))
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S.%fZ")
+    destination = (
+        runs_root
+        / "forensics"
+        / "fidelity-artifacts"
+        / f"{stamp}__{csv_path.stem}"
+    )
+    destination.mkdir(parents=True, exist_ok=False)
+    moved = []
+    for artifact in (csv_path, certificate):
+        if artifact.exists():
+            target = destination / artifact.name
+            shutil.move(str(artifact), str(target))
+            moved.append({"source": str(artifact), "preserved_as": str(target)})
+            print(
+                f"QUARANTINED fidelity artifact: source={artifact} "
+                f"destination={target}",
+                flush=True,
+            )
+    (destination / "reason.json").write_text(
+        json.dumps({"reason": reason, "artifacts": moved}, indent=2, sort_keys=True),
+        encoding="utf-8",
+    )
+    return destination
+
+
 def _validate_settings(settings: dict, expected: set[str], label: str) -> None:
     if set(settings) != expected:
         raise ValueError(
@@ -370,16 +516,14 @@ def _load_freeze(config_path: Path, cfg: dict, models: list[dict]) -> tuple[Path
     return freeze_path, freeze
 
 
-def _load_fidelity_certificates(config_path: Path, cfg: dict, models: list[dict]) -> dict[str, dict]:
-    declared = cfg["audit"].get("fidelity_certificates", {})
-    development_pool = _expand_int_ranges(
-        str(cfg["common"]["candidate_author_pools"]["calibration"])
-    )
+def _load_fidelity_certificates(
+    config_path: Path,
+    cfg: dict,
+    models: list[dict],
+) -> dict[str, dict]:
     certificates = {}
     for model in models:
-        if model["id"] not in declared:
-            raise ValueError(f"no fidelity certificate declared for model {model['id']}")
-        path = _runtime_path(declared[model["id"]])
+        path = _fidelity_certificate_path(cfg, model)
         wait_seconds = int(
             os.environ.get(
                 "FDMU_FIDELITY_WAIT_SECONDS",
@@ -405,39 +549,7 @@ def _load_fidelity_certificates(config_path: Path, cfg: dict, models: list[dict]
                 "development-only frozen-cell fidelity command before audit "
                 f"(waited {wait_seconds}s)"
             )
-        cert = json.loads(path.read_text(encoding="utf-8"))
-        expected = {
-            "schema": "fd-fidelity-certificate-v1",
-            "passed": True,
-            "model": str(model["path"]),
-            "dtype": str(cfg["common"]["dtype"]),
-            "block_last_n": int(cfg["common"]["block_last_n"]),
-            "R": int(cfg["common"]["probe_dirs"]),
-            "eta": float(cfg["common"]["probe_norm_eta"]),
-            "probe_seed": int(cfg["common"]["probe_seed"]),
-        }
-        for key, value in expected.items():
-            if cert.get(key) != value:
-                raise ValueError(
-                    f"fidelity certificate mismatch for {model['id']}/{key}: "
-                    f"expected {value!r}, got {cert.get(key)!r}"
-                )
-        if set(cert.get("candidate_authors") or []) != development_pool:
-            raise ValueError(
-                f"fidelity certificate for {model['id']} did not use the frozen "
-                "development candidate pool"
-            )
-        minimum = int(cfg.get("fidelity", {}).get("n_candidates", 128))
-        if int(cert.get("n_candidates", 0)) < minimum:
-            raise ValueError(
-                f"fidelity certificate for {model['id']} has too few candidates: "
-                f"{cert.get('n_candidates')} < {minimum}"
-            )
-        certificates[model["id"]] = {
-            "path": str(path),
-            "sha256": _sha256(path),
-            "payload": cert,
-        }
+        certificates[model["id"]] = validate_fidelity_certificate(cfg, model)
     return certificates
 
 
@@ -608,36 +720,81 @@ def main() -> None:
 
     n = 0
     if a.phase == "fidelity":
-        for csv_path, certificate, cmd in fidelity_commands(cfg, models, output_root):
-            if a.resume and csv_path.exists() and certificate.exists():
-                payload = json.loads(certificate.read_text(encoding="utf-8"))
-                if payload.get("passed"):
-                    print(f"SKIP passed fidelity certificate: {certificate}")
-                    continue
-            if a.resume and csv_path.exists() != certificate.exists():
-                runs_root = Path(
-                    os.environ.get("CLUSTER_RUNS_ROOT", ROOT / "runs")
-                )
-                stamp = datetime.now(timezone.utc).strftime(
-                    "%Y%m%dT%H%M%S.%fZ"
-                )
-                forensics = runs_root / "forensics" / "fidelity-orphans" / stamp
-                for artifact in (csv_path, certificate):
-                    if artifact.exists():
-                        forensics.mkdir(parents=True, exist_ok=True)
-                        destination = forensics / artifact.name
-                        shutil.move(str(artifact), str(destination))
-                        print(
-                            f"QUARANTINED orphan fidelity artifact: "
-                            f"source={artifact} destination={destination}",
-                            flush=True,
+        for model, (csv_path, certificate, cmd) in zip(
+            models, fidelity_commands(cfg, models, output_root), strict=True
+        ):
+            if a.dry_run:
+                _run(cmd, True, env)
+                n += 1
+                if a.limit and n >= a.limit:
+                    break
+                continue
+
+            with _exclusive_fidelity_build_lock(certificate):
+                artifacts_exist = csv_path.exists() or certificate.exists()
+                if (
+                    csv_path.is_file()
+                    and csv_path.stat().st_size > 0
+                    and certificate.is_file()
+                ):
+                    try:
+                        validate_fidelity_artifact_pair(cfg, model)
+                    except (OSError, ValueError, json.JSONDecodeError) as exc:
+                        _preserve_fidelity_artifacts(
+                            csv_path,
+                            certificate,
+                            reason=f"invalid current-contract certificate: {exc}",
                         )
-            if not a.dry_run and (csv_path.exists() or certificate.exists()):
-                raise RuntimeError(
-                    f"pre-existing fidelity artifact for {csv_path.stem}; preserve it and "
-                    "choose a new campaign/output_root rather than overwriting"
-                )
-            _run(cmd, a.dry_run, env)
+                    else:
+                        if a.resume:
+                            print(
+                                f"SKIP fully validated fidelity certificate: {certificate}",
+                                flush=True,
+                            )
+                            continue
+                        raise RuntimeError(
+                            f"pre-existing valid fidelity artifact for {csv_path.stem}; "
+                            "use --resume or choose a new campaign/output_root"
+                        )
+                elif artifacts_exist:
+                    _preserve_fidelity_artifacts(
+                        csv_path,
+                        certificate,
+                        reason="orphan or empty fidelity artifact pair",
+                    )
+
+                try:
+                    _run(cmd, False, env)
+                except BaseException as exc:
+                    if csv_path.exists() or certificate.exists():
+                        _preserve_fidelity_artifacts(
+                            csv_path,
+                            certificate,
+                            reason=f"fidelity build failed: {type(exc).__name__}: {exc}",
+                        )
+                    raise
+                if not csv_path.is_file() or csv_path.stat().st_size == 0:
+                    if csv_path.exists() or certificate.exists():
+                        _preserve_fidelity_artifacts(
+                            csv_path,
+                            certificate,
+                            reason="fidelity build did not publish a non-empty CSV",
+                        )
+                    raise RuntimeError(
+                        f"fidelity build did not publish a non-empty CSV: {csv_path}"
+                    )
+                try:
+                    validate_fidelity_artifact_pair(cfg, model)
+                except (OSError, ValueError, json.JSONDecodeError) as exc:
+                    _preserve_fidelity_artifacts(
+                        csv_path,
+                        certificate,
+                        reason=f"new fidelity build failed contract validation: {exc}",
+                    )
+                    raise RuntimeError(
+                        f"new fidelity build failed contract validation for "
+                        f"{model['id']}: {exc}"
+                    ) from exc
             n += 1
             if a.limit and n >= a.limit:
                 break

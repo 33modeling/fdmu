@@ -35,7 +35,38 @@ from rsus.evidence.schemas import (  # noqa: E402
 )
 
 
-def _load_fidelity_inputs(contract) -> dict[str, dict]:
+def _fidelity_paths(
+    contract, overrides: list[str]
+) -> dict[str, tuple[Path, bool]]:
+    paths = {
+        setting_id: (_resolve_repo_path(relative), False)
+        for setting_id, relative in contract.fidelity_inputs.items()
+    }
+    seen: set[str] = set()
+    for raw in overrides:
+        if "=" not in raw:
+            raise EvidenceValidationError(
+                "--fidelity-input must use SETTING=PATH syntax"
+            )
+        setting_id, value = (part.strip() for part in raw.split("=", 1))
+        if setting_id not in contract.fidelity_inputs:
+            raise EvidenceValidationError(
+                f"--fidelity-input setting {setting_id!r} is not predeclared"
+            )
+        if setting_id in seen:
+            raise EvidenceValidationError(
+                f"--fidelity-input setting {setting_id!r} is duplicated"
+            )
+        if not value:
+            raise EvidenceValidationError("--fidelity-input path must be non-empty")
+        seen.add(setting_id)
+        paths[setting_id] = (_resolve_repo_path(value), True)
+    return paths
+
+
+def _load_fidelity_inputs(
+    contract, overrides: list[str] | None = None
+) -> dict[str, dict]:
     """Load per-setting fidelity summaries named by the frozen contract.
 
     Missing files keep RQ2 incomplete. Failed certificates are retained so
@@ -44,9 +75,14 @@ def _load_fidelity_inputs(contract) -> dict[str, dict]:
     import json
 
     result: dict[str, dict] = {}
-    for setting_id, relative in contract.fidelity_inputs.items():
-        path = _resolve_repo_path(relative)
+    for setting_id, (path, required) in _fidelity_paths(
+        contract, overrides or []
+    ).items():
         if not path.is_file():
+            if required:
+                raise EvidenceValidationError(
+                    f"explicit fidelity input is missing: {path}"
+                )
             continue
         try:
             payload = json.loads(path.read_text(encoding="utf-8"))
@@ -62,6 +98,11 @@ def _load_fidelity_inputs(contract) -> dict[str, dict]:
             raise EvidenceValidationError(
                 f"fidelity_inputs.{setting_id} carries setting "
                 f"{payload.get('setting')!r}; refusing a mismatched summary"
+            )
+        if payload.get("support") != "declared_setting_fidelity":
+            raise EvidenceValidationError(
+                f"fidelity_inputs.{setting_id} is not measured on the "
+                "declared setting-level fidelity support"
             )
         result[setting_id] = payload
     return result
@@ -100,6 +141,16 @@ def build_parser() -> argparse.ArgumentParser:
         help="return exit status 2 unless every registered table is data-ready",
     )
     parser.add_argument(
+        "--fidelity-input",
+        action="append",
+        default=[],
+        metavar="SETTING=PATH",
+        help=(
+            "override one predeclared setting-level fidelity summary; repeatable. "
+            "Explicit paths are required to exist and never alter the frozen roster"
+        ),
+    )
+    parser.add_argument(
         "--table1-out",
         default=None,
         help="optional generated Table 1 LaTeX path",
@@ -125,7 +176,7 @@ def main(argv: list[str] | None = None) -> int:
         ledger_path = _resolve_repo_path(args.ledger or contract.ledger_path).resolve()
         ledger = EvidenceLedger.read(ledger_path) if ledger_path.is_file() else EvidenceLedger.empty()
         validate_artifact_files(ledger, repository_root=ROOT)
-        fidelity = _load_fidelity_inputs(contract)
+        fidelity = _load_fidelity_inputs(contract, args.fidelity_input)
         report = evaluate_evidence(contract, ledger, fidelity=fidelity)
         report["sources"] = {
             "config": str(config_path),

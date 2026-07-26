@@ -5,14 +5,13 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 
 unset PYTHONHOME PYTHONPATH PIP_TARGET PIP_PREFIX
-PYTHON_BOOTSTRAP="${PYTHON_BOOTSTRAP:-python3.11}"
 VENV="$ROOT/.venv"
 PYTHON="$VENV/bin/python"
-export PIP_NO_CACHE_DIR=1
 GPU_IDS="${GPU_IDS:-0,1}"
 MODEL_PATH="${MODEL_PATH:-/rdata/models/Qwen2.5-1.5B-Instruct}"
-CALIBRATION_ROOT="${CALIBRATION_ROOT:-/rdata/minsoo3.kim/results/paper/tofu_qwen25_1p5b/parent_calibration}"
-SFT_CACHE_ROOT="${SFT_CACHE_ROOT:-/rdata/minsoo3.kim/results/paper/tofu_qwen25_1p5b/sft_cache}"
+RUN_ROOT="${RUN_ROOT:-/rdata/minsoo3.kim/results/paper/tofu_qwen25_1p5b}"
+CALIBRATION_ROOT="${CALIBRATION_ROOT:-$RUN_ROOT/parent_calibration}"
+SFT_CACHE_ROOT="${SFT_CACHE_ROOT:-$RUN_ROOT/sft_cache}"
 PROGRESS_INTERVAL_SECONDS="${PROGRESS_INTERVAL_SECONDS:-15}"
 
 mkdir -p "$CALIBRATION_ROOT/launcher_logs"
@@ -26,16 +25,7 @@ printf '[%s] calibration launcher start pid=%s log=%s\n' \
 printf '[config] repo=%s gpus=%s output=%s progress=%ss\n' \
   "$ROOT" "$GPU_IDS" "$CALIBRATION_ROOT" "$PROGRESS_INTERVAL_SECONDS"
 
-if [[ ! -x "$PYTHON" ]]; then
-  command -v "$PYTHON_BOOTSTRAP" >/dev/null
-  "$PYTHON_BOOTSTRAP" -m venv "$VENV"
-  "$PYTHON" -m pip install --upgrade pip setuptools wheel
-  "$PYTHON" -m pip install "torch==2.7.1"
-  "$PYTHON" -m pip install -e ".[dev]" "datasets>=2.19" "PyYAML>=6.0"
-elif ! "$PYTHON" -c 'import torch, transformers, datasets, yaml' >/dev/null 2>&1; then
-  "$PYTHON" -m pip install -e ".[dev]" "datasets>=2.19" "PyYAML>=6.0"
-fi
-bash local_run/ensure_4090_yaml.sh
+bash local_run/bootstrap_4090_env.sh
 "$PYTHON" -c 'import datasets, site, sys, torch, transformers, yaml; print(
     f"[deps] python={sys.executable} prefix={sys.prefix} "
     f"site={site.getsitepackages()} yaml_file={yaml.__file__} "

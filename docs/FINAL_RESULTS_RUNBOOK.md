@@ -75,10 +75,24 @@ total:             280
 
 ## 3. 전체 TOFU 결과 실행
 
-4090 x2 joint sweep이 이미 `BEST.json`을 만들었다면 calibration과 D_prot를
-다시 실행하지 않고 다음 단일 명령을 사용한다.
+4090 x2에서 환경 설정부터 calibration, joint sweep, target, evidence,
+`table1.tex`까지 원클릭으로 실행한다.
 
 ```bash
+GPU_IDS=0,1 bash local_run/run_tofu_1p5b_4090x2.sh
+```
+
+통합 로그는 `<RUN_ROOT>/launcher_logs/current.log`에 남는다. Parent proposal과
+joint `BEST.json`은 target 전에 화면에 출력되며, 각 파일 해시에 묶인 승인
+문구를 직접 입력해야 한다. Declared fidelity 결과는
+`<RUN_ROOT>/fidelity/fidelity_summary.json`에 생성된다.
+
+4090 x2 joint sweep이 이미 `BEST.json`을 만들었다면 calibration과 D_prot를
+다시 실행하지 않고 다음 두 단계를 순서대로 사용한다.
+
+```bash
+bash local_run/run_tofu_1p5b_fidelity.sh
+
 APPROVE_JOINT_BEST=1 GPU_IDS=0,1 \
   bash local_run/finalize_joint_sweep_to_latex.sh
 ```
@@ -86,9 +100,10 @@ APPROVE_JOINT_BEST=1 GPU_IDS=0,1 \
 이 명령은 winning D_prot를 재사용해 D_pred, prospective selection freeze,
 target evaluation, raw aggregation, evidence 판정, `final/table1.tex` 생성을
 순서대로 수행한다. `APPROVE_JOINT_BEST=1`은 target을 보기 전에
-`joint_sweep/BEST.json`을 검토했다는 명시적 승인이다.
+고정된 development-only BEST 선택을 사용한다는 명시적 사전 승인이다.
 
-최종 결과를 처음부터 만드는 단일 진입점은 다음 명령이다.
+이미 동결된 stage manifest에서 범용 Table 1 runner만 실행할 때는 다음 명령을
+사용한다.
 
 ```bash
 python experiments/paper/run_tofu_table1.py \

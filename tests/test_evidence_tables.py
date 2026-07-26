@@ -52,7 +52,8 @@ def test_passing_row_renders_bounds_and_yes_flags(tmp_path):
     assert "0.200 [0.050]" in core  # min endpoint gain
     assert "y/y" in core
     # Fidelity cells stay placeholders without a fidelity summary input.
-    assert "$f_\\rho/f_K$" in core
+    assert "$f_\\rho$ [LB$-\\tau_\\rho$]" in core
+    assert "$f_K$ [LB$-\\tau_K$]" in core
     robustness = render_robustness_table(contract, ledger, report)
     assert "1/1" in robustness
     assert "RQ3 parents & Chain" in robustness
@@ -178,7 +179,7 @@ def test_robustness_worst_bounds_cover_all_three_rqs(tmp_path):
     assert "Worst RQ1/RQ2/RQ3" in robustness
     # RQ1/RQ2 report least-favorable lower bounds (min over members, the
     # fidelity floor margins included), RQ3 the largest damage upper bound.
-    assert "+0.050 / +0.050 / -0.050" in robustness
+    assert "+0.050 / +0.090 / -0.050" in robustness
     # A setting with no attempted rows keeps the whole cell a placeholder.
     empty = render_robustness_table(
         contract, EvidenceLedger.empty(), _report(contract, EvidenceLedger.empty())

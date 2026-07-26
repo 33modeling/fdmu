@@ -649,6 +649,36 @@ def _require_parent_freeze(runtime: Mapping[str, Any], setting: str) -> None:
         )
 
 
+def _with_parent_freeze(
+    runtime: Mapping[str, Any], setting: str, parent_freeze: Path
+) -> dict[str, Any]:
+    path = parent_freeze.resolve()
+    if not path.is_file():
+        raise SweepError(f"parent_freeze is missing: {path}")
+    resolved = json.loads(json.dumps(runtime))
+    setting_runtime = resolved.get("settings", {}).get(setting)
+    if not isinstance(setting_runtime, dict):
+        raise SweepError(f"runtime has no setting {setting!r}")
+    setting_runtime["parent_freeze"] = str(path)
+    return resolved
+
+
+def _best_parent_freeze(
+    best: Mapping[str, Any], setting: str
+) -> Path:
+    value = best.get("recommended_runtime")
+    if not isinstance(value, str) or not value:
+        raise SweepError("existing BEST.json has no recommended_runtime")
+    best_runtime = _load_yaml(_resolve(value))
+    setting_runtime = best_runtime.get("settings", {}).get(setting)
+    if not isinstance(setting_runtime, Mapping):
+        raise SweepError(f"existing BEST runtime has no setting {setting!r}")
+    parent_freeze = setting_runtime.get("parent_freeze")
+    if not isinstance(parent_freeze, str) or not parent_freeze:
+        raise SweepError("existing BEST runtime has no parent_freeze")
+    return _resolve(parent_freeze)
+
+
 def _valid_artifact(entry: object, expected: Path | None = None) -> bool:
     if not isinstance(entry, Mapping):
         return False
@@ -680,7 +710,8 @@ def _unit_complete(
             "runtime_config_sha256": runtime_hash,
         }
         if (
-            raw.get("contract") != "tofu-pdf-v4-unit-output"
+            raw.get("schema_version") != 1
+            or raw.get("contract") != "tofu-pdf-v4-unit-output"
             or raw.get("stage") != stage
             or raw.get("setting") != unit.get("setting", raw.get("setting"))
             or any(raw.get(name) != digest for name, digest in expected_hashes.items())
@@ -702,13 +733,35 @@ def _unit_complete(
             _valid_artifact(raw_outputs[name], Path(str(path)))
             for name, path in outputs.items()
         )
-        if stage == "calibration":
-            diagnostics_valid = _valid_artifact(raw.get("fidelity_diagnostics"))
-        elif stage == "protection":
-            diagnostics_valid = _valid_artifact(raw.get("protection_diagnostics"))
-        else:
-            diagnostics_valid = True
-        return outputs_valid and diagnostics_valid
+        if not outputs_valid:
+            return False
+        if not _valid_artifact(raw.get("profile_artifact")):
+            return False
+        if not _valid_artifact(raw.get("score_independent_manifest")):
+            return False
+        if stage in {"calibration", "target_evaluation"} and not _valid_artifact(
+            raw.get("fidelity_diagnostics")
+        ):
+            return False
+        if stage in {"protection", "target_evaluation"} and not _valid_artifact(
+            raw.get("protection_diagnostics")
+        ):
+            return False
+        if stage == "target_evaluation" and not _valid_artifact(
+            raw.get("selection_freeze")
+        ):
+            return False
+        if stage != "calibration":
+            parent_freeze = Path(str(raw.get("parent_freeze", ""))).resolve()
+            parent_freeze_digest = raw.get("parent_freeze_sha256")
+            if (
+                not isinstance(parent_freeze_digest, str)
+                or len(parent_freeze_digest) != 64
+                or not parent_freeze.is_file()
+                or _sha256(parent_freeze) != parent_freeze_digest
+            ):
+                return False
+        return True
     except (KeyError, OSError, SweepError, TypeError, ValueError):
         return False
 
@@ -946,8 +999,15 @@ def _prepare_trial(
             "campaign_sha256": _sha256(campaign_source),
             "evidence_sha256": _sha256(evidence_source),
             "runtime_sha256": _sha256(_resolve(spec["paths"]["runtime"])),
+            "resolved_runtime_sha256": _json_sha(runtime),
             "model_source": str(_resolve(spec["paths"]["model_source"])),
             "sft_cache_root": str(_resolve(spec["paths"]["sft_cache_root"])),
+            "parent_freeze": str(
+                _resolve(runtime["settings"][setting]["parent_freeze"])
+            ),
+            "parent_freeze_sha256": _sha256(
+                _resolve(runtime["settings"][setting]["parent_freeze"])
+            ),
         }
     )
     trial_dir = output_root / "trials" / f"{trial['id']}--{fingerprint[:12]}"
@@ -1141,6 +1201,7 @@ def run(args: argparse.Namespace) -> int:
         ("python", args.python),
         ("model_source", args.model_source),
         ("sft_cache_root", args.sft_cache_root),
+        ("parent_freeze", args.parent_freeze),
         ("output_root", args.output_root),
     ):
         if value is not None:
@@ -1161,6 +1222,12 @@ def run(args: argparse.Namespace) -> int:
     campaign = _load_yaml(campaign_path)
     evidence = _load_yaml(evidence_path)
     runtime = _load_yaml(runtime_source)
+    if "parent_freeze" in spec["paths"]:
+        runtime = _with_parent_freeze(
+            runtime,
+            str(spec["setting"]),
+            _resolve(spec["paths"]["parent_freeze"]),
+        )
     _require_parent_freeze(runtime, str(spec["setting"]))
     model, parents, requests, seeds, draws = _setting_contract(
         campaign, evidence, runtime, str(spec["setting"])
@@ -1243,6 +1310,19 @@ def run(args: argparse.Namespace) -> int:
     best_path = output_root / "BEST.json"
     if best_path.is_file():
         best = _load_json(best_path)
+        expected_parent_freeze = _resolve(
+            runtime["settings"][str(spec["setting"])]["parent_freeze"]
+        )
+        observed_parent_freeze = _best_parent_freeze(
+            best, str(spec["setting"])
+        )
+        if observed_parent_freeze != expected_parent_freeze:
+            raise SweepError(
+                "existing BEST uses a different parent freeze; refusing stale "
+                f"winner reuse (expected {expected_parent_freeze}, "
+                f"found {observed_parent_freeze}). Use a new RESULTS_ROOT to "
+                "run the sweep under the approved freeze"
+            )
         print(f"joint sweep already satisfied by {best['trial_dir']}")
         return 0
 
@@ -1477,6 +1557,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--python", type=Path, default=None)
     parser.add_argument("--model-source", type=Path, default=None)
     parser.add_argument("--sft-cache-root", type=Path, default=None)
+    parser.add_argument("--parent-freeze", type=Path, default=None)
     parser.add_argument("--output-root", type=Path, default=None)
     parser.add_argument("--max-trials", type=int, default=None)
     parser.add_argument("--progress-interval", type=float, default=15.0)

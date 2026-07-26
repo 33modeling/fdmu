@@ -6,6 +6,7 @@ import json
 import os
 import subprocess
 import sys
+import threading
 import time
 from pathlib import Path
 
@@ -18,7 +19,7 @@ sys.path.insert(0, str(ROOT / "experiments" / "cluster"))
 import make_units  # noqa: E402
 import quarantine_failed_audit  # noqa: E402
 import worker  # noqa: E402
-from workqueue import Unit, WorkQueue  # noqa: E402
+from workqueue import ClaimLostError, Unit, WorkQueue  # noqa: E402
 
 
 def _unit(unit_id: str, cmd: list[str] | None = None, **kw) -> Unit:
@@ -97,6 +98,112 @@ def test_retry_failed_can_target_specific_units(tmp_path):
     assert [row["unit_id"] for row in report["failed"]] == ["a"]
 
 
+def test_retry_failed_can_explicitly_repin_current_commit(tmp_path):
+    q = WorkQueue(tmp_path / "q")
+    old_commit = "1" * 40
+    current_commit = "2" * 40
+    q.enqueue([_unit("a", max_attempts=1, code_commit=old_commit)])
+    q.fail(q.claim(), {"exit_code": 2})
+
+    assert q.retry_failed({"a"}, code_commit=current_commit) == ["a"]
+    payload = json.loads(
+        (q.root / "pending" / "a.json").read_text(encoding="utf-8")
+    )
+    assert payload["unit"]["code_commit"] == current_commit
+    assert payload["retry_pin"] == {
+        "source_state": "failed",
+        "previous_code_commit": old_commit,
+        "code_commit": current_commit,
+    }
+    with pytest.raises(ValueError, match="40-character Git SHA"):
+        q.retry_failed(code_commit="short")
+
+
+def test_retry_repin_updates_targeted_pending_unit(tmp_path):
+    q = WorkQueue(tmp_path / "q")
+    q.enqueue([_unit("a", max_attempts=2, code_commit="1" * 40)])
+    assert q.fail(q.claim(), {"exit_code": 2}) == "pending"
+
+    assert q.retry_failed({"a"}, code_commit="2" * 40) == ["a"]
+    payload = json.loads(
+        (q.root / "pending" / "a.json").read_text(encoding="utf-8")
+    )
+    assert payload["attempts"] == 0
+    assert payload["unit"]["code_commit"] == "2" * 40
+    assert payload["retry_pin"]["source_state"] == "pending"
+
+
+def test_enqueue_serializes_same_unit_producers(tmp_path):
+    first_write_entered = threading.Event()
+    release_first_write = threading.Event()
+    write_guard = threading.Lock()
+    first_pending_write = {"seen": False}
+
+    class SlowQueue(WorkQueue):
+        def _write_json(self, path, payload):
+            if path.parent.name == "pending":
+                with write_guard:
+                    should_wait = not first_pending_write["seen"]
+                    first_pending_write["seen"] = True
+                if should_wait:
+                    first_write_entered.set()
+                    assert release_first_write.wait(timeout=2)
+            return super()._write_json(path, payload)
+
+    q = SlowQueue(tmp_path / "q")
+    results: list[list[str]] = []
+
+    def enqueue() -> None:
+        results.append(q.enqueue([_unit("same")], skip_existing=True))
+
+    first = threading.Thread(target=enqueue)
+    second = threading.Thread(target=enqueue)
+    first.start()
+    assert first_write_entered.wait(timeout=2)
+    second.start()
+    release_first_write.set()
+    first.join(timeout=2)
+    second.join(timeout=2)
+
+    assert not first.is_alive() and not second.is_alive()
+    assert sorted(results, key=len) == [[], ["same"]]
+    assert q.status()["counts"]["pending"] == 1
+
+
+def test_claim_filter_leaves_unrelated_units_pending(tmp_path):
+    q = WorkQueue(tmp_path / "q")
+    q.enqueue([_unit("other-model"), _unit("aud__qwen25_14b__a181")])
+
+    claim = q.claim(unit_id_contains="qwen25_14b")
+    assert claim is not None
+    assert claim.unit.unit_id == "aud__qwen25_14b__a181"
+    assert q.claim(unit_id_contains="qwen25_14b") is None
+    assert (q.root / "pending" / "other-model.json").is_file()
+    q.complete(claim, {"exit_code": 0})
+
+
+def test_claim_prefers_audit_before_other_matching_model_units(tmp_path):
+    q = WorkQueue(tmp_path / "q")
+    q.enqueue([
+        _unit("alpha-dev__qwen25_14b__a198__s2025"),
+        _unit("aud__qwen25_14b__a181"),
+    ])
+
+    first = q.claim(
+        unit_id_contains="qwen25_14b",
+        preferred_prefix="aud__qwen25_14b",
+    )
+    assert first is not None
+    assert first.unit.unit_id == "aud__qwen25_14b__a181"
+    q.complete(first, {"exit_code": 0})
+    second = q.claim(
+        unit_id_contains="qwen25_14b",
+        preferred_prefix="aud__qwen25_14b",
+    )
+    assert second is not None
+    assert second.unit.unit_id.startswith("alpha-dev__")
+
+
 def test_requeue_stale_by_heartbeat_age(tmp_path):
     q = WorkQueue(tmp_path / "q")
     q.enqueue([_unit("a"), _unit("b")])
@@ -112,6 +219,27 @@ def test_requeue_stale_by_heartbeat_age(tmp_path):
     assert counts["pending"] == 1 and counts["claimed"] == 1
     payload = json.loads((q.root / "pending" / "a.json").read_text(encoding="utf-8"))
     assert payload["attempts"] == 1
+
+
+def test_stale_worker_cannot_finish_or_heartbeat_reclaimed_unit(tmp_path):
+    q = WorkQueue(tmp_path / "q")
+    q.enqueue([_unit("a")])
+    old = q.claim(owner={"host": "old", "gpu": 0})
+    assert old is not None
+
+    future = time.time() + 3600
+    assert q.requeue_stale(max_age_s=1800, now=future) == ["a"]
+    current = q.claim(owner={"host": "new", "gpu": 1})
+    assert current is not None and current.token != old.token
+
+    with pytest.raises(ClaimLostError):
+        q.heartbeat(old)
+    with pytest.raises(ClaimLostError):
+        q.complete(old, {"exit_code": 0})
+
+    assert (q.root / "claimed" / "a.json").is_file()
+    q.complete(current, {"exit_code": 0})
+    assert (q.root / "done" / "a.json").is_file()
 
 
 def test_claim_survives_concurrent_double_rename_semantics(tmp_path):
@@ -233,8 +361,35 @@ def test_model_launchers_pin_queues_without_force_override():
     assert "WORKER_GPU=0" in fourteen
     assert 'launch_node.sh --dedicated-queue "$QUEUE" 1' in fourteen
     assert "experiments/cluster/monitor_queue.py" in fourteen
-    assert '--unit aud__' not in seven
-    assert '--unit aud__' not in fourteen
+    assert "setup_group_volume.sh" in seven
+    assert "setup_group_volume.sh" in fourteen
+    assert "stage aggregate-latex" in seven
+    assert "stage aggregate-latex" in fourteen
+    assert "h100_campaign.sh aggregate" in seven
+    assert "h100_campaign.sh aggregate" in fourteen
+    assert "one dedicated worker on GPU 0" in fourteen
+    assert seven.count("--unit aud__qwen25_7b__") == 3
+    assert 'RETRY_ARGS+=(--unit "$unit_id")' in fourteen
+    assert 'WAIT=0 UNIT_MATCH="$MODEL_ID" UNIT_PREFER="$AUDIT_MATCH"' in seven
+    assert 'WAIT=0 UNIT_MATCH="$MODEL_ID" UNIT_PREFER="$AUDIT_MATCH"' in fourteen
+    assert 'AUDIT_MATCH="aud__${MODEL_ID}"' in seven
+    assert 'AUDIT_MATCH="aud__${MODEL_ID}"' in fourteen
+    assert '--queue "$QUEUE" --match "$AUDIT_MATCH"' in seven
+    assert '--queue "$QUEUE" --match "$AUDIT_MATCH"' in fourteen
+    assert "alpha jobs continue independently" in seven
+    assert "alpha jobs continue independently" in fourteen
+    assert '--code-commit "$CURRENT_COMMIT"' in seven
+    assert '--code-commit "$CURRENT_COMMIT"' in fourteen
+    assert seven.index("stage retry-commit-validation") < seven.index(
+        "stage failed-audit-recovery"
+    )
+    assert fourteen.index("stage retry-commit-validation") < fourteen.index(
+        "stage failed-audit-recovery"
+    )
+    assert "refusing queue re-pin from a dirty worktree" in seven
+    assert "refusing queue re-pin from a dirty worktree" in fourteen
+    assert '--match-unit "${UNIT_MATCH}"' in launch
+    assert '--prefer-unit-prefix "${UNIT_PREFER}"' in launch
     enqueue = (ROOT / "experiments/cluster/enqueue_table12.sh").read_text(
         encoding="utf-8"
     )
@@ -243,6 +398,15 @@ def test_model_launchers_pin_queues_without_force_override():
     assert 'require_passed_fidelity "${cfg}" qwen25_14b' in enqueue
     assert "each 8-GPU node starts 8 workers" not in enqueue
     assert "exactly one dedicated worker on GPU 0" in enqueue
+    setup = (ROOT / "experiments/cluster/setup_group_volume.sh").read_text(
+        encoding="utf-8"
+    )
+    assert "sentence-transformers" not in setup
+    assert 'flock -x 9' in setup
+    assert '"torch==2.7.1"' in setup
+    assert '"transformers==4.53.2"' in setup
+    assert '"datasets==2.19.2"' in setup
+    assert '"PyYAML==6.0.2"' in setup
 
 
 def test_quarantine_moves_only_retryable_partial_audit(tmp_path, monkeypatch):
@@ -338,6 +502,92 @@ def test_worker_survives_unlaunchable_command(tmp_path):
     assert "FileNotFoundError" in failed["result"]["error"]
 
 
+def test_worker_rejects_unit_pinned_to_another_commit(tmp_path):
+    q = WorkQueue(tmp_path / "q")
+    marker = tmp_path / "must-not-run"
+    q.enqueue([
+        Unit(
+            unit_id="wrong-commit",
+            cmd=["sh", "-c", f"touch {marker}"],
+            gpus=0,
+            max_attempts=1,
+            code_commit="0" * 40,
+        )
+    ])
+    log_dir = tmp_path / "logs"
+    log_dir.mkdir()
+    claim = q.claim(owner={"host": "test", "gpu": -1})
+    assert claim is not None
+    assert not worker.run_claim(q, claim, gpu=-1, log_dir=log_dir)
+    assert not marker.exists()
+    failed = json.loads(
+        (q.root / "failed" / "wrong-commit.json").read_text(encoding="utf-8")
+    )
+    assert "CodeCommitMismatch" in failed["result"]["error"]
+
+
+def test_stale_claim_terminates_entire_child_process_group(
+    tmp_path,
+    monkeypatch,
+):
+    q = WorkQueue(tmp_path / "q")
+    started = tmp_path / "started"
+    descendant_survived = tmp_path / "descendant-survived"
+    child_code = (
+        "import pathlib,time;"
+        f"time.sleep(1);pathlib.Path({str(descendant_survived)!r}).write_text('bad')"
+    )
+    parent_code = (
+        "import pathlib,subprocess,sys,time;"
+        f"subprocess.Popen([sys.executable,'-c',{child_code!r}]);"
+        f"pathlib.Path({str(started)!r}).write_text('started');"
+        "time.sleep(30)"
+    )
+    q.enqueue([
+        Unit(
+            unit_id="stale-process-group",
+            cmd=[sys.executable, "-c", parent_code],
+            gpus=0,
+            max_attempts=1,
+        )
+    ])
+    claim = q.claim(owner={"host": "old", "gpu": -1})
+    assert claim is not None
+    log_dir = tmp_path / "logs"
+    log_dir.mkdir()
+    monkeypatch.setattr(worker, "HEARTBEAT_INTERVAL_S", 0.02)
+    monkeypatch.setattr(worker, "CHILD_POLL_INTERVAL_S", 0.01)
+    monkeypatch.setattr(worker, "CHILD_TERMINATE_GRACE_S", 0.1)
+    errors: list[BaseException] = []
+
+    def run() -> None:
+        try:
+            worker.run_claim(q, claim, gpu=-1, log_dir=log_dir)
+        except BaseException as exc:
+            errors.append(exc)
+
+    thread = threading.Thread(target=run)
+    thread.start()
+    deadline = time.time() + 3
+    while not started.exists() and time.time() < deadline:
+        time.sleep(0.01)
+    assert started.is_file()
+
+    assert q.requeue_stale(
+        max_age_s=1,
+        now=time.time() + 3600,
+    ) == ["stale-process-group"]
+    replacement = q.claim(owner={"host": "new", "gpu": -1})
+    assert replacement is not None
+    thread.join(timeout=3)
+
+    assert not thread.is_alive()
+    assert len(errors) == 1 and isinstance(errors[0], ClaimLostError)
+    time.sleep(1.1)
+    assert not descendant_survived.exists()
+    q.complete(replacement, {"exit_code": 0})
+
+
 def test_make_units_calibration_shards_by_author_and_objective():
     cfg = yaml.safe_load(
         (ROOT / "configs/channel_matrix/7b_tofu.yaml").read_text(encoding="utf-8")
@@ -352,6 +602,7 @@ def test_make_units_calibration_shards_by_author_and_objective():
     for u in units:
         assert "--only-authors" in u.cmd and "--only-objectives" in u.cmd
         assert "--resume" in u.cmd and u.gpus == 1
+        assert len(u.code_commit) == 40
         assert u.cmd[u.cmd.index("--only-objectives") + 1] in objectives
 
     audit_units = make_units.build_units(

@@ -61,6 +61,9 @@ def main() -> None:
     p.add_argument("--out", required=True)
     p.add_argument("--stress-out", default="",
                    help="optional appendix table for predeclared stress objectives")
+    p.add_argument("--scale-label", default="7B/8B")
+    p.add_argument("--table-label", default="tab:channel-matrix-7b")
+    p.add_argument("--stress-label", default="tab:channel-stress-7b")
     a = p.parse_args()
 
     with open(a.report, newline="", encoding="utf-8") as f:
@@ -83,7 +86,7 @@ def main() -> None:
     columns = "@{}llc" + "c" * len(objectives) + "@{}"
     lines = [
         r"\begin{table*}[t]",
-        (r"\caption{\textbf{Channel-conditioned prediction of realized damage at 7B/8B scale.} "
+        (rf"\caption{{\textbf{{Channel-conditioned prediction of realized damage at {a.scale_label} scale.}} "
          f"Pooled within-run Spearman $\\rho$ across {summary['n_runs']} sealed runs, "
          f"{len(summary['models'])} model(s), {len(summary['requests'])} request(s), and "
          f"{len(summary['seeds'])} seed(s), with $n={candidate_text}$ audit candidates per run. "
@@ -95,7 +98,7 @@ def main() -> None:
          r"the original safety methods are disclosed in the appendix. "
          r"$^{\dagger}$At least one run missed the frozen forget criterion; "
          r"$^{\ddagger}$at least one run crossed the frozen collapse threshold.}" ),
-        r"\label{tab:channel-matrix-7b}",
+        rf"\label{{{a.table_label}}}",
         r"\centering",
         r"\scriptsize",
         r"\setlength{\tabcolsep}{2.7pt}",
@@ -146,7 +149,7 @@ def main() -> None:
              r"excluded from the core interaction. Brackets are hierarchical-bootstrap 95\% "
              r"CIs. $^{\dagger}$At least one run missed the frozen forget criterion; "
              r"$^{\ddagger}$at least one run crossed the frozen collapse threshold.}"),
-            r"\label{tab:channel-stress-7b}",
+            rf"\label{{{a.stress_label}}}",
             r"\centering",
             r"\scriptsize",
             r"\setlength{\tabcolsep}{3.2pt}",

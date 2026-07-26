@@ -15,13 +15,22 @@ from experiments.paper.approve_parent_freeze import (
 from experiments.paper.run_joint_dev_sweep import (
     SweepError,
     _absolute_executable,
+    _best_parent_freeze,
     _unit_complete,
+    _with_parent_freeze,
     build_exhaustion_report,
     candidate_score,
     evaluate_cell,
     evaluate_trial,
     validate_spec,
 )
+
+
+def _artifact(path: Path) -> dict[str, str]:
+    return {
+        "path": str(path),
+        "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+    }
 
 
 DRAWS = ["rand-000", "rand-001"]
@@ -288,17 +297,58 @@ def test_paper_runtime_registers_the_14b_scale_setting():
     assert setting["sft"]["steps"] == 800
 
 
-def test_calibration_resume_requires_hashed_outputs_and_fidelity(tmp_path):
-    def artifact(path):
-        return {
-            "path": str(path),
-            "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+def test_parent_freeze_override_is_absolute_and_does_not_mutate_source(tmp_path):
+    freeze = tmp_path / "parent_freeze.yaml"
+    freeze.write_text("status: frozen\n", encoding="utf-8")
+    runtime = {
+        "settings": {
+            "tofu_qwen25_1p5b": {
+                "parent_freeze": "configs/paper/old.yaml",
+            }
         }
+    }
+    resolved = _with_parent_freeze(
+        runtime, "tofu_qwen25_1p5b", freeze
+    )
+    assert (
+        resolved["settings"]["tofu_qwen25_1p5b"]["parent_freeze"]
+        == str(freeze.resolve())
+    )
+    assert (
+        runtime["settings"]["tofu_qwen25_1p5b"]["parent_freeze"]
+        == "configs/paper/old.yaml"
+    )
 
+
+def test_existing_best_exposes_its_resolved_parent_freeze(tmp_path):
+    freeze = tmp_path / "parent_freeze.yaml"
+    freeze.write_text("status: frozen\n", encoding="utf-8")
+    runtime = tmp_path / "runtime.yaml"
+    runtime.write_text(
+        yaml.safe_dump(
+            {
+                "settings": {
+                    "tofu_qwen25_1p5b": {
+                        "parent_freeze": str(freeze),
+                    }
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    assert _best_parent_freeze(
+        {"recommended_runtime": str(runtime)},
+        "tofu_qwen25_1p5b",
+    ) == freeze.resolve()
+
+
+def test_calibration_resume_requires_hashed_outputs_and_fidelity(tmp_path):
     fidelity = tmp_path / "fidelity_raw.jsonl"
     selection = tmp_path / "parent_selection_inputs.jsonl"
     diagnostics = tmp_path / "fidelity_diagnostics.json"
-    for path in (fidelity, selection, diagnostics):
+    profile = tmp_path / "profiles.json"
+    score_manifest = tmp_path / "score_independent_manifest.json"
+    for path in (fidelity, selection, diagnostics, profile, score_manifest):
         path.write_text("{}\n", encoding="utf-8")
     hashes = {
         "campaign_config_sha256": "a" * 64,
@@ -309,6 +359,7 @@ def test_calibration_resume_requires_hashed_outputs_and_fidelity(tmp_path):
     run_manifest.write_text(
         json.dumps(
             {
+                "schema_version": 1,
                 "contract": "tofu-pdf-v4-unit-output",
                 "stage": "calibration",
                 "setting": "tofu_qwen25_1p5b",
@@ -317,10 +368,12 @@ def test_calibration_resume_requires_hashed_outputs_and_fidelity(tmp_path):
                 "seed": 2025,
                 **hashes,
                 "outputs": {
-                    "fidelity_raw": artifact(fidelity),
-                    "parent_selection_inputs": artifact(selection),
+                    "fidelity_raw": _artifact(fidelity),
+                    "parent_selection_inputs": _artifact(selection),
                 },
-                "fidelity_diagnostics": artifact(diagnostics),
+                "profile_artifact": _artifact(profile),
+                "score_independent_manifest": _artifact(score_manifest),
+                "fidelity_diagnostics": _artifact(diagnostics),
             }
         ),
         encoding="utf-8",
@@ -350,6 +403,109 @@ def test_calibration_resume_requires_hashed_outputs_and_fidelity(tmp_path):
         evidence_hash=hashes["evidence_config_sha256"],
         runtime_hash=hashes["runtime_config_sha256"],
         stage="calibration",
+    )
+
+
+@pytest.mark.parametrize(
+    ("stage", "corrupt_field"),
+    (
+        ("prediction", "profile_artifact"),
+        ("prediction", "score_independent_manifest"),
+        ("protection", "protection_diagnostics"),
+        ("protection", "parent_freeze"),
+        ("target_evaluation", "fidelity_diagnostics"),
+        ("target_evaluation", "protection_diagnostics"),
+        ("target_evaluation", "selection_freeze"),
+    ),
+)
+def test_resume_rejects_every_stage_contract_artifact(
+    tmp_path, stage, corrupt_field
+):
+    output_names = {
+        "prediction": ("prediction_raw", "selection_inputs"),
+        "protection": ("protection_raw", "selection_inputs"),
+        "target_evaluation": (
+            "prediction_raw",
+            "fidelity_raw",
+            "protection_raw",
+        ),
+    }[stage]
+    files = {}
+    for name in (
+        *output_names,
+        "profile_artifact",
+        "score_independent_manifest",
+        "fidelity_diagnostics",
+        "protection_diagnostics",
+        "selection_freeze",
+        "parent_freeze",
+    ):
+        path = tmp_path / f"{name}.json"
+        path.write_text("{}\n", encoding="utf-8")
+        files[name] = path
+    hashes = {
+        "campaign_config_sha256": "a" * 64,
+        "evidence_config_sha256": "b" * 64,
+        "runtime_config_sha256": "c" * 64,
+    }
+    payload = {
+        "schema_version": 1,
+        "contract": "tofu-pdf-v4-unit-output",
+        "stage": stage,
+        "setting": "tofu_qwen25_1p5b",
+        "parent": "graddiff",
+        "request": "tofu-a188",
+        "seed": 2025,
+        **hashes,
+        "outputs": {name: _artifact(files[name]) for name in output_names},
+        "profile_artifact": _artifact(files["profile_artifact"]),
+        "score_independent_manifest": _artifact(
+            files["score_independent_manifest"]
+        ),
+        "fidelity_diagnostics": (
+            _artifact(files["fidelity_diagnostics"])
+            if stage == "target_evaluation"
+            else None
+        ),
+        "protection_diagnostics": (
+            _artifact(files["protection_diagnostics"])
+            if stage in {"protection", "target_evaluation"}
+            else None
+        ),
+        "selection_freeze": (
+            _artifact(files["selection_freeze"])
+            if stage == "target_evaluation"
+            else None
+        ),
+        "parent_freeze": str(files["parent_freeze"]),
+        "parent_freeze_sha256": hashlib.sha256(
+            files["parent_freeze"].read_bytes()
+        ).hexdigest(),
+    }
+    run_manifest = tmp_path / "run_manifest.json"
+    run_manifest.write_text(json.dumps(payload), encoding="utf-8")
+    unit = {
+        "setting": "tofu_qwen25_1p5b",
+        "parent": "graddiff",
+        "request": "tofu-a188",
+        "seed": "2025",
+        "run_manifest": str(run_manifest),
+        "outputs": {name: str(files[name]) for name in output_names},
+    }
+    assert _unit_complete(
+        unit,
+        campaign_hash=hashes["campaign_config_sha256"],
+        evidence_hash=hashes["evidence_config_sha256"],
+        runtime_hash=hashes["runtime_config_sha256"],
+        stage=stage,
+    )
+    files[corrupt_field].write_text('{"corrupt": true}\n', encoding="utf-8")
+    assert not _unit_complete(
+        unit,
+        campaign_hash=hashes["campaign_config_sha256"],
+        evidence_hash=hashes["evidence_config_sha256"],
+        runtime_hash=hashes["runtime_config_sha256"],
+        stage=stage,
     )
 
 

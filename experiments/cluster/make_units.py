@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import subprocess
 import sys
 from pathlib import Path
 
@@ -47,11 +48,26 @@ def build_units(cfg: dict, config_rel: str, phase: str, models: list[str],
                 max_attempts: int, unit_suffix: str = "") -> list[Unit]:
     python = "python"  # resolved by the worker's activated venv, not the enqueuing shell
     units: list[Unit] = []
+    code_commit = subprocess.run(
+        ["git", "rev-parse", "HEAD"],
+        cwd=ROOT,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
 
     def add(unit_id: str, cmd: list[str]) -> None:
         if unit_suffix:
             unit_id = f"{unit_id}__{unit_suffix}"
-        units.append(Unit(unit_id=unit_id, cmd=cmd, gpus=1, max_attempts=max_attempts))
+        units.append(
+            Unit(
+                unit_id=unit_id,
+                cmd=cmd,
+                gpus=1,
+                max_attempts=max_attempts,
+                code_commit=code_commit,
+            )
+        )
 
     if phase == "fidelity":
         for model in models:

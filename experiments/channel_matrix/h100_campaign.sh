@@ -45,6 +45,26 @@ source "${ROOT}/experiments/cluster/cluster_env.sh"
 export PYTHONUNBUFFERED=1
 mkdir -p "$CLUSTER_RUNS_ROOT/logs"
 
+CAMPAIGN_LOG_DIR="$CLUSTER_RUNS_ROOT/logs/channel_matrix"
+mkdir -p "$CAMPAIGN_LOG_DIR"
+CAMPAIGN_LOG="$CAMPAIGN_LOG_DIR/${MODEL_ID}_${ACTION}_$(hostname)_$(date -u '+%Y%m%dT%H%M%SZ')_$$.log"
+ln -sfn "$(basename "$CAMPAIGN_LOG")" \
+  "$CAMPAIGN_LOG_DIR/${MODEL_ID}_${ACTION}_$(hostname)_current.log"
+exec > >(tee -a "$CAMPAIGN_LOG") 2>&1
+echo "[campaign] action=$ACTION config=$CONFIG model=$MODEL_ID gpu=$GPU"
+echo "[campaign] repo=$ROOT commit=$(git rev-parse --short HEAD) log=$CAMPAIGN_LOG"
+echo "[storage] runs=$CLUSTER_RUNS_ROOT runtime=$CLUSTER_WORK_ROOT hf=$HF_HOME"
+
+on_campaign_error() {
+  local code=$?
+  trap - ERR
+  printf '[ERROR] campaign action=%s exit=%s line=%s command=%s\n' \
+    "$ACTION" "$code" "${BASH_LINENO[0]:-unknown}" "${BASH_COMMAND:-unknown}"
+  printf '[ERROR] action log retained at %s\n' "$CAMPAIGN_LOG"
+  exit "$code"
+}
+trap on_campaign_error ERR
+
 model_args=()
 if [[ "${MODEL_ID}" != "all" ]]; then
   model_args=(--model-id "${MODEL_ID}")
@@ -100,6 +120,41 @@ from datasets import load_dataset
 for subset in ("full", "forget10_perturbed"):
     split = load_dataset("locuslab/TOFU", subset)["train"]
     print(f"cached locuslab/TOFU/{subset}: {len(split)} rows")
+PY
+}
+
+campaign_paths() {
+  python - "${CONFIG}" "${MODEL_ID}" "${CLUSTER_RUNS_ROOT}" <<'PY'
+from pathlib import Path
+import re
+import sys
+
+import yaml
+
+config_path, model_id, runs_root = sys.argv[1:]
+cfg = yaml.safe_load(Path(config_path).read_text(encoding="utf-8"))
+if not isinstance(cfg, dict):
+    raise SystemExit(f"invalid campaign config: {config_path}")
+enabled = {
+    str(model["id"])
+    for model in cfg.get("models", [])
+    if isinstance(model, dict) and model.get("enabled", True)
+}
+if model_id == "all" or model_id not in enabled:
+    raise SystemExit(
+        f"aggregate requires one enabled MODEL_ID; found {model_id!r}, enabled={sorted(enabled)}"
+    )
+output_root = Path(str(cfg.get("output_root", "")))
+if not output_root.parts:
+    raise SystemExit(f"missing output_root in {config_path}")
+if not output_root.is_absolute():
+    if output_root.parts[0] == "runs":
+        output_root = Path(runs_root, *output_root.parts[1:])
+    else:
+        output_root = Path.cwd() / output_root
+tag = re.sub(r"[^a-zA-Z0-9_.-]+", "_", model_id)
+print(output_root.resolve())
+print(tag)
 PY
 }
 
@@ -170,15 +225,32 @@ case "${ACTION}" in
     run_phase audit
     ;;
   aggregate)
+    mapfile -t campaign_values < <(campaign_paths)
+    if (( ${#campaign_values[@]} != 2 )); then
+      echo "failed to resolve campaign output root and model tag" >&2
+      exit 2
+    fi
+    CAMPAIGN_ROOT="${campaign_values[0]}"
+    MODEL_TAG="${campaign_values[1]}"
+    SCALE_LABEL="${SCALE_LABEL:-${MODEL_TAG#qwen25_}}"
+    AGGREGATE_ROOT="$CAMPAIGN_ROOT/aggregate"
+    echo "[aggregate] config=$CONFIG model=$MODEL_ID root=$CAMPAIGN_ROOT"
     python experiments/channel_matrix/aggregate.py \
-      --root "$CLUSTER_RUNS_ROOT/channel_matrix_7b/audit" \
-      --out "$CLUSTER_RUNS_ROOT/channel_matrix_7b/aggregate" \
+      --root "$CAMPAIGN_ROOT/audit" \
+      --out "$AGGREGATE_ROOT" \
+      --config "$CONFIG" \
+      --model-id "$MODEL_ID" \
       --n-boot 2000
     python experiments/channel_matrix/make_main_table.py \
-      --report "$CLUSTER_RUNS_ROOT/channel_matrix_7b/aggregate/pooled_channel_report.csv" \
-      --summary "$CLUSTER_RUNS_ROOT/channel_matrix_7b/aggregate/pooled_channel_report.json" \
-      --out "$CLUSTER_RUNS_ROOT/channel_matrix_7b/aggregate/table1_channel_matrix_7b.tex" \
-      --stress-out "$CLUSTER_RUNS_ROOT/channel_matrix_7b/aggregate/table1_stress_7b.tex"
+      --report "$AGGREGATE_ROOT/pooled_channel_report.csv" \
+      --summary "$AGGREGATE_ROOT/pooled_channel_report.json" \
+      --out "$AGGREGATE_ROOT/table1_channel_matrix_${MODEL_TAG}.tex" \
+      --stress-out "$AGGREGATE_ROOT/table1_stress_${MODEL_TAG}.tex" \
+      --scale-label "$SCALE_LABEL" \
+      --table-label "tab:channel-matrix-${MODEL_TAG}" \
+      --stress-label "tab:channel-stress-${MODEL_TAG}"
+    echo "[RESULT] aggregate=$AGGREGATE_ROOT"
+    echo "[RESULT] latex=$AGGREGATE_ROOT/table1_channel_matrix_${MODEL_TAG}.tex"
     ;;
   dry-alpha-development)
     CUDA_VISIBLE_DEVICES="${GPU}" python experiments/channel_matrix/alpha_protection.py \

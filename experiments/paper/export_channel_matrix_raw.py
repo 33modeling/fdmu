@@ -5,7 +5,7 @@ paper ledger:
 
     gate.py audit cells        -> prediction.jsonl   (candidate-level)
     alpha_protection.py audit  -> protection.jsonl   (candidate-level, per arm)
-    fd-fidelity certificate    -> fidelity summary JSON (display-only fallback)
+    fd-fidelity certificate    -> declared-support RQ2 fidelity summary JSON
 
 The exporter opens sealed audit scores only through ``rsus.sealing`` (which
 requires every trajectory DONE marker) and never recomputes or reselects
@@ -29,6 +29,7 @@ selection, roster, native-metric, or Kp drift.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import math
 import random
@@ -702,7 +703,7 @@ def export_protection(
 
 
 def export_fidelity_summary(args, cfg: Mapping[str, Any], out_path: Path) -> None:
-    """Summarize the frozen fd-fidelity certificate for the table renderer.
+    """Summarize the frozen declared-support certificate for the RQ2 renderer.
 
     f_rho is rho(A,C): exact per-candidate gradient energy versus the frozen
     loss-shake estimate. f_K and the bootstrap lower bounds are computable
@@ -721,7 +722,11 @@ def export_fidelity_summary(args, cfg: Mapping[str, Any], out_path: Path) -> Non
             survival = min(float(value) for value in realized)
     summary: dict[str, Any] = {
         "setting": args.setting_id,
+        "support": "declared_setting_fidelity",
         "source_certificate": str(args.fidelity_certificate),
+        "source_certificate_sha256": hashlib.sha256(
+            cert_path.read_bytes()
+        ).hexdigest(),
         "certificate_passed": cert.get("passed"),
         "f_rho": metrics.get("rho_AC"),
         "f_k": metrics.get("ov_AC"),

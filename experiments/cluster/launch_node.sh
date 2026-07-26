@@ -16,6 +16,8 @@ set -Eeuo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 VENV="/group-volume/fdmu/.venv"
 WAIT="${WAIT:-1}"
+UNIT_MATCH="${UNIT_MATCH:-}"
+UNIT_PREFER="${UNIT_PREFER:-}"
 HOST="$(hostname)"
 DEDICATED_QUEUE=0
 if [[ "${1:-}" == "--dedicated-queue" ]]; then
@@ -114,11 +116,19 @@ python experiments/cluster/workqueue.py init --queue "${QUEUE}"
 nohup python -u experiments/cluster/node_watch.py --replace \
   --status-dir "$CLUSTER_RUNS_ROOT/cluster_status" \
   >> "${LOGDIR}/watch_${HOST}.out" 2>&1 &
-echo "node=${HOST} queue=${QUEUE} gpus=${NGPU}/${DETECTED} wait=${WAIT} watcher_pid=$!"
+echo "node=${HOST} queue=${QUEUE} gpus=${NGPU}/${DETECTED} wait=${WAIT} unit_match=${UNIT_MATCH:-all} unit_prefer=${UNIT_PREFER:-none} watcher_pid=$!"
 
 wait_flag=()
 if [[ "${WAIT}" == "1" ]]; then
   wait_flag=(--wait)
+fi
+match_flag=()
+if [[ -n "${UNIT_MATCH}" ]]; then
+  match_flag=(--match-unit "${UNIT_MATCH}")
+fi
+prefer_flag=()
+if [[ -n "${UNIT_PREFER}" ]]; then
+  prefer_flag=(--prefer-unit-prefix "${UNIT_PREFER}")
 fi
 
 for (( g = 0; g < NGPU; g++ )); do
@@ -129,6 +139,7 @@ for (( g = 0; g < NGPU; g++ )); do
   out="${LOGDIR}/worker_${HOST}_gpu${g}.out"
   nohup python -u experiments/cluster/worker.py \
     --queue "${QUEUE}" --gpu "${g}" "${wait_flag[@]}" \
+    "${match_flag[@]}" "${prefer_flag[@]}" \
     --log-dir "$LOGDIR" \
     >> "${out}" 2>&1 &
   echo "  worker gpu${g}: started pid=$! log=${out}"

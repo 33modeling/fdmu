@@ -27,8 +27,10 @@ import argparse
 import csv
 import json
 import math
+import os
 import statistics
 import sys
+import tempfile
 from pathlib import Path
 
 import torch
@@ -47,6 +49,41 @@ from rsus.probe.fidelity import (  # noqa: E402
     exact_A_and_projsq,
     perturbation_report,
 )
+
+
+def _atomic_write_csv(path: Path, rows: list[dict]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, temp_raw = tempfile.mkstemp(
+        dir=path.parent, prefix=f".{path.name}.", suffix=".tmp"
+    )
+    temp = Path(temp_raw)
+    try:
+        with os.fdopen(fd, "w", newline="", encoding="utf-8") as handle:
+            writer = csv.DictWriter(handle, fieldnames=list(rows[0]))
+            writer.writeheader()
+            writer.writerows(rows)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temp, path)
+    finally:
+        temp.unlink(missing_ok=True)
+
+
+def _atomic_write_json(path: Path, payload: dict) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, temp_raw = tempfile.mkstemp(
+        dir=path.parent, prefix=f".{path.name}.", suffix=".tmp"
+    )
+    temp = Path(temp_raw)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            json.dump(payload, handle, indent=2, sort_keys=True)
+            handle.write("\n")
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temp, path)
+    finally:
+        temp.unlink(missing_ok=True)
 
 
 def _ints(s: str) -> list[int]:
@@ -285,11 +322,7 @@ def main() -> None:
               f"rho(A,C)={gate['rho_AC']:.3f} -- inspect the grid above.")
 
     out = Path(a.out) if a.out else ROOT / "runs" / f"fidelity_{a.model.split('/')[-1]}_{a.dtype}.csv"
-    out.parent.mkdir(parents=True, exist_ok=True)
-    with open(out, "w", newline="", encoding="utf-8") as f:
-        w = csv.DictWriter(f, fieldnames=list(rows[0]))
-        w.writeheader()
-        w.writerows(rows)
+    _atomic_write_csv(out, rows)
     print(f"\nwrote {out}", flush=True)
 
     passed = (
@@ -333,8 +366,7 @@ def main() -> None:
         },
     }
     cert_path = Path(a.certificate) if a.certificate else out.with_suffix(".certificate.json")
-    cert_path.parent.mkdir(parents=True, exist_ok=True)
-    cert_path.write_text(json.dumps(certificate, indent=2, sort_keys=True), encoding="utf-8")
+    _atomic_write_json(cert_path, certificate)
     print(f"wrote {cert_path}; passed={passed}", flush=True)
     if a.enforce_gate and not passed:
         raise SystemExit("frozen fd_norm fidelity cell failed; do not start sealed audit")

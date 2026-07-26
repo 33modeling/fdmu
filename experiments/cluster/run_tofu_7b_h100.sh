@@ -4,19 +4,41 @@ set -Eeuo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$ROOT"
 
-# shellcheck disable=SC1091
-source "$ROOT/experiments/cluster/cluster_env.sh"
-
-QUEUE="$CLUSTER_RUNS_ROOT/cluster_queue/wave2"
-VENV="/group-volume/fdmu/.venv"
-PYTHON="$VENV/bin/python"
 MODEL_ID=qwen25_7b
-LOG_DIR="$CLUSTER_RUNS_ROOT/logs/cluster"
-FIDELITY_CERT="$CLUSTER_RUNS_ROOT/channel_matrix_7b/fidelity/${MODEL_ID}.json"
+AUDIT_MATCH="aud__${MODEL_ID}"
+STORAGE_ROOT=/group-volume/fdmu
+VENV="$STORAGE_ROOT/.venv"
+PYTHON="$VENV/bin/python"
+QUEUE="$STORAGE_ROOT/runs/cluster_queue/wave2"
+LOG_DIR="$STORAGE_ROOT/runs/logs/cluster"
 mkdir -p "$LOG_DIR"
 LOG="$LOG_DIR/launcher_${MODEL_ID}_$(hostname)_$(date -u '+%Y%m%dT%H%M%SZ').out"
 ln -sfn "$(basename "$LOG")" "$LOG_DIR/launcher_${MODEL_ID}_$(hostname)_current.out"
 exec > >(tee -a "$LOG") 2>&1
+
+bootstrap_error() {
+  local code=$?
+  trap - ERR
+  printf '[ERROR] stage=environment-bootstrap exit=%s line=%s command=%s\n' \
+    "$code" "${BASH_LINENO[0]:-unknown}" "${BASH_COMMAND:-unknown}"
+  df -h "$STORAGE_ROOT" 2>&1 || true
+  printf '[ERROR] launcher log retained at %s\n' "$LOG"
+  exit "$code"
+}
+trap bootstrap_error ERR
+
+printf '[INFO] time=%s stage=environment-bootstrap start\n' "$(date -u '+%FT%TZ')"
+if [[ "${BOOTSTRAP_CLUSTER_ENV:-1}" == "1" ]]; then
+  bash "$ROOT/experiments/cluster/setup_group_volume.sh"
+fi
+
+# shellcheck disable=SC1091
+source "$ROOT/experiments/cluster/cluster_env.sh"
+
+QUEUE="$CLUSTER_RUNS_ROOT/cluster_queue/wave2"
+FIDELITY_CERT="$CLUSTER_RUNS_ROOT/channel_matrix_7b/fidelity/${MODEL_ID}.json"
+CURRENT_COMMIT=
+printf '[INFO] time=%s stage=environment-bootstrap complete\n' "$(date -u '+%FT%TZ')"
 
 STAGE=bootstrap
 
@@ -25,6 +47,8 @@ print_context() {
   workers="$(pgrep -af "experiments/cluster/worker.py --queue" || true)"
   printf '[CONTEXT] host=%s model=%s queue=%s commit=%s python=%s\n' \
     "$(hostname)" "$MODEL_ID" "$QUEUE" "$(git rev-parse --short HEAD)" "$PYTHON"
+  printf '[CONTEXT] runs=%s runtime=%s hf=%s log=%s\n' \
+    "$CLUSTER_RUNS_ROOT" "$CLUSTER_WORK_ROOT" "$HF_HOME" "$LOG"
   if [[ -n "$(git status --porcelain --untracked-files=all)" ]]; then
     printf '[CONTEXT] worktree=dirty\n'
     git status --short --untracked-files=all
@@ -38,6 +62,7 @@ print_context() {
   fi
   nvidia-smi --query-gpu=index,name,memory.total,memory.used,utilization.gpu \
     --format=csv,noheader 2>&1 || true
+  df -h "$CLUSTER_RUNS_ROOT" "$CLUSTER_WORK_ROOT" 2>&1 || true
 }
 
 on_error() {
@@ -72,13 +97,48 @@ stage() {
   printf '[INFO] time=%s stage=%s start\n' "$(date -u '+%FT%TZ')" "$STAGE"
 }
 
+assert_clean_retry_commit() {
+  local tree_status
+  tree_status="$(git status --porcelain --untracked-files=all)"
+  if [[ -n "$tree_status" ]]; then
+    printf '[ERROR] refusing queue re-pin from a dirty worktree:\n%s\n' \
+      "$tree_status" >&2
+    return 2
+  fi
+  CURRENT_COMMIT="$(git rev-parse HEAD)"
+  printf '[INFO] retry units will be pinned to clean commit=%s\n' \
+    "$CURRENT_COMMIT"
+}
+
+fidelity_contract_valid() {
+  "$PYTHON" - "$ROOT" "configs/channel_matrix/7b_tofu.yaml" "$MODEL_ID" <<'PY'
+import sys
+from pathlib import Path
+
+root, config_raw, model_id = sys.argv[1:]
+sys.path.insert(0, str(Path(root) / "experiments" / "channel_matrix"))
+import run_campaign
+
+config_path = Path(config_raw).resolve()
+config = run_campaign._load_yaml(config_path)
+model = run_campaign._enabled_models(config, {model_id})[0]
+try:
+    validated = run_campaign.validate_fidelity_artifact_pair(config, model)
+except (OSError, ValueError) as exc:
+    print(f"[INVALID] fidelity certificate: {exc}", file=sys.stderr)
+    raise SystemExit(1)
+print(f"[VALID] fidelity certificate: {validated['path']}")
+PY
+}
+
 stop_uncertified_local_audit() {
   local worker_pattern="experiments/cluster/worker.py --queue ${QUEUE}"
   local audit_pattern="run_campaign.py.*7b_tofu.yaml.*--phase audit"
   local attempt
 
-  if [[ -s "$FIDELITY_CERT" ]]; then
-    printf '[INFO] fidelity certificate present: %s\n' "$FIDELITY_CERT"
+  if fidelity_contract_valid; then
+    printf '[INFO] fidelity certificate satisfies current contract: %s\n' \
+      "$FIDELITY_CERT"
     return
   fi
   if ! pgrep -f "$worker_pattern|$audit_pattern" >/dev/null; then
@@ -105,6 +165,12 @@ stop_uncertified_local_audit() {
 }
 
 print_context
+printf '[TOPOLOGY] launcher activates this host only; 7B uses one worker per free local GPU\n'
+printf '[TOPOLOGY] audit_monitor=%s worker_scope=%s; alpha jobs continue independently\n' \
+  "$AUDIT_MATCH" "$MODEL_ID"
+
+stage retry-commit-validation
+assert_clean_retry_commit
 
 stage uncertified-audit-recovery
 stop_uncertified_local_audit
@@ -123,7 +189,11 @@ stage failed-audit-partial-quarantine
 
 stage failed-audit-recovery
 "$PYTHON" experiments/cluster/workqueue.py retry-failed \
-  --queue "$QUEUE"
+  --queue "$QUEUE" \
+  --code-commit "$CURRENT_COMMIT" \
+  --unit aud__qwen25_7b__a181 \
+  --unit aud__qwen25_7b__a186 \
+  --unit aud__qwen25_7b__a191
 
 stage fidelity-contract-validation
 "$PYTHON" experiments/channel_matrix/run_campaign.py \
@@ -134,11 +204,21 @@ stage fidelity-contract-validation
 stage enqueue
 bash experiments/cluster/enqueue_table12.sh audit-7b
 stage worker-launch
-bash experiments/cluster/launch_node.sh --dedicated-queue "$QUEUE"
+# Audit units are preferred for early LaTeX. These model-scoped workers then
+# continue any queued alpha units and exit naturally without touching other queues.
+WAIT=0 UNIT_MATCH="$MODEL_ID" UNIT_PREFER="$AUDIT_MATCH" \
+  bash experiments/cluster/launch_node.sh --dedicated-queue "$QUEUE"
 printf '[RESULT] worker-launch complete; active local workers:\n'
 pgrep -af "experiments/cluster/worker.py --queue" || true
 "$PYTHON" experiments/cluster/workqueue.py status --brief --queue "$QUEUE"
 stage queue-monitor
 "$PYTHON" -u experiments/cluster/monitor_queue.py \
-  --queue "$QUEUE" --match "$MODEL_ID" \
+  --queue "$QUEUE" --match "$AUDIT_MATCH" \
   --interval "${MONITOR_INTERVAL_SECONDS:-30}"
+stage aggregate-latex
+CONFIG=configs/channel_matrix/7b_tofu.yaml \
+MODEL_ID="$MODEL_ID" \
+SCALE_LABEL=7B \
+  bash experiments/channel_matrix/h100_campaign.sh aggregate
+printf '[RESULT] LaTeX generation complete: %s\n' \
+  "$CLUSTER_RUNS_ROOT/channel_matrix_7b/aggregate/table1_channel_matrix_${MODEL_ID}.tex"

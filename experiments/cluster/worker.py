@@ -26,9 +26,11 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from workqueue import Claim, WorkQueue  # noqa: E402
+from workqueue import Claim, ClaimLostError, WorkQueue  # noqa: E402
 
 HEARTBEAT_INTERVAL_S = 60.0
+CHILD_POLL_INTERVAL_S = 0.25
+CHILD_TERMINATE_GRACE_S = 10.0
 FAILURE_TAIL_LINES = 60
 
 
@@ -60,6 +62,17 @@ def resolve_unit_command(cmd: list[str]) -> list[str]:
     return resolved
 
 
+def repository_commit() -> str:
+    result = subprocess.run(
+        ["git", "rev-parse", "HEAD"],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    return result.stdout.strip()
+
+
 def print_failure_tail(log_path: Path, lines: int = FAILURE_TAIL_LINES) -> None:
     try:
         content = log_path.read_text(encoding="utf-8", errors="replace").splitlines()
@@ -69,6 +82,42 @@ def print_failure_tail(log_path: Path, lines: int = FAILURE_TAIL_LINES) -> None:
     print(f"[worker] ERROR LOG TAIL BEGIN {log_path}", flush=True)
     print("\n".join(content[-lines:]), flush=True)
     print(f"[worker] ERROR LOG TAIL END {log_path}", flush=True)
+
+
+def terminate_process_group(
+    process: subprocess.Popen,
+    *,
+    reason: str,
+    log,
+) -> None:
+    """Terminate a claimed unit and every descendant in its process group."""
+    if process.poll() is not None:
+        return
+    log.write(
+        f"# worker terminating process_group={process.pid} reason={reason}\n".encode(
+            "utf-8"
+        )
+    )
+    log.flush()
+    try:
+        os.killpg(process.pid, signal.SIGTERM)
+    except ProcessLookupError:
+        return
+    try:
+        process.wait(timeout=CHILD_TERMINATE_GRACE_S)
+        return
+    except subprocess.TimeoutExpired:
+        pass
+    log.write(
+        f"# worker killing process_group={process.pid} after "
+        f"{CHILD_TERMINATE_GRACE_S:.1f}s grace\n".encode("utf-8")
+    )
+    log.flush()
+    try:
+        os.killpg(process.pid, signal.SIGKILL)
+    except ProcessLookupError:
+        return
+    process.wait()
 
 
 def build_env(base: dict[str, str], unit_env: dict[str, str], gpu: int, needs_gpu: bool) -> dict[str, str]:
@@ -172,12 +221,22 @@ def run_claim(queue: WorkQueue, claim: Claim, gpu: int, log_dir: Path) -> bool:
     log_path = log_dir / f"{unit.unit_id}__{host}_gpu{gpu}__try{attempt}.out"
     env = build_env(os.environ.copy(), unit.env, gpu, needs_gpu=unit.gpus > 0)
 
-    stop = threading.Event()
+    stop_heartbeat = threading.Event()
+    claim_lost = threading.Event()
+    claim_lost_messages: list[str] = []
 
     def beat() -> None:
-        while not stop.wait(HEARTBEAT_INTERVAL_S):
+        while not stop_heartbeat.wait(HEARTBEAT_INTERVAL_S):
             try:
-                queue.heartbeat(unit.unit_id)
+                queue.heartbeat(claim)
+            except ClaimLostError as exc:
+                claim_lost_messages.append(str(exc))
+                print(
+                    f"[worker gpu{gpu}] claim lost for {unit.unit_id}: {exc}",
+                    flush=True,
+                )
+                claim_lost.set()
+                return
             except OSError:
                 pass  # transient NFS hiccup; the next beat retries
 
@@ -192,13 +251,35 @@ def run_claim(queue: WorkQueue, claim: Claim, gpu: int, log_dir: Path) -> bool:
             header = (
                 f"# unit={unit.unit_id} attempt={attempt} host={host} gpu={gpu}\n"
                 f"# cmd={' '.join(cmd)}\n"
+                f"# required_commit={unit.code_commit or 'legacy-unpinned'}\n"
             )
             log.write(header.encode("utf-8"))
             log.flush()
-            proc = subprocess.run(
-                cmd, cwd=ROOT, env=env, stdout=log, stderr=subprocess.STDOUT
-            )
-        exit_code = proc.returncode
+            actual_commit = repository_commit()
+            if unit.code_commit and actual_commit != unit.code_commit:
+                error = (
+                    f"CodeCommitMismatch: unit requires {unit.code_commit}, "
+                    f"worker checkout is {actual_commit}; pull the required commit "
+                    "and retry this unit"
+                )
+                log.write(f"# worker error: {error}\n".encode("utf-8"))
+                log.flush()
+            else:
+                process = subprocess.Popen(
+                    cmd,
+                    cwd=ROOT,
+                    env=env,
+                    stdout=log,
+                    stderr=subprocess.STDOUT,
+                    start_new_session=True,
+                )
+                while process.poll() is None:
+                    if claim_lost.wait(CHILD_POLL_INTERVAL_S):
+                        reason = claim_lost_messages[-1]
+                        terminate_process_group(process, reason=reason, log=log)
+                        error = f"ClaimLostError: {reason}"
+                        break
+                exit_code = process.wait()
     except Exception as exc:  # a broken unit must never take the worker down
         error = f"{type(exc).__name__}: {exc}"
         try:
@@ -207,8 +288,16 @@ def run_claim(queue: WorkQueue, claim: Claim, gpu: int, log_dir: Path) -> bool:
         except OSError:
             pass
     finally:
-        stop.set()
+        stop_heartbeat.set()
         beater.join(timeout=5)
+
+    if claim_lost.is_set():
+        print_failure_tail(log_path)
+        raise ClaimLostError(
+            claim_lost_messages[-1]
+            if claim_lost_messages
+            else f"claim lost while running {unit.unit_id}"
+        )
 
     result = {
         "exit_code": exit_code,
@@ -238,6 +327,16 @@ def main() -> None:
     parser.add_argument("--gpu", type=int, required=True, help="GPU index this worker owns")
     parser.add_argument("--wait", action="store_true",
                         help="keep polling for new units instead of exiting on an empty queue")
+    parser.add_argument(
+        "--match-unit",
+        default="",
+        help="claim only unit IDs containing this string",
+    )
+    parser.add_argument(
+        "--prefer-unit-prefix",
+        default="",
+        help="claim matching unit IDs with this prefix before other matches",
+    )
     parser.add_argument("--poll-s", type=float, default=30.0)
     parser.add_argument("--allow-busy-gpu", action="store_true")
     parser.add_argument("--busy-threshold-mib", type=int, default=1024)
@@ -272,7 +371,11 @@ def main() -> None:
 
     while not interrupted["flag"]:
         try:
-            claim = queue.claim(owner=owner)
+            claim = queue.claim(
+                owner=owner,
+                unit_id_contains=args.match_unit,
+                preferred_prefix=args.prefer_unit_prefix,
+            )
         except OSError as exc:
             # Transient shared-volume error: back off and retry, never die.
             print(f"[worker gpu{args.gpu}] claim error, retrying: {exc}", flush=True)
@@ -280,7 +383,11 @@ def main() -> None:
             continue
         if claim is None:
             if not args.wait:
-                print(f"[worker gpu{args.gpu}] queue drained; exiting", flush=True)
+                scope = args.match_unit or "all units"
+                print(
+                    f"[worker gpu{args.gpu}] queue drained for {scope}; exiting",
+                    flush=True,
+                )
                 return
             time.sleep(args.poll_s)
             continue

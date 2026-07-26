@@ -11,4 +11,12 @@ def test_4090_pipeline_accepts_resolved_calibration_boundary_only():
     assert 'run_stage_accept calibration "0 4"' in launcher
     assert 'run_stage parent-freeze-approval' in launcher
     assert 'run_stage joint-sweep' in launcher
+    assert 'run_stage declared-fidelity' in launcher
+    assert 'run_stage target-evidence-latex' in launcher
+    assert 'RUN_FINALIZE:-1' in launcher
+    assert 'unset APPROVE_JOINT_BEST' in launcher
+    assert 'require_file_approval JOINT "$JOINT_ROOT/BEST.json"' in launcher
+    assert launcher.index("run_stage declared-fidelity") < launcher.index(
+        "run_stage target-evidence-latex"
+    )
     assert '"0 3 4"' not in launcher

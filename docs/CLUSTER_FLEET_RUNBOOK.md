@@ -36,6 +36,10 @@ experiments/cluster/
   절대 겹치지 않도록 자름: calibration/audit은 `--only-authors <한 명>`,
   alpha 페이즈는 `--worker --author A --seed S`. 모든 명령에 `--resume`이
   들어가므로 재시도/스테일 회수가 안전하다.
+- **실행 커밋 고정.** `make_units.py`가 enqueue 시점의 Git SHA를 각 unit에
+  기록한다. Worker checkout의 SHA가 다르면 모델 명령을 실행하지 않고
+  `CodeCommitMismatch`로 실패한다. 여러 노드 중 한 곳만 `git pull`한 상태로
+  같은 sealed queue를 처리할 수 없다.
 - **GPU당 워커 1개.** fp32 7B는 H100 한 장을 거의 다 쓰므로 겹배치 금지 규칙을
   코드로 강제 — 워커는 시작 시 `nvidia-smi`로 자기 GPU에 1GiB 이상 상주 메모리가
   있으면 기동 거부(`--allow-busy-gpu`로만 해제).
@@ -107,6 +111,12 @@ test -s /group-volume/fdmu/runs/channel_matrix_14b/fidelity/qwen25_14b.json
 자식만 먼저 종료한다. 따라서 GPU 0를 비운 상태에서 fidelity를 생성하고,
 certificate 생성 후 그 실패 unit만 자동으로 재대기시킨다.
 
+Fidelity 생성은 certificate별 공유 `flock`으로 직렬화한다. CSV와 JSON은
+임시 파일을 `fsync`한 뒤 원자적으로 게시하고, resume/enqueue/audit은 모두
+모델 경로, dtype, block, `R`, eta, seed, candidate roster를 같은 validator로
+검사한다. 오래됐거나 한쪽만 있는 artifact는
+`runs/forensics/fidelity-artifacts/`로 이동한 뒤 다시 생성한다.
+
 실행 중 `RuntimeError`가 발생하면 해당 unit은 완료된 것이 아니다. 특히
 `inline_container.cc:659 unexpected pos`는 Python 659줄이 아니라 PyTorch
 ZIP checkpoint writer 내부의 저장 실패 위치다. 경고로 무시하거나 실패한
@@ -137,6 +147,14 @@ bash experiments/cluster/launch_node.sh \
 cache writer는 공유 cache를 잠그고 worker별 임시 파일에 쓴 뒤 원자적으로
 교체하며, 과거 실행의 고정 이름 `*.pt.tmp`는 다음 쓰기에서 격리 없이
 자동 제거한다.
+
+14B의 최종 `.pt/.json` cache pair가 불완전하거나
+`inline_container.cc:659 unexpected pos` 계열로 손상된 경우에는
+`runs/forensics/sft-cache-corrupt/`로 보존 이동하고 cache miss로 재학습한다.
+새 cache는 크기와 SHA-256을 기록해 다음 load에서 검증한다. 계약 불일치나
+일반적인 일시 I/O 오류는 자동 격리하지 않고 실패시켜 잘못된 재학습을 막는다.
+14B 원클릭 실행기는 fidelity 전에 GPU 0 compute process가 없는지 확인하며,
+같은 `wave1_14b`의 GPU 1-7 worker가 남아 있으면 시작을 거부한다.
 
 ### 1. 작업 enqueue (아무 노드에서 1회)
 
@@ -281,12 +299,34 @@ bash experiments/cluster/run_tofu_7b_h100.sh
 bash experiments/cluster/run_tofu_14b_h100.sh
 ```
 
-7B 실행기는 빈 GPU 전체에 worker를 띄운다. 14B 실행기는 같은 dedicated
-mode로 **GPU 0 worker 1개만 실행**한다. 두 원클릭 런처 모두
+두 명령은 `setup_group_volume.sh`의 idempotent 환경 검사를 먼저 수행하고,
+fidelity, enqueue, worker, monitor, aggregate, LaTeX까지 이어서 실행한다.
+7B 실행기는 실행한 호스트의 빈 GPU 전체에 worker를 띄운다. 14B 실행기는
+실행한 호스트에서 **GPU 0 worker 1개만 실행**한다. H100 4대 전체를 자동
+활성화하지 않는다. 두 원클릭 런처 모두
 hostname/fleet assignment에 의존하지 않으며 monitor가 failed unit의 로그를
 launcher 터미널에 표시한다. 14B unit 자체도
 `CUDA_VISIBLE_DEVICES=0`인 단일-GPU 실행이며 내부 8-GPU sharding을 사용하지
 않는다.
+
+원클릭 launcher 로그:
+
+```text
+/group-volume/fdmu/runs/logs/cluster/launcher_qwen25_7b_<host>_current.out
+/group-volume/fdmu/runs/logs/cluster/launcher_qwen25_14b_<host>_current.out
+```
+
+단계별 `h100_campaign.sh` 로그는
+`/group-volume/fdmu/runs/logs/channel_matrix/`에 남는다. 최종 channel-matrix
+LaTeX는 각각 다음 위치다.
+
+```text
+/group-volume/fdmu/runs/channel_matrix_7b/aggregate/table1_channel_matrix_qwen25_7b.tex
+/group-volume/fdmu/runs/channel_matrix_14b/aggregate/table1_channel_matrix_qwen25_14b.tex
+```
+
+이 두 표는 현재 H100 channel-matrix 계약의 표이며, 아직 roster가 완성되지
+않은 최신 PDF-v4 전체 Table 1/2를 완료된 것으로 표시하지 않는다.
 
 - `status`: wave2 / wave1_14b / wave_wmdp / wave_llama / wave3_alpha /
   wave4_alpha 큐별 `workqueue.py status --brief` 요약 + `fleet_status.py` 안내.

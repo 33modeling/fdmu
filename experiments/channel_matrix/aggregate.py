@@ -16,6 +16,8 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
+import yaml
+
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "src"))
@@ -34,6 +36,77 @@ class Run:
     scores: dict[str, dict[str, float]]
     damage: dict[str, dict[str, float]]
     terminal_recall: dict[str, float]
+
+
+def _request_id(cfg: dict, author: int) -> str:
+    dataset = cfg.get("dataset", "tofu")
+    if dataset == "rwku":
+        return f"rwku-t{author:03d}"
+    if dataset == "wmdp_bio_mmlu":
+        return f"wmdp-r{author:03d}"
+    return f"tofu-a{author}"
+
+
+def _config_roster(
+    config_path: Path, model_id: str
+) -> set[tuple[str, str, int]]:
+    try:
+        cfg = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    except (OSError, yaml.YAMLError) as error:
+        raise ValueError(f"cannot read aggregate config {config_path}: {error}") from error
+    if not isinstance(cfg, dict):
+        raise ValueError(f"aggregate config must be a mapping: {config_path}")
+
+    enabled_models = [
+        str(model["id"])
+        for model in cfg.get("models", [])
+        if isinstance(model, dict)
+        and model.get("enabled", True)
+        and isinstance(model.get("id"), str)
+    ]
+    if len(enabled_models) != len(set(enabled_models)):
+        raise ValueError(f"aggregate config has duplicate enabled model ids: {config_path}")
+    if model_id not in enabled_models:
+        raise ValueError(
+            f"--model-id {model_id!r} is not enabled by {config_path}; "
+            f"enabled={enabled_models}"
+        )
+
+    audit = cfg.get("audit")
+    if not isinstance(audit, dict):
+        raise ValueError(f"aggregate config lacks an audit mapping: {config_path}")
+    authors = audit.get("authors")
+    seeds = audit.get("seeds")
+    if (
+        not isinstance(authors, list)
+        or not authors
+        or not isinstance(seeds, list)
+        or not seeds
+    ):
+        raise ValueError(
+            f"aggregate config audit authors/seeds must be non-empty lists: {config_path}"
+        )
+    try:
+        author_ids = [int(author) for author in authors]
+        seed_ids = [int(seed) for seed in seeds]
+    except (TypeError, ValueError) as error:
+        raise ValueError(
+            f"aggregate config audit authors/seeds must contain integers: {config_path}"
+        ) from error
+    if len(author_ids) != len(set(author_ids)) or len(seed_ids) != len(set(seed_ids)):
+        raise ValueError(
+            f"aggregate config audit authors/seeds contain duplicates: {config_path}"
+        )
+    return {
+        (model_id, _request_id(cfg, author), seed)
+        for author in author_ids
+        for seed in seed_ids
+    }
+
+
+def _run_paths(root: Path, model_id: str | None = None) -> list[Path]:
+    search_root = root / model_id if model_id is not None else root
+    return sorted(path.parent for path in search_root.glob("**/run_manifest.json"))
 
 
 def _first_reaching_damage(
@@ -314,6 +387,27 @@ def _validate_balanced(runs: list[Run]) -> None:
         raise ValueError(f"unbalanced campaign; missing={missing}, extra={extra}")
 
 
+def _validate_exact_roster(
+    runs: list[Run], expected: set[tuple[str, str, int]]
+) -> None:
+    actual = [(run.model, run.request, run.seed) for run in runs]
+    if len(actual) != len(set(actual)):
+        duplicates = sorted(
+            key for key in set(actual) if actual.count(key) > 1
+        )
+        raise ValueError(
+            f"duplicate model/request/seed run in aggregate input: {duplicates}"
+        )
+    actual_set = set(actual)
+    missing = sorted(expected - actual_set)
+    extra = sorted(actual_set - expected)
+    if missing or extra:
+        raise ValueError(
+            "config-declared audit roster mismatch; "
+            f"missing={missing}, extra={extra}"
+        )
+
+
 def _objective_status(
     runs: list[Run], objective: str, rule: dict, cvar_frac: float
 ) -> dict:
@@ -356,22 +450,47 @@ def main() -> None:
     p = argparse.ArgumentParser()
     p.add_argument("--root", required=True, help="audit root containing run_manifest.json files")
     p.add_argument("--out", required=True)
+    p.add_argument(
+        "--config",
+        help=(
+            "campaign config used to enforce its exact audit roster; requires "
+            "--model-id"
+        ),
+    )
+    p.add_argument(
+        "--model-id",
+        help=(
+            "single enabled model to filter and validate; requires --config. "
+            "Omit both options only for legacy diagnostic aggregation"
+        ),
+    )
     p.add_argument("--n-boot", type=int, default=2000)
     p.add_argument("--k-frac", type=float, default=0.10)
     p.add_argument("--cvar-frac", type=float, default=0.05)
     p.add_argument("--seed", type=int, default=0)
     a = p.parse_args()
+    if bool(a.config) != bool(a.model_id):
+        p.error("--config and --model-id must be supplied together")
 
     root = Path(a.root)
-    run_paths = sorted(path.parent for path in root.glob("**/run_manifest.json"))
+    expected = (
+        _config_roster(Path(a.config), a.model_id)
+        if a.config is not None
+        else None
+    )
+    run_paths = _run_paths(root, a.model_id)
     if not run_paths:
-        p.error(f"no run manifests under {root}")
+        selected = f" for model {a.model_id}" if a.model_id else ""
+        p.error(f"no run manifests under {root}{selected}")
     loaded = [_load_run(path) for path in run_paths]
     runs = [item[0] for item in loaded]
     manifests = [item[1] for item in loaded]
     objectives, stress_objectives, predictors = _validate(manifests)
     all_objectives = objectives + stress_objectives
-    _validate_balanced(runs)
+    if expected is None:
+        _validate_balanced(runs)
+    else:
+        _validate_exact_roster(runs, expected)
     output_objectives = [o for o in objectives if DECLARED_CHANNEL.get(o) == "loss_gradient"]
     rep_objectives = [o for o in objectives if DECLARED_CHANNEL.get(o) == "representation"]
     if not output_objectives or not rep_objectives:

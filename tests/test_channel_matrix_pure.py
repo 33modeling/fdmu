@@ -23,11 +23,13 @@ def _module(name: str, relative: str):
     spec = importlib.util.spec_from_file_location(name, ROOT / relative)
     module = importlib.util.module_from_spec(spec)
     assert spec.loader is not None
+    sys.modules[name] = module
     spec.loader.exec_module(module)
     return module
 
 
 campaign = _module("channel_campaign", "experiments/channel_matrix/run_campaign.py")
+aggregate = _module("channel_aggregate", "experiments/channel_matrix/aggregate.py")
 table = _module("channel_table", "experiments/channel_matrix/make_main_table.py")
 
 
@@ -305,6 +307,43 @@ class ChannelCampaignContractTest(unittest.TestCase):
         self.assertIn(r"\dagger", label)
         self.assertIn(r"\ddagger", label)
 
+    def test_h100_aggregate_contract_passes_config_model_and_resolves_14b_root(self):
+        wrapper = (
+            ROOT / "experiments/channel_matrix/h100_campaign.sh"
+        ).read_text(encoding="utf-8")
+        aggregate_call = wrapper.split(
+            "python experiments/channel_matrix/aggregate.py", 1
+        )[1].split(
+            "python experiments/channel_matrix/make_main_table.py", 1
+        )[0]
+        self.assertIn('--config "$CONFIG"', aggregate_call)
+        self.assertIn('--model-id "$MODEL_ID"', aggregate_call)
+
+        config = yaml.safe_load(
+            (ROOT / "configs/channel_matrix/14b_tofu.yaml").read_text(
+                encoding="utf-8"
+            )
+        )
+        expected = aggregate._config_roster(
+            ROOT / "configs/channel_matrix/14b_tofu.yaml", "qwen25_14b"
+        )
+        self.assertEqual(len(expected), 6)
+        output_root = Path(config["output_root"])
+        resolved = Path(
+            "/group-volume/fdmu/runs", *output_root.parts[1:]
+        )
+        self.assertEqual(
+            resolved,
+            Path("/group-volume/fdmu/runs/channel_matrix_14b"),
+        )
+        self.assertEqual(
+            resolved / "aggregate/table1_channel_matrix_qwen25_14b.tex",
+            Path(
+                "/group-volume/fdmu/runs/channel_matrix_14b/aggregate/"
+                "table1_channel_matrix_qwen25_14b.tex"
+            ),
+        )
+
     def test_sealed_aggregate_and_main_table_end_to_end(self):
         core = self.config["audit"]["objectives"]
         stress = self.config["audit"]["stress_objectives"]
@@ -409,6 +448,47 @@ class ChannelCampaignContractTest(unittest.TestCase):
                 "--out", str(aggregate_out),
                 "--n-boot", "10",
             ], cwd=ROOT, check=True, capture_output=True, text=True)
+
+            aggregate_config = root / "aggregate-config.yaml"
+            aggregate_config.write_text(
+                yaml.safe_dump(
+                    {
+                        "models": [
+                            {"id": "qwen25_7b", "enabled": True},
+                            {"id": "other_model", "enabled": True},
+                        ],
+                        "audit": {
+                            "authors": [181, 186],
+                            "seeds": [2025, 2026],
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+            unrelated = (
+                audit_root / "other_model" / "invalid" / "seed-0"
+                / "run_manifest.json"
+            )
+            unrelated.parent.mkdir(parents=True)
+            unrelated.write_text("not-json", encoding="utf-8")
+            selected_out = root / "aggregate-selected"
+            subprocess.run([
+                sys.executable,
+                str(ROOT / "experiments/channel_matrix/aggregate.py"),
+                "--root", str(audit_root),
+                "--out", str(selected_out),
+                "--config", str(aggregate_config),
+                "--model-id", "qwen25_7b",
+                "--n-boot", "10",
+            ], cwd=ROOT, check=True, capture_output=True, text=True)
+            selected_summary = json.loads(
+                (selected_out / "pooled_channel_report.json").read_text(
+                    encoding="utf-8"
+                )
+            )
+            self.assertEqual(selected_summary["models"], ["qwen25_7b"])
+            self.assertEqual(selected_summary["n_runs"], 4)
+
             tex = root / "table.tex"
             stress_tex = root / "stress.tex"
             subprocess.run([
@@ -418,6 +498,9 @@ class ChannelCampaignContractTest(unittest.TestCase):
                 "--summary", str(aggregate_out / "pooled_channel_report.json"),
                 "--out", str(tex),
                 "--stress-out", str(stress_tex),
+                "--scale-label", "14B",
+                "--table-label", "tab:channel-matrix-qwen25_14b",
+                "--stress-label", "tab:channel-stress-qwen25_14b",
             ], cwd=ROOT, check=True, capture_output=True, text=True)
             summary = json.loads(
                 (aggregate_out / "pooled_channel_report.json").read_text(encoding="utf-8")
@@ -428,8 +511,11 @@ class ChannelCampaignContractTest(unittest.TestCase):
             self.assertEqual(summary["stress_objectives"], stress)
             self.assertEqual(summary["objective_status"]["idkdpo"]["failed_runs"], 4)
             self.assertIn("Bwd-free", rendered)
+            self.assertIn("at 14B scale", rendered)
+            self.assertIn(r"\label{tab:channel-matrix-qwen25_14b}", rendered)
             self.assertNotIn("IdkDPO", rendered)
             self.assertIn("IdkDPO", rendered_stress)
+            self.assertIn(r"\label{tab:channel-stress-qwen25_14b}", rendered_stress)
             if shutil.which("pdflatex"):
                 wrapper = root / "wrapper.tex"
                 wrapper.write_text(
@@ -445,6 +531,59 @@ class ChannelCampaignContractTest(unittest.TestCase):
                     ["pdflatex", "-interaction=nonstopmode", "-halt-on-error", "wrapper.tex"],
                     cwd=root, check=True, capture_output=True, text=True,
                 )
+
+            extra_run = (
+                audit_root / "qwen25_7b" / "tofu-a181" / "seed-999"
+            )
+            shutil.copytree(
+                audit_root / "qwen25_7b" / "tofu-a181" / "seed-2025",
+                extra_run,
+            )
+            extra_manifest_path = extra_run / "run_manifest.json"
+            extra_manifest = json.loads(
+                extra_manifest_path.read_text(encoding="utf-8")
+            )
+            extra_manifest["seed"] = 999
+            extra_manifest_path.write_text(
+                json.dumps(extra_manifest), encoding="utf-8"
+            )
+            extra = subprocess.run([
+                sys.executable,
+                str(ROOT / "experiments/channel_matrix/aggregate.py"),
+                "--root", str(audit_root),
+                "--out", str(root / "aggregate-extra"),
+                "--config", str(aggregate_config),
+                "--model-id", "qwen25_7b",
+                "--n-boot", "1",
+            ], cwd=ROOT, check=False, capture_output=True, text=True)
+            self.assertNotEqual(extra.returncode, 0)
+            self.assertIn(
+                "config-declared audit roster mismatch", extra.stderr
+            )
+            self.assertIn(
+                "('qwen25_7b', 'tofu-a181', 999)", extra.stderr
+            )
+            shutil.rmtree(extra_run)
+
+            shutil.rmtree(
+                audit_root / "qwen25_7b" / "tofu-a186" / "seed-2026"
+            )
+            partial = subprocess.run([
+                sys.executable,
+                str(ROOT / "experiments/channel_matrix/aggregate.py"),
+                "--root", str(audit_root),
+                "--out", str(root / "aggregate-partial"),
+                "--config", str(aggregate_config),
+                "--model-id", "qwen25_7b",
+                "--n-boot", "1",
+            ], cwd=ROOT, check=False, capture_output=True, text=True)
+            self.assertNotEqual(partial.returncode, 0)
+            self.assertIn(
+                "config-declared audit roster mismatch", partial.stderr
+            )
+            self.assertIn(
+                "('qwen25_7b', 'tofu-a186', 2026)", partial.stderr
+            )
 
 
 if __name__ == "__main__":

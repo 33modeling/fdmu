@@ -83,38 +83,24 @@ require_frozen() {  # $1 = freeze yaml path, $2 = what for
 
 require_passed_fidelity() {  # $1 = config path, $2 = model id
   local cfg="$1" model_id="$2"
-  python - "$cfg" "$model_id" "$CLUSTER_RUNS_ROOT" <<'PY' \
+  python - "$ROOT" "$cfg" "$model_id" <<'PY' \
     || die "${model_id} audit requires a passed fidelity certificate; run the model's h100_campaign.sh fidelity phase first."
-import json
 import sys
 from pathlib import Path
 
-import yaml
+root, config_raw, model_id = sys.argv[1:]
+sys.path.insert(0, str(Path(root) / "experiments" / "channel_matrix"))
+import run_campaign
 
-config_path = Path(sys.argv[1])
-model_id = sys.argv[2]
-runs_root = Path(sys.argv[3])
-config = yaml.safe_load(config_path.read_text(encoding="utf-8"))
-declared = (config.get("audit") or {}).get("fidelity_certificates") or {}
-raw = declared.get(model_id)
-if not raw:
-    raise SystemExit(f"no fidelity certificate declared for {model_id}")
-path = Path(raw)
-if not path.is_absolute() and path.parts and path.parts[0] == "runs":
-    path = runs_root.joinpath(*path.parts[1:])
-elif not path.is_absolute():
-    path = config_path.resolve().parents[1] / path
-if not path.is_file():
-    raise SystemExit(f"missing fidelity certificate for {model_id}: {path}")
+config_path = Path(config_raw).resolve()
+config = run_campaign._load_yaml(config_path)
+model = run_campaign._enabled_models(config, {model_id})[0]
 try:
-    payload = json.loads(path.read_text(encoding="utf-8"))
-except (OSError, json.JSONDecodeError) as exc:
-    raise SystemExit(f"invalid fidelity certificate for {model_id}: {path}: {exc}")
-if payload.get("schema") != "fd-fidelity-certificate-v1":
-    raise SystemExit(f"wrong fidelity certificate schema for {model_id}: {path}")
-if payload.get("passed") is not True:
-    raise SystemExit(f"fidelity certificate did not pass for {model_id}: {path}")
-print(f"[enqueue_table12] verified passed fidelity certificate: {path}")
+    validated = run_campaign.validate_fidelity_artifact_pair(config, model)
+except (OSError, ValueError) as exc:
+    print(f"[enqueue_table12] invalid fidelity certificate: {exc}", file=sys.stderr)
+    raise SystemExit(1)
+print(f"[enqueue_table12] verified current-contract fidelity certificate: {validated['path']}")
 PY
 }
 

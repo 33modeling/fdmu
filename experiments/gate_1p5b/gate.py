@@ -13,11 +13,14 @@ from __future__ import annotations
 
 import argparse
 from contextlib import contextmanager
+from datetime import datetime, timezone
 import fcntl
 import gc
+import hashlib
 import importlib.metadata
 import json
 import os
+import pickle
 import platform
 import shutil
 import sys
@@ -389,22 +392,162 @@ def _sft_cache_guard(path: Path, *, exclusive: bool):
             fcntl.flock(guard.fileno(), fcntl.LOCK_UN)
 
 
-def _load_sft_cache(model, path: Path, contract: dict, log) -> dict | None:
+def _sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(8 * 2**20), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _quarantine_sft_cache_locked(path: Path, reason: str, log) -> Path:
+    """Preserve a known-bad final cache pair while holding its exclusive lock."""
     meta_path = path.with_suffix(path.suffix + ".json")
-    with _sft_cache_guard(path, exclusive=False):
-        if not path.exists() and not meta_path.exists():
-            return None
-        if not path.exists() or not meta_path.exists():
-            raise RuntimeError(f"incomplete SFT cache pair: {path} / {meta_path}")
+    runs_root = Path(os.environ.get("CLUSTER_RUNS_ROOT", ROOT / "runs"))
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S.%fZ")
+    destination = (
+        runs_root
+        / "forensics"
+        / "sft-cache-corrupt"
+        / f"{stamp}__{path.stem}__{uuid.uuid4().hex[:8]}"
+    )
+    destination.mkdir(parents=True, exist_ok=False)
+    moved = []
+    for artifact in (path, meta_path):
+        if artifact.exists():
+            target = destination / artifact.name
+            shutil.move(str(artifact), str(target))
+            moved.append(str(target))
+    manifest = {
+        "schema": "sft-cache-quarantine-v1",
+        "source_state": str(path),
+        "source_metadata": str(meta_path),
+        "reason": reason,
+        "quarantined_at_utc": datetime.now(timezone.utc).isoformat(),
+        "artifacts": moved,
+    }
+    (destination / "quarantine.json").write_text(
+        json.dumps(manifest, indent=2, sort_keys=True),
+        encoding="utf-8",
+    )
+    log(
+        f"QUARANTINED corrupt SFT cache reason={reason} "
+        f"destination={destination}"
+    )
+    return destination
+
+
+def _known_sft_cache_corruption(error: Exception) -> bool:
+    if isinstance(error, (EOFError, pickle.UnpicklingError, UnicodeDecodeError)):
+        return True
+    if not isinstance(error, RuntimeError):
+        return False
+    message = str(error).lower()
+    return any(
+        marker in message
+        for marker in (
+            "unexpected pos",
+            "pytorchstreamreader failed",
+            "failed finding central directory",
+            "invalid header or archive is corrupted",
+            "pickle data was truncated",
+            "invalid magic number",
+        )
+    )
+
+
+def _read_sft_cache_metadata_locked(
+    path: Path,
+    contract: dict,
+    log,
+) -> dict | None:
+    """Validate the final pair without converting generic I/O into a cache miss."""
+    meta_path = path.with_suffix(path.suffix + ".json")
+    state_exists = path.exists()
+    metadata_exists = meta_path.exists()
+    if not state_exists and not metadata_exists:
+        return None
+    if not state_exists or not metadata_exists:
+        _quarantine_sft_cache_locked(path, "incomplete final cache pair", log)
+        return None
+    try:
         metadata = json.loads(meta_path.read_text(encoding="utf-8"))
-        if metadata.get("contract") != contract:
-            raise RuntimeError(
-                f"SFT cache contract mismatch at {path}; preserve it and use a new cache path"
-            )
+    except json.JSONDecodeError as error:
+        _quarantine_sft_cache_locked(
+            path,
+            f"invalid metadata JSON: {error}",
+            log,
+        )
+        return None
+    if not isinstance(metadata, dict):
+        _quarantine_sft_cache_locked(path, "metadata is not a JSON object", log)
+        return None
+    if metadata.get("contract") != contract:
+        raise RuntimeError(
+            f"SFT cache contract mismatch at {path}; preserve it and use a new cache path"
+        )
+    if not isinstance(metadata.get("sft_result"), dict):
+        _quarantine_sft_cache_locked(path, "metadata has no valid sft_result", log)
+        return None
+
+    integrity = metadata.get("integrity")
+    if integrity is None:
+        log(f"loading legacy SFT cache without integrity metadata: {path}")
+        return metadata
+    if not isinstance(integrity, dict):
+        _quarantine_sft_cache_locked(path, "integrity metadata is not an object", log)
+        return None
+    if integrity.get("algorithm") != "sha256":
+        raise RuntimeError(
+            f"unsupported SFT cache integrity algorithm at {path}: "
+            f"{integrity.get('algorithm')!r}"
+        )
+    expected_size = integrity.get("size_bytes")
+    expected_sha = integrity.get("sha256")
+    if not isinstance(expected_size, int) or expected_size < 0:
+        _quarantine_sft_cache_locked(path, "invalid integrity size_bytes", log)
+        return None
+    if not isinstance(expected_sha, str) or len(expected_sha) != 64:
+        _quarantine_sft_cache_locked(path, "invalid integrity sha256", log)
+        return None
+    actual_size = path.stat().st_size
+    if actual_size != expected_size:
+        _quarantine_sft_cache_locked(
+            path,
+            f"size mismatch expected={expected_size} actual={actual_size}",
+            log,
+        )
+        return None
+    actual_sha = _sha256_file(path)
+    if actual_sha != expected_sha:
+        _quarantine_sft_cache_locked(
+            path,
+            f"sha256 mismatch expected={expected_sha} actual={actual_sha}",
+            log,
+        )
+        return None
+    return metadata
+
+
+def _load_sft_cache(model, path: Path, contract: dict, log) -> dict | None:
+    with _sft_cache_guard(path, exclusive=True):
+        metadata = _read_sft_cache_metadata_locked(path, contract, log)
+        if metadata is None:
+            return None
         try:
-            state = torch.load(path, map_location="cpu", weights_only=True)
-        except TypeError:  # torch versions before weights_only
-            state = torch.load(path, map_location="cpu")
+            try:
+                state = torch.load(path, map_location="cpu", weights_only=True)
+            except TypeError:  # torch versions before weights_only
+                state = torch.load(path, map_location="cpu")
+        except Exception as error:
+            if not _known_sft_cache_corruption(error):
+                raise
+            _quarantine_sft_cache_locked(
+                path,
+                f"{type(error).__name__}: {error}",
+                log,
+            )
+            return None
     model.load_state_dict(state)
     del state
     result = metadata["sft_result"]
@@ -413,34 +556,37 @@ def _load_sft_cache(model, path: Path, contract: dict, log) -> dict | None:
     return result
 
 
-def _write_sft_cache(path: Path, contract: dict, result: dict, state: dict, log) -> None:
+def _write_sft_cache(
+    path: Path,
+    contract: dict,
+    result: dict,
+    state: dict,
+    log,
+) -> bool:
     path.parent.mkdir(parents=True, exist_ok=True)
     meta_path = path.with_suffix(path.suffix + ".json")
     token = f"{os.getpid()}-{uuid.uuid4().hex}"
     tmp_state = path.with_name(f".{path.name}.{token}.tmp")
     tmp_meta = meta_path.with_name(f".{meta_path.name}.{token}.tmp")
     with _sft_cache_guard(path, exclusive=True):
-        for stale in (
+        stale_paths = {
             path.with_suffix(path.suffix + ".tmp"),
             meta_path.with_suffix(meta_path.suffix + ".tmp"),
-        ):
+            *path.parent.glob(f".{path.name}.*.tmp"),
+            *meta_path.parent.glob(f".{meta_path.name}.*.tmp"),
+        }
+        for stale in stale_paths:
             if stale.exists():
                 size_gib = stale.stat().st_size / 2**30
                 stale.unlink()
                 log(
-                    f"removed incomplete legacy SFT cache temporary "
+                    f"removed abandoned SFT cache temporary "
                     f"path={stale} size_gib={size_gib:.2f}"
                 )
-        if path.exists() and meta_path.exists():
-            metadata = json.loads(meta_path.read_text(encoding="utf-8"))
-            if metadata.get("contract") != contract:
-                raise RuntimeError(
-                    f"concurrent SFT cache contract mismatch at {path}"
-                )
+        metadata = _read_sft_cache_metadata_locked(path, contract, log)
+        if metadata is not None:
             log(f"reusing SFT cache written by a concurrent worker: {path}")
-            return
-        if path.exists() or meta_path.exists():
-            raise RuntimeError(f"incomplete SFT cache pair: {path} / {meta_path}")
+            return False
 
         state_bytes = sum(
             tensor.numel() * tensor.element_size()
@@ -469,9 +615,18 @@ def _write_sft_cache(path: Path, contract: dict, result: dict, state: dict, log)
             )
             with tmp_state.open("rb") as handle:
                 os.fsync(handle.fileno())
+            integrity = {
+                "algorithm": "sha256",
+                "size_bytes": tmp_state.stat().st_size,
+                "sha256": _sha256_file(tmp_state),
+            }
             tmp_meta.write_text(
                 json.dumps(
-                    {"contract": contract, "sft_result": result},
+                    {
+                        "contract": contract,
+                        "sft_result": result,
+                        "integrity": integrity,
+                    },
                     indent=2,
                     sort_keys=True,
                 ),
@@ -485,6 +640,7 @@ def _write_sft_cache(path: Path, contract: dict, result: dict, state: dict, log)
             tmp_state.unlink(missing_ok=True)
             tmp_meta.unlink(missing_ok=True)
     log(f"wrote development SFT cache {path}")
+    return True
 
 
 def main():
@@ -620,8 +776,38 @@ def main():
     # Keep the frozen target on host memory.  Otherwise model0 + state0 + the
     # fresh optimizer model coexist on device during every trajectory.
     state0 = {k: v.detach().cpu().clone() for k, v in model0.state_dict().items()}
-    if cache_path is not None and not cache_path.exists():
-        _write_sft_cache(cache_path, cache_contract, sft_result, state0, log)
+    if cache_path is not None and not sft_cache_hit:
+        for cache_attempt in range(3):
+            if _write_sft_cache(
+                cache_path,
+                cache_contract,
+                sft_result,
+                state0,
+                log,
+            ):
+                break
+            del state0
+            concurrent_result = _load_sft_cache(
+                model0,
+                cache_path,
+                cache_contract,
+                log,
+            )
+            if concurrent_result is not None:
+                sft_result = concurrent_result
+                state0 = {
+                    k: v.detach().cpu().clone()
+                    for k, v in model0.state_dict().items()
+                }
+                break
+            state0 = {
+                k: v.detach().cpu().clone()
+                for k, v in model0.state_dict().items()
+            }
+        else:
+            raise RuntimeError(
+                f"SFT cache did not stabilize after 3 attempts: {cache_path}"
+            )
     del model0
     clear_cuda_cache()
 
