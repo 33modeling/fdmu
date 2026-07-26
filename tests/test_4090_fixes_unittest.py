@@ -62,10 +62,9 @@ class LauncherContractTests(unittest.TestCase):
             top.index("run_stage declared-fidelity"),
             top.index("run_stage target-evidence-latex"),
         )
-        self.assertIn("unset APPROVE_JOINT_BEST", top)
-        self.assertIn(
-            'require_file_approval JOINT "$JOINT_ROOT/BEST.json"', top
-        )
+        self.assertNotIn("require_file_approval", top)
+        self.assertNotIn("APPROVE JOINT", top)
+        self.assertNotIn("read -r response", top)
         self.assertIn(
             'PARENT_FREEZE="${PARENT_FREEZE:-$CALIBRATION_ROOT/freeze/',
             top,
@@ -76,7 +75,9 @@ class LauncherContractTests(unittest.TestCase):
         self.assertIn('--out "$PARENT_FREEZE"', approval)
         self.assertIn('--campaign "$CAMPAIGN"', approval)
         self.assertIn('--runtime "$RUNTIME"', approval)
-        self.assertIn('token="APPROVE PARENT ${digest:0:12}"', approval)
+        self.assertNotIn('token="APPROVE PARENT', approval)
+        self.assertNotIn("read -r response", approval)
+        self.assertIn("--approve", approval)
         self.assertIn('--parent-freeze "$PARENT_FREEZE"', sweep)
         self.assertIn('PIPELINE_LOG="$RUN_ROOT/launcher_logs/', top)
         self.assertNotIn('pip install "torch==', calibration)

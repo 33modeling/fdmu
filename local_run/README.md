@@ -16,7 +16,7 @@ GPU_IDS=0,1 bash local_run/run_tofu_1p5b_4090x2.sh
 ```text
 environment bootstrap + dependency/CUDA/data 검사
   -> parent calibration
-  -> resolved parent freeze 승인
+  -> resolved parent freeze 자동 검증
   -> joint development sweep
   -> trial 검증과 종료 판정
   -> declared setting-level fidelity
@@ -24,10 +24,10 @@ environment bootstrap + dependency/CUDA/data 검사
   -> raw evidence -> table1.tex
 ```
 
-원클릭 실행기는 parent proposal과 `BEST.json` 전체를 각각 출력하고 파일
-SHA-256 앞 12자리에 묶인 승인 문구를 요구한다. 입력이 일치하지 않거나
-터미널이 아닌 실행에서는 target으로 진행하지 않는다. 실행 전에 설정한
-`APPROVE_JOINT_BEST` 값은 원클릭 런처가 제거한다.
+원클릭 실행기는 사람의 입력을 기다리지 않는다. parent proposal은 sealed
+calibration input에서 다시 계산해 일치 여부를 확인하고, `BEST.json`은
+target-free terminal winner와 trial 산출물을 검증한다. 각 단계의 SHA-256
+freeze 기록을 남긴 뒤 자동으로 다음 단계로 진행한다.
 
 단계별 실행과 재개도 지원한다. 먼저 calibration과 sweep까지만 실행한다.
 
@@ -36,13 +36,12 @@ RUN_FINALIZE=0 GPU_IDS=0,1 \
   bash local_run/run_tofu_1p5b_4090x2.sh
 ```
 
-`joint_sweep/BEST.json`을 검토한 뒤 finalize만 실행한다.
+`joint_sweep/BEST.json`이 생성된 뒤 finalize만 실행한다.
 
 ```bash
 bash local_run/run_tofu_1p5b_fidelity.sh
 
-APPROVE_JOINT_BEST=1 GPU_IDS=0,1 \
-  bash local_run/finalize_joint_sweep_to_latex.sh
+GPU_IDS=0,1 bash local_run/finalize_joint_sweep_to_latex.sh
 ```
 
 최종 LaTeX는 기본적으로
@@ -55,10 +54,10 @@ APPROVE_JOINT_BEST=1 GPU_IDS=0,1 \
 `fidelity/launcher_logs/current.log`,
 `final/launcher_logs/current.log`에 남는다.
 
-Parent calibration의 exit `4`는 실패가 아니라 resolved proposal에 대한
-승인 경계다. 원큐 실행기는 이 상태만 정상으로 받아 다음
-`parent-freeze-approval` 단계로 진행한다. Exit `3`
-(`PARENT_CALIBRATION_UNRESOLVED`)은 그대로 중단한다.
+현재 Parent calibration은 resolved proposal을 생성하면 exit `0`으로
+종료하고 자동 freeze 검증 단계로 진행한다. 이전 checkout에서 생성된
+exit `4` 경계도 재개 호환성을 위해 원큐 실행기가 정상으로 받아들인다.
+Exit `3` (`PARENT_CALIBRATION_UNRESOLVED`)은 그대로 중단한다.
 
 세 단계는 모두 저장소의 `.venv/bin/python`을 사용한다. 환경 bootstrap은
 `torch==2.7.1`을 항상 검증하며, `.venv`가 정상이고 버전이 정확하면 재설치하지

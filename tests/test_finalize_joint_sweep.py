@@ -7,6 +7,7 @@ from pathlib import Path
 import yaml
 
 from experiments.paper.finalize_joint_sweep import (
+    _record_joint_best_freeze,
     _validate_existing_freeze,
     _write_final_campaign,
     resolve_joint_winner,
@@ -45,6 +46,7 @@ def test_resolve_joint_winner_uses_sealed_trial_artifacts(tmp_path: Path) -> Non
         {
             "status": "draft",
             "human_review_required": True,
+            "development_only": True,
             "target_used": False,
             "trial_dir": str(trial),
             "recommended_runtime": str(runtime),
@@ -70,6 +72,15 @@ def test_resolve_joint_winner_uses_sealed_trial_artifacts(tmp_path: Path) -> Non
         "runtime": runtime.resolve(),
         "protection_input": protection.resolve(),
     }
+    record_path = _record_joint_best_freeze(joint, resolved)
+    first = record_path.read_bytes()
+    assert json.loads(first)["automatic"] is True
+    assert json.loads(first)["target_used"] is False
+    assert json.loads(first)["best_sha256"] == hashlib.sha256(
+        (joint / "BEST.json").read_bytes()
+    ).hexdigest()
+    assert _record_joint_best_freeze(joint, resolved) == record_path
+    assert record_path.read_bytes() == first
 
 
 def test_final_campaign_points_to_external_selection_freeze(

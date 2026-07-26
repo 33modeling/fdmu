@@ -54,15 +54,15 @@ GPU 머신에서는 기존 검증된 `.venv`가 있으면 다시 만들지 않�
 GPU_IDS=0,1 bash local_run/run_tofu_1p5b_4090x2.sh
 ```
 
-환경 bootstrap, calibration, parent-freeze 승인, joint 개발 스윕, declared
+환경 bootstrap, calibration, parent-freeze 자동 검증, joint 개발 스윕, declared
 fidelity, target, evidence, `table1.tex` 생성을 순서대로 실행한다. 원클릭
-실행 중 parent proposal과 `BEST.json`을 화면에 출력하며, 표시된 SHA-256
-승인 문구를 직접 입력해야 다음 단계로 진행한다. 완료 unit과 검증된 SFT
-cache는 재사용한다. 결과와 로그는 기본적으로
+실행은 사람의 입력을 기다리지 않는다. target-free 산출물을 재검증하고
+SHA-256이 포함된 freeze 기록을 남긴 뒤 자동으로 다음 단계로 진행한다.
+완료 unit과 검증된 SFT cache는 재사용한다. 결과와 로그는 기본적으로
 `/rdata/minsoo3.kim/results/paper/tofu_qwen25_1p5b/`에 쓴다. 전체 로그는
 `launcher_logs/current.log`, 최종 표는 `final/table1.tex`이다.
 
-단계별 실행은 sweep까지만 수행한 뒤 BEST를 검토하고 finalize를 재개한다.
+단계별 실행은 sweep까지만 수행한 뒤 finalize를 재개한다.
 
 ```bash
 RUN_FINALIZE=0 GPU_IDS=0,1 \
@@ -70,8 +70,7 @@ RUN_FINALIZE=0 GPU_IDS=0,1 \
 
 bash local_run/run_tofu_1p5b_fidelity.sh
 
-APPROVE_JOINT_BEST=1 GPU_IDS=0,1 \
-  bash local_run/finalize_joint_sweep_to_latex.sh
+GPU_IDS=0,1 bash local_run/finalize_joint_sweep_to_latex.sh
 ```
 
 ### 범용 로컬 PDF-v4 진단
@@ -107,7 +106,8 @@ df -h /group-volume/fdmu
 Audit에는 모델별 fidelity certificate가 필수다. 인증서 누락을 무시하거나
 audit gate를 우회하지 않는다. 아래 원클릭 실행기는 공유 볼륨 환경 설정,
 preflight, fidelity, audit enqueue/monitor, aggregate, LaTeX 생성을 수행한다.
-통과한 인증서를 확인한 뒤에만 audit을 적재한다.
+통과한 인증서를 확인한 뒤에만 audit을 적재한다. 7B/14B 런처는 커밋된
+freeze 설정을 검증해 사용하며 실행 중 키보드 승인 입력을 요구하지 않는다.
 
 ```bash
 bash experiments/cluster/run_tofu_7b_h100.sh

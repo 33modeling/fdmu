@@ -55,6 +55,16 @@ def _sha256(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
+def _atomic_json(path: Path, value: Mapping[str, Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_name(path.name + ".tmp")
+    temporary.write_text(
+        json.dumps(dict(value), indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    os.replace(temporary, path)
+
+
 def _read_jsonl(path: Path) -> list[dict[str, Any]]:
     try:
         rows = [
@@ -416,11 +426,12 @@ def resolve_joint_winner(joint_root: Path) -> dict[str, Path]:
             f"joint sweep is not a target-free terminal winner: {joint_root}"
         )
     if (
-        best.get("status") != "draft"
-        or best.get("human_review_required") is not True
+        best.get("status") not in {"draft", "selected"}
+        or best.get("human_review_required") not in {True, False}
+        or best.get("development_only") is not True
         or best.get("target_used") is not False
     ):
-        raise FinalizationError("BEST.json does not describe a reviewable joint winner")
+        raise FinalizationError("BEST.json does not describe a target-free joint winner")
 
     trial_dir = Path(str(best.get("trial_dir", ""))).resolve()
     if (
@@ -454,6 +465,40 @@ def resolve_joint_winner(joint_root: Path) -> dict[str, Path]:
         "runtime": runtime,
         "protection_input": protection_input,
     }
+
+
+def _record_joint_best_freeze(
+    joint_root: Path,
+    winner: Mapping[str, Path],
+) -> Path:
+    joint_root = joint_root.resolve()
+    best_path = joint_root / "BEST.json"
+    status_path = joint_root / "SWEEP_STATUS.json"
+    freeze_record = joint_root / "JOINT_BEST_FREEZE.json"
+    record = {
+        "schema_version": 1,
+        "contract": "tofu-pdf-v4-joint-best-freeze",
+        "status": "frozen",
+        "automatic": True,
+        "development_only": True,
+        "target_used": False,
+        "best": str(best_path),
+        "best_sha256": _sha256(best_path),
+        "sweep_status": str(status_path),
+        "sweep_status_sha256": _sha256(status_path),
+        "trial_dir": str(winner["trial_dir"]),
+    }
+    if freeze_record.is_file():
+        current_record = _load_json(freeze_record)
+        if current_record != record:
+            raise FinalizationError(
+                f"existing joint BEST freeze differs from validated winner: {freeze_record}"
+            )
+        print(f"[RESUME] reusing joint BEST freeze: {freeze_record}", flush=True)
+        return freeze_record
+    _atomic_json(freeze_record, record)
+    print(f"[FREEZE] automatic joint BEST freeze: {freeze_record}", flush=True)
+    return freeze_record
 
 
 def _write_final_campaign(
@@ -611,11 +656,7 @@ def _validate_existing_freeze(
 
 def run(args: argparse.Namespace) -> None:
     winner = resolve_joint_winner(args.joint_root)
-    if not args.approve_joint_best:
-        raise FinalizationError(
-            "target evaluation requires explicit review approval: "
-            "pass --approve-joint-best"
-        )
+    _record_joint_best_freeze(args.joint_root, winner)
 
     args.output_root.mkdir(parents=True, exist_ok=True)
     selection_freeze = (
@@ -776,7 +817,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--fidelity-input", type=Path, required=True)
     parser.add_argument("--gpus", default="0,1")
     parser.add_argument("--progress-interval", type=float, default=15.0)
-    parser.add_argument("--approve-joint-best", action="store_true")
+    parser.add_argument(
+        "--approve-joint-best",
+        action="store_true",
+        help=argparse.SUPPRESS,
+    )
     args = parser.parse_args(argv)
     try:
         args.gpus = tuple(int(value.strip()) for value in args.gpus.split(","))

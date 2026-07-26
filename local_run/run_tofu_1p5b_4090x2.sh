@@ -16,8 +16,6 @@ export JOINT_ROOT="${JOINT_ROOT:-$RESULTS_ROOT}"
 export FINAL_ROOT="${FINAL_ROOT:-$RUN_ROOT/final}"
 export FIDELITY_ROOT="${FIDELITY_ROOT:-$RUN_ROOT/fidelity}"
 export PARENT_FREEZE="${PARENT_FREEZE:-$CALIBRATION_ROOT/freeze/tofu_parent_freeze_1p5b.yaml}"
-# A one-command run must approve the winner only after it exists and is shown.
-unset APPROVE_JOINT_BEST
 
 timestamp() {
   date -u '+%FT%TZ'
@@ -87,41 +85,6 @@ run_stage_accept() {
     "$(timestamp)" "$name" "$status"
 }
 
-require_file_approval() {
-  local label="$1"
-  local path="$2"
-  local digest token response
-  if [[ ! -f "$path" ]]; then
-    printf '[ERROR] approval artifact is missing: %s\n' "$path" >&2
-    return 2
-  fi
-  printf '[%s] review artifact for %s: %s\n' "$(timestamp)" "$label" "$path"
-  printf '%s\n' '----- REVIEW ARTIFACT BEGIN -----'
-  cat "$path"
-  printf '%s\n' '----- REVIEW ARTIFACT END -----'
-  if [[ ! -t 0 ]]; then
-    printf '[ERROR] %s requires an interactive terminal; artifact was not approved\n' \
-      "$label" >&2
-    return 4
-  fi
-  digest="$("$PYTHON" - "$path" <<'PY'
-import hashlib
-import sys
-
-print(hashlib.sha256(open(sys.argv[1], "rb").read()).hexdigest())
-PY
-)"
-  token="APPROVE ${label} ${digest:0:12}"
-  printf '[APPROVAL] type exactly: %s\n> ' "$token"
-  IFS= read -r response
-  if [[ "$response" != "$token" ]]; then
-    printf '[ERROR] %s approval rejected; expected exact typed token\n' "$label" >&2
-    return 4
-  fi
-  printf '[%s] approval accepted: label=%s sha256=%s\n' \
-    "$(timestamp)" "$label" "$digest"
-}
-
 printf '[%s] TOFU 1.5B 4090x2 pipeline start pid=%s log=%s\n' \
   "$(timestamp)" "$$" "$PIPELINE_LOG"
 printf '[CONFIG] repo=%s python=%s gpus=%s run_root=%s\n' \
@@ -130,23 +93,21 @@ printf '[STORAGE] calibration=%s sft_cache=%s sweep=%s final=%s\n' \
   "$CALIBRATION_ROOT" "$SFT_CACHE_ROOT" "$JOINT_ROOT" "$FINAL_ROOT"
 printf '[STORAGE] parent_freeze=%s fidelity=%s\n' "$PARENT_FREEZE" "$FIDELITY_ROOT"
 df -h "$RUN_ROOT" 2>&1 || true
-# Exit 4 is the successful protocol boundary: calibration is resolved and
-# requires the explicit target-free approval performed by the next stage.
+# Exit 4 is accepted for calibration artifacts produced by older checkouts.
+# Current calibration exits 0 once its target-free proposal is resolved.
 run_stage_accept calibration "0 4" bash local_run/run_tofu_1p5b_calibration.sh
-run_stage parent-freeze-approval \
-  bash local_run/approve_tofu_1p5b_parent_freeze.sh
+run_stage parent-freeze-validation \
+  bash local_run/approve_tofu_1p5b_parent_freeze.sh --approve
 run_stage joint-sweep bash local_run/sweep_joint_1p5b_4090x2.sh "$@"
 if [[ "${RUN_FINALIZE:-1}" == "1" ]]; then
   run_stage declared-fidelity bash local_run/run_tofu_1p5b_fidelity.sh
-  STAGE=joint-best-approval
-  require_file_approval JOINT "$JOINT_ROOT/BEST.json"
   run_stage target-evidence-latex \
-    env APPROVE_JOINT_BEST=1 bash local_run/finalize_joint_sweep_to_latex.sh
+    bash local_run/finalize_joint_sweep_to_latex.sh
 else
   printf '[%s] finalize skipped: RUN_FINALIZE=%s\n' \
     "$(timestamp)" "${RUN_FINALIZE:-}"
-  printf '[NEXT] review %s/BEST.json, then run:\n' "$JOINT_ROOT"
-  printf '  APPROVE_JOINT_BEST=1 GPU_IDS=%s RUN_ROOT=%q bash local_run/finalize_joint_sweep_to_latex.sh\n' \
+  printf '[NEXT] resume validated finalization with:\n'
+  printf '  GPU_IDS=%s RUN_ROOT=%q bash local_run/finalize_joint_sweep_to_latex.sh\n' \
     "${GPU_IDS:-0,1}" "$RUN_ROOT"
 fi
 printf '[%s] TOFU 1.5B 4090x2 pipeline complete\n' "$(timestamp)"

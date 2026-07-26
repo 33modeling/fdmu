@@ -242,12 +242,12 @@ def run(args: argparse.Namespace) -> int:
             f"parents={unresolved} proposal={proposal_path}"
         )
         return 3
-    _status(f"HUMAN_FREEZE_REQUIRED proposal={proposal_path}")
+    _status(f"AUTOMATIC_FREEZE_READY proposal={proposal_path}")
     _status(
-        "APPROVE_COMMAND "
+        "FREEZE_COMMAND "
         "bash local_run/approve_tofu_1p5b_parent_freeze.sh --approve"
     )
-    return 4
+    return 0
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:

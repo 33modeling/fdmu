@@ -14,10 +14,6 @@ FINAL_ROOT="${FINAL_ROOT:-$RUN_ROOT/final}"
 FIDELITY_SUMMARY="${FIDELITY_SUMMARY:-$RUN_ROOT/fidelity/fidelity_summary.json}"
 PROGRESS_INTERVAL_SECONDS="${PROGRESS_INTERVAL_SECONDS:-15}"
 
-if [[ "${APPROVE_JOINT_BEST:-0}" != "1" ]]; then
-  printf '[ERROR] review joint_sweep/BEST.json, then set APPROVE_JOINT_BEST=1\n' >&2
-  exit 4
-fi
 if [[ ! -x "$PYTHON" ]]; then
   printf '[ERROR] Python environment is missing: %s\n' "$PYTHON" >&2
   exit 2
@@ -64,5 +60,4 @@ exec "$PYTHON" -u experiments/paper/finalize_joint_sweep.py \
   --python "$PYTHON" \
   --progress-interval "$PROGRESS_INTERVAL_SECONDS" \
   --fidelity-input "$FIDELITY_SUMMARY" \
-  --approve-joint-best \
   "$@"

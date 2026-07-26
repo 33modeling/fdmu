@@ -55,7 +55,7 @@ class SweepError(ValueError):
 
 
 class HumanFreezeRequired(SweepError):
-    """A prospective human freeze blocks further execution."""
+    """A validated parent freeze is required before further execution."""
 
 
 def _utc_now() -> str:
@@ -644,7 +644,7 @@ def _require_parent_freeze(runtime: Mapping[str, Any], setting: str) -> None:
         )
     if not ready:
         raise HumanFreezeRequired(
-            "HUMAN_FREEZE_REQUIRED: parent calibration must be reviewed and frozen "
+            "PARENT_FREEZE_REQUIRED: parent calibration must be validated and frozen "
             f"before the joint sweep: {path}"
         )
 
@@ -1443,8 +1443,9 @@ def run(args: argparse.Namespace) -> int:
             recommendation = {
                 "schema_version": 1,
                 "contract": CONTRACT,
-                "status": "draft",
-                "human_review_required": True,
+                "status": "selected",
+                "human_review_required": False,
+                "automatic_freeze_ready": True,
                 "development_only": True,
                 "target_used": False,
                 "trial_id": trial["id"],
@@ -1452,7 +1453,7 @@ def run(args: argparse.Namespace) -> int:
                 "recommended_runtime": str(local_runtime),
                 "joint_comparison": str(trial_dir / "joint_comparison.json"),
                 "next_action": (
-                    "review and commit a prospective freeze before target evaluation"
+                    "validate and record the target-free freeze before target evaluation"
                 ),
             }
             _write_once(
@@ -1477,7 +1478,7 @@ def run(args: argparse.Namespace) -> int:
                 },
             )
             print(f"JOINT_BEST_DEVELOPMENT: {trial_dir}")
-            print("target evaluation was not run; human freeze is required")
+            print("target evaluation was not run; automatic freeze validation is next")
             return 0
 
     if args.dry_run:
