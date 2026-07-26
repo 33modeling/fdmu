@@ -12,12 +12,16 @@ Artifacts land in runs/gate_<tag>/ (tables + JSON + seal ledger).
 from __future__ import annotations
 
 import argparse
+from contextlib import contextmanager
+import fcntl
 import gc
 import importlib.metadata
 import json
 import os
 import platform
+import shutil
 import sys
+import uuid
 from pathlib import Path
 
 import torch
@@ -369,21 +373,38 @@ def _sft_cache_contract(a, req, probe_block) -> dict:
     }
 
 
+@contextmanager
+def _sft_cache_guard(path: Path, *, exclusive: bool):
+    """Serialize readers/writers that share one request-level cache."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    guard_path = path.with_suffix(path.suffix + ".guard")
+    with guard_path.open("a+b") as guard:
+        fcntl.flock(
+            guard.fileno(),
+            fcntl.LOCK_EX if exclusive else fcntl.LOCK_SH,
+        )
+        try:
+            yield
+        finally:
+            fcntl.flock(guard.fileno(), fcntl.LOCK_UN)
+
+
 def _load_sft_cache(model, path: Path, contract: dict, log) -> dict | None:
     meta_path = path.with_suffix(path.suffix + ".json")
-    if not path.exists() and not meta_path.exists():
-        return None
-    if not path.exists() or not meta_path.exists():
-        raise RuntimeError(f"incomplete SFT cache pair: {path} / {meta_path}")
-    metadata = json.loads(meta_path.read_text(encoding="utf-8"))
-    if metadata.get("contract") != contract:
-        raise RuntimeError(
-            f"SFT cache contract mismatch at {path}; preserve it and use a new cache path"
-        )
-    try:
-        state = torch.load(path, map_location="cpu", weights_only=True)
-    except TypeError:  # torch versions before weights_only
-        state = torch.load(path, map_location="cpu")
+    with _sft_cache_guard(path, exclusive=False):
+        if not path.exists() and not meta_path.exists():
+            return None
+        if not path.exists() or not meta_path.exists():
+            raise RuntimeError(f"incomplete SFT cache pair: {path} / {meta_path}")
+        metadata = json.loads(meta_path.read_text(encoding="utf-8"))
+        if metadata.get("contract") != contract:
+            raise RuntimeError(
+                f"SFT cache contract mismatch at {path}; preserve it and use a new cache path"
+            )
+        try:
+            state = torch.load(path, map_location="cpu", weights_only=True)
+        except TypeError:  # torch versions before weights_only
+            state = torch.load(path, map_location="cpu")
     model.load_state_dict(state)
     del state
     result = metadata["sft_result"]
@@ -395,15 +416,74 @@ def _load_sft_cache(model, path: Path, contract: dict, log) -> dict | None:
 def _write_sft_cache(path: Path, contract: dict, result: dict, state: dict, log) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     meta_path = path.with_suffix(path.suffix + ".json")
-    tmp_state = path.with_suffix(path.suffix + ".tmp")
-    tmp_meta = meta_path.with_suffix(meta_path.suffix + ".tmp")
-    torch.save(state, tmp_state)
-    tmp_meta.write_text(
-        json.dumps({"contract": contract, "sft_result": result}, indent=2, sort_keys=True),
-        encoding="utf-8",
-    )
-    os.replace(tmp_state, path)
-    os.replace(tmp_meta, meta_path)
+    token = f"{os.getpid()}-{uuid.uuid4().hex}"
+    tmp_state = path.with_name(f".{path.name}.{token}.tmp")
+    tmp_meta = meta_path.with_name(f".{meta_path.name}.{token}.tmp")
+    with _sft_cache_guard(path, exclusive=True):
+        for stale in (
+            path.with_suffix(path.suffix + ".tmp"),
+            meta_path.with_suffix(meta_path.suffix + ".tmp"),
+        ):
+            if stale.exists():
+                size_gib = stale.stat().st_size / 2**30
+                stale.unlink()
+                log(
+                    f"removed incomplete legacy SFT cache temporary "
+                    f"path={stale} size_gib={size_gib:.2f}"
+                )
+        if path.exists() and meta_path.exists():
+            metadata = json.loads(meta_path.read_text(encoding="utf-8"))
+            if metadata.get("contract") != contract:
+                raise RuntimeError(
+                    f"concurrent SFT cache contract mismatch at {path}"
+                )
+            log(f"reusing SFT cache written by a concurrent worker: {path}")
+            return
+        if path.exists() or meta_path.exists():
+            raise RuntimeError(f"incomplete SFT cache pair: {path} / {meta_path}")
+
+        state_bytes = sum(
+            tensor.numel() * tensor.element_size()
+            for tensor in state.values()
+            if torch.is_tensor(tensor)
+        )
+        free_bytes = shutil.disk_usage(path.parent).free
+        log(
+            f"writing SFT cache path={path} "
+            f"estimated_gib={state_bytes / 2**30:.2f} "
+            f"free_gib={free_bytes / 2**30:.2f}"
+        )
+        if free_bytes < state_bytes + 512 * 2**20:
+            raise RuntimeError(
+                f"insufficient disk for SFT cache {path}: "
+                f"need>{(state_bytes + 512 * 2**20) / 2**30:.2f} GiB, "
+                f"free={free_bytes / 2**30:.2f} GiB"
+            )
+        try:
+            # The sequential serializer avoids PyTorch inline-container seek
+            # failures observed for concurrent 14B writes on shared storage.
+            torch.save(
+                state,
+                tmp_state,
+                _use_new_zipfile_serialization=False,
+            )
+            with tmp_state.open("rb") as handle:
+                os.fsync(handle.fileno())
+            tmp_meta.write_text(
+                json.dumps(
+                    {"contract": contract, "sft_result": result},
+                    indent=2,
+                    sort_keys=True,
+                ),
+                encoding="utf-8",
+            )
+            with tmp_meta.open("rb") as handle:
+                os.fsync(handle.fileno())
+            os.replace(tmp_state, path)
+            os.replace(tmp_meta, meta_path)
+        finally:
+            tmp_state.unlink(missing_ok=True)
+            tmp_meta.unlink(missing_ok=True)
     log(f"wrote development SFT cache {path}")
 
 
