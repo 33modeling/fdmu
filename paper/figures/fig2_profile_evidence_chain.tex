@@ -1,0 +1,525 @@
+\begin{figure*}[!t]
+\centering
+\begingroup
+\definecolor{fTwoBlue}{HTML}{0072B2}
+\definecolor{fTwoOrange}{HTML}{D55E00}
+\definecolor{fTwoGreen}{HTML}{009E73}
+\definecolor{fTwoGray}{HTML}{707070}
+\definecolor{fTwoLightGray}{HTML}{BDBDBD}
+\definecolor{fTwoGrid}{HTML}{D9D9D9}
+\definecolor{fTwoInk}{HTML}{1A1A1A}
+
+\begin{tikzpicture}[
+  x=1cm,
+  y=1cm,
+  line cap=round,
+  line join=round,
+  >={Stealth[length=2.0mm,width=1.3mm]},
+  every node/.style={font=\sffamily},
+  panelbadge/.style={
+    fill=fTwoInk,
+    text=white,
+    rounded corners=.7mm,
+    minimum width=4.2mm,
+    minimum height=4.2mm,
+    inner sep=0pt,
+    font=\sffamily\bfseries\fontsize{7.2}{7.5}\selectfont
+  },
+  candidate/.style={
+    circle,
+    draw=fTwoGray,
+    fill=white,
+    line width=.55pt,
+    minimum size=2.35mm,
+    inner sep=0pt
+  },
+  pooloff/.style={
+    circle,
+    draw=fTwoLightGray,
+    fill=white,
+    line width=.55pt,
+    minimum size=2.05mm,
+    inner sep=0pt
+  },
+  poolon/.style={
+    circle,
+    draw=none,
+    minimum size=2.20mm,
+    inner sep=0pt
+  }
+]
+\path[use as bounding box] (0,0) rectangle (17.35,7.65);
+
+% --------------------------------------------------------------------------
+% Figure heading
+\node[
+  anchor=west,
+  text=fTwoInk,
+  font=\sffamily\bfseries\fontsize{13.2}{13.8}\selectfont
+] at (0.20,7.45)
+  {Two complementary coordinates for prospective retained-behavior risk};
+
+\node[
+  anchor=west,
+  text=fTwoGray,
+  font=\sffamily\fontsize{7.6}{8.2}\selectfont
+] at (0.20,7.02)
+  {One frozen two-signal profile, one sealed score, two tests.};
+
+% ==========================================================================
+% A. PROFILE
+\node[panelbadge] at (0.48,6.43) {A};
+
+\node[
+  anchor=west,
+  text=fTwoInk,
+  font=\sffamily\bfseries\fontsize{9.4}{10.0}\selectfont
+] at (0.82,6.43)
+  {TWO-SIGNAL PROFILE};
+
+\node[
+  anchor=west,
+  text=fTwoGray,
+  font=\sffamily\fontsize{6.5}{7.1}\selectfont
+] at (0.82,6.09)
+  {two coordinates, frozen at $\theta_0$};
+
+% Joint-profile field
+\shade[
+  shading=axis,
+  left color=white,
+  right color=fTwoGreen!20,
+  shading angle=45
+] (0.35,1.00) rectangle (7.35,5.72);
+
+\draw[fTwoGrid,dashed,line width=.50pt]
+  (3.85,1.00)--(3.85,5.72);
+\draw[fTwoGrid,dashed,line width=.50pt]
+  (0.35,3.36)--(7.35,3.36);
+\draw[fTwoLightGray,line width=.70pt]
+  (0.35,1.00) rectangle (7.35,5.72);
+
+% Signal definitions
+\node[
+  anchor=west,
+  text=fTwoBlue,
+  font=\sffamily\bfseries\fontsize{7.7}{8.3}\selectfont
+] at (0.58,5.39)
+  {$\widetilde q_G$: rank-normalized Loss Susceptibility};
+
+\node[
+  anchor=west,
+  text=fTwoOrange,
+  font=\sffamily\bfseries\fontsize{7.7}{8.3}\selectfont
+] at (0.58,5.08)
+  {$\widetilde q_H$: rank-normalized Representation Proximity};
+
+\node[
+  anchor=west,
+  fill=white,
+  fill opacity=.82,
+  text opacity=1,
+  inner sep=.45mm,
+  text=fTwoInk,
+  font=\sffamily\fontsize{7.8}{8.4}\selectfont
+] at (0.55,4.66)
+  {$S_\alpha=(1-\alpha)\widetilde q_G+\alpha\widetilde q_H$};
+
+% Illustrative retained candidates
+\foreach \x/\y in {
+  1.33/1.74,
+  2.24/2.34,
+  3.09/1.84,
+  1.55/4.02,
+  2.82/3.94,
+  4.58/1.92,
+  4.66/4.08,
+  6.23/3.80,
+  6.62/4.18
+}{
+  \node[candidate] at (\x,\y) {};
+}
+
+% Matched Representation Proximity, different Loss Susceptibility
+\draw[
+  fTwoGray,
+  densely dashed,
+  line width=.65pt
+] (5.40,2.27)--(5.40,4.77);
+
+\node[
+  circle,
+  draw=fTwoBlue,
+  fill=white,
+  line width=1.05pt,
+  minimum size=3.05mm,
+  inner sep=0pt
+] at (5.40,2.27) {};
+
+\node[
+  circle,
+  draw=fTwoBlue,
+  fill=fTwoBlue,
+  line width=.70pt,
+  minimum size=3.05mm,
+  inner sep=0pt
+] at (5.40,4.77) {};
+
+\node[
+  anchor=west,
+  text=fTwoBlue,
+  font=\sffamily\fontsize{6.7}{7.3}\selectfont
+] at (5.65,2.27)
+  {$x_{\mathrm{low}}$: lower $\widetilde q_G$};
+
+\node[
+  anchor=west,
+  text=fTwoBlue,
+  font=\sffamily\fontsize{6.7}{7.3}\selectfont
+] at (5.65,4.77)
+  {$x_{\mathrm{high}}$: higher $\widetilde q_G$};
+
+\node[
+  rotate=90,
+  anchor=south,
+  text=fTwoGray,
+  font=\sffamily\fontsize{5.9}{6.5}\selectfont
+] at (5.20,3.52)
+  {matched Representation Proximity $\widetilde q_H$};
+
+% Increasing two-signal score
+\draw[
+  -{Stealth[length=2.25mm,width=1.50mm]},
+  fTwoGreen,
+  line width=1.30pt
+] (1.18,1.47)--(6.90,5.25);
+
+\node[
+  rotate=34,
+  fill=white,
+  fill opacity=.88,
+  text opacity=1,
+  inner sep=.45mm,
+  text=fTwoGreen,
+  font=\sffamily\bfseries\fontsize{6.8}{7.4}\selectfont
+] at (3.83,3.28)
+  {two-signal score $S_\alpha$};
+
+\node[
+  anchor=north east,
+  align=right,
+  text=fTwoGreen,
+  font=\sffamily\bfseries\fontsize{6.4}{7.0}\selectfont
+] at (7.15,5.55)
+  {higher $S_\alpha$};
+
+% Region descriptions
+\node[
+  anchor=south west,
+  text=fTwoGray,
+  font=\sffamily\fontsize{6.1}{6.7}\selectfont
+] at (0.63,1.18)
+  {lower $S_\alpha$};
+
+\node[
+  anchor=north west,
+  text=fTwoGray,
+  font=\sffamily\fontsize{6.1}{6.7}\selectfont
+] at (0.63,3.28)
+  {high $\widetilde q_G$, low $\widetilde q_H$};
+
+\node[
+  anchor=south east,
+  text=fTwoGray,
+  font=\sffamily\fontsize{6.1}{6.7}\selectfont
+] at (7.08,1.18)
+  {low $\widetilde q_G$, high $\widetilde q_H$};
+
+% Axes
+\node[
+  anchor=north,
+  text=fTwoOrange,
+  font=\sffamily\fontsize{7.0}{7.6}\selectfont
+] at (3.85,0.72)
+  {Representation Proximity $\widetilde q_H$
+   \quad low $\longrightarrow$ high};
+
+\node[
+  rotate=90,
+  anchor=south,
+  text=fTwoBlue,
+  font=\sffamily\fontsize{7.0}{7.6}\selectfont
+] at (-0.02,3.36)
+  {Loss Susceptibility $\widetilde q_G$
+   \quad low $\longrightarrow$ high};
+
+% ==========================================================================
+% B. PREDICTION
+\node[panelbadge] at (9.72,6.43) {B};
+
+\node[
+  anchor=west,
+  text=fTwoInk,
+  font=\sffamily\bfseries\fontsize{9.4}{10.0}\selectfont
+] at (10.06,6.43)
+  {PREDICT: prospective ordering};
+
+\node[
+  anchor=west,
+  text=fTwoGray,
+  font=\sffamily\fontsize{6.5}{7.1}\selectfont
+] at (10.06,6.09)
+  {$\widehat\alpha_{\mathrm{pred}}$ fixed before target outcomes};
+
+\node[
+  anchor=north west,
+  align=left,
+  text=fTwoInk,
+  font=\sffamily\fontsize{6.7}{7.3}\selectfont
+] at (9.82,5.79)
+  {tests prospective ordering\\and harmful-tail recall};
+
+% Damage outcomes opened only after the prospective rank is sealed
+\draw[fTwoInk,line width=.72pt]
+  (9.95,4.16)--(17.15,4.16);
+
+\foreach \x/\y in {
+  10.12/4.30,
+  10.62/4.40,
+  11.12/4.35,
+  11.62/4.53,
+  12.12/4.48,
+  12.62/4.66,
+  13.12/4.59,
+  13.62/4.83,
+  14.12/4.75,
+  14.62/4.97
+}{
+  \draw[fTwoGray!72,line width=.68pt]
+    (\x,4.16)--(\x,\y);
+  \fill[fTwoGray] (\x,\y) circle[radius=1.02mm];
+}
+
+\foreach \x/\y in {
+  15.12/5.02,
+  15.62/4.94,
+  16.12/5.27,
+  16.72/5.43
+}{
+  \draw[fTwoOrange!72,line width=.68pt]
+    (\x,4.16)--(\x,\y);
+  \fill[fTwoOrange] (\x,\y) circle[radius=1.02mm];
+}
+
+\draw[fTwoOrange,line width=.90pt]
+  (15.02,5.66)--(16.82,5.66);
+\draw[fTwoOrange,line width=.90pt]
+  (15.02,5.59)--(15.02,5.73);
+\draw[fTwoOrange,line width=.90pt]
+  (16.82,5.59)--(16.82,5.73);
+
+\node[
+  anchor=south,
+  text=fTwoOrange,
+  font=\sffamily\bfseries\fontsize{6.5}{7.1}\selectfont
+] at (15.92,5.71)
+  {later damage tail};
+
+\node[
+  anchor=south east,
+  text=fTwoGray,
+  font=\sffamily\fontsize{5.9}{6.5}\selectfont
+] at (17.12,4.25)
+  {realized damage $d_{t^\dagger}(x)$, observed later};
+
+% Sealed prospective rank
+\draw[
+  -{Stealth[length=2.0mm,width=1.3mm]},
+  fTwoGreen,
+  line width=1.05pt
+] (9.98,3.98)--(17.08,3.98);
+
+\node[
+  anchor=north west,
+  text=fTwoGreen,
+  font=\sffamily\fontsize{6.6}{7.2}\selectfont
+] at (9.98,3.90)
+  {sealed $S_{\widehat\alpha_{\mathrm{pred}}}$ audit rank};
+
+% ==========================================================================
+% C. PROTECTION
+\node[panelbadge] at (9.72,3.31) {C};
+
+\node[
+  anchor=west,
+  text=fTwoInk,
+  font=\sffamily\bfseries\fontsize{9.4}{10.0}\selectfont
+] at (10.06,3.31)
+  {PROTECT: constrained allocation};
+
+\node[
+  anchor=west,
+  text=fTwoGray,
+  font=\sffamily\fontsize{6.5}{7.1}\selectfont
+] at (10.06,2.98)
+  {Top-$K_p$ by $S_{\widehat\alpha_{\mathrm{pred}}}$ on
+   $\mathcal C_{\mathrm{disc}}$; fixed operator and repair compute budget};
+
+% Selector labels
+\node[
+  anchor=east,
+  text=fTwoInk,
+  font=\sffamily\fontsize{6.5}{7.1}\selectfont
+] at (11.15,2.42)
+  {$S_{\widehat\alpha_{\mathrm{pred}}}$};
+
+\node[
+  anchor=east,
+  text=fTwoInk,
+  font=\sffamily\fontsize{6.5}{7.1}\selectfont
+] at (11.15,2.07)
+  {$S_0$ (Loss Susceptibility)};
+
+\node[
+  anchor=east,
+  text=fTwoInk,
+  font=\sffamily\fontsize{6.5}{7.1}\selectfont
+] at (11.15,1.72)
+  {$S_1$ (Proximity)};
+
+\node[
+  anchor=east,
+  text=fTwoInk,
+  font=\sffamily\fontsize{6.5}{7.1}\selectfont
+] at (11.15,1.37)
+  {random};
+
+% Same candidate universe for every selector
+\foreach \yy in {2.42,2.07,1.72,1.37}{
+  \foreach \xx in {
+    11.43,11.76,12.09,12.42,12.75,
+    13.08,13.41,13.74,14.07,14.40
+  }{
+    \node[pooloff] at (\xx,\yy) {};
+  }
+}
+
+% Exactly four selected behaviors in every row
+\foreach \xx in {13.41,13.74,14.07,14.40}{
+  \node[poolon,fill=fTwoGreen] at (\xx,2.42) {};
+}
+
+\foreach \xx in {11.76,12.75,13.74,14.40}{
+  \node[poolon,fill=fTwoBlue] at (\xx,2.07) {};
+}
+
+\foreach \xx in {12.42,13.41,14.07,14.40}{
+  \node[poolon,fill=fTwoOrange] at (\xx,1.72) {};
+}
+
+\foreach \xx in {11.43,12.42,13.08,14.07}{
+  \node[poolon,fill=fTwoGray] at (\xx,1.37) {};
+}
+
+% Shared evaluation protocol
+\draw[
+  -{Stealth[length=1.8mm,width=1.2mm]},
+  fTwoInk,
+  line width=.75pt
+] (14.66,1.90)--(15.00,1.90);
+
+\node[
+  draw=fTwoLightGray,
+  fill=fTwoGray!5,
+  rounded corners=1.2pt,
+  minimum width=2.10cm,
+  minimum height=1.48cm,
+  inner sep=1.5pt
+] at (16.16,1.90) {};
+
+\node[
+  align=center,
+  text=fTwoInk,
+  font=\sffamily\bfseries\fontsize{6.1}{6.7}\selectfont
+] at (16.16,2.37)
+  {EVALUATE\\held-out retain};
+
+\node[
+  align=center,
+  text=fTwoInk,
+  font=\sffamily\fontsize{5.8}{6.5}\selectfont
+] at (16.16,1.88)
+  {mean $\cdot$ tail CVaR\\native retain; vs. no repair};
+
+\node[
+  text=fTwoOrange,
+  font=\sffamily\bfseries\fontsize{6.0}{6.6}\selectfont
+] at (16.16,1.36)
+  {forget + utility};
+
+\node[
+  anchor=west,
+  text=fTwoGray,
+  font=\sffamily\itshape\fontsize{6.0}{6.6}\selectfont
+] at (9.70,0.91)
+  {the score is sealed before target outcomes; the two tests are separate};
+
+% ==========================================================================
+% Sealed-score chain: PROFILE -> PREDICT -> PROTECT
+
+% A PROFILE -> B PREDICT
+\draw[
+  -{Stealth[length=2.0mm,width=1.3mm]},
+  fTwoGreen,
+  line width=1.00pt
+] (7.58,4.34)
+  to[out=10,in=190] (9.43,4.74);
+
+\node[
+  fill=white,
+  inner sep=.35mm,
+  text=fTwoGreen,
+  font=\sffamily\fontsize{6.0}{6.6}\selectfont
+] at (8.50,4.94)
+  {sealed score};
+
+% B PREDICT -> C PROTECT (same sealed score, unlabeled hand-off)
+\draw[
+  -{Stealth[length=2.0mm,width=1.3mm]},
+  fTwoGreen,
+  line width=1.00pt
+] (9.72,4.14)--(9.72,3.58);
+
+\end{tikzpicture}
+\endgroup
+
+\caption{\textbf{One pre-unlearning two-signal profile, two separately tested
+uses (schematic).}
+Its coordinates are a forward-only, rank-normalized estimate of
+gradient-defined Loss Susceptibility and rank-normalized Representation Proximity. A
+target-request-disjoint development fold freezes a single two-signal score before the
+target trajectory. Prediction compares the sealed audit rank with damage
+revealed only after unlearning; the same score independently defines the Top-$K_p$
+repair pool on $\mathcal C_{\mathrm{disc}}$. Target audit outcomes
+select neither the weight nor the pool. Selector arms share the repair operator, repair compute budget, and
+feasibility contract; the unrepaired checkpoint separately measures net repair
+benefit. Candidate positions are illustrative;
+quantitative evidence is reported in Tables~\ref{tab:pred-value},
+\ref{tab:tail-recovery}, \ref{tab:prot-effect},
+\ref{tab:prot-contract}, and~\ref{tab:robustness}.}
+
+\Description{A chained schematic from one frozen profile through prediction
+to protection. The profile panel places retained behaviors by a forward-only,
+rank-normalized estimate of gradient-defined Loss Susceptibility and by
+rank-normalized Representation Proximity. Two candidates
+with matched Representation Proximity but different Loss Susceptibility
+estimates illustrate the
+distinct information in the signals. A single frozen score
+supplies the audit rank for prospective prediction and independently the Top-$K_p$
+discovery pool for protection. Target audit outcomes select neither the
+weight nor the pool. Selector arms share
+the repair operator, repair compute budget, forgetting constraints, and utility
+evaluation.}
+
+\label{fig:profile-two-uses}
+\end{figure*}

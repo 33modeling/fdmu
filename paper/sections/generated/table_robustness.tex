@@ -1,0 +1,102 @@
+% Generated-table shell; experiments/paper/build_evidence.py owns this path.
+\begin{table*}[!t]
+  \caption{\textbf{Breadth of the claim across predeclared settings.} Each
+  row is one setting on a declared breadth axis (held-out requests, datasets,
+  model scale/family); its seven parents are fixed in advance, and
+  \emph{Plan/done} keeps unfinished rows in the denominator. The RQ1 and RQ3
+  columns report how many of the seven parents were eligible and passed
+  (\texttt{E/P}); RQ2 reports the setting's single registered fidelity
+  certificate, evaluated on its declared setting-level support and shared by
+  all parents in that setting.
+  Eligibility failures are diagnosed in
+  Table~\ref{tab:robustness-funnel}, and \textit{n.a.}\ marks a setting with
+  no registered fidelity certificate. \emph{Chain} is the licensing rule: a
+  setting supports the full claim only when its setting-level certificate
+  passes RQ2, every claim-bearing target profile passes the separate
+  split-bank, perturbation-survival, and integrity eligibility checks, and at
+  least one output-readout and one representation-readout parent are eligible
+  and pass both RQ1 and RQ3 after the predeclared within-readout correction.
+  The certificate does not exact-rank certify each target candidate support.
+  The paper-level breadth claim
+  additionally requires a licensed chain in primary TOFU, in one non-primary
+  model scale or family, and in at least two of WMDP-bio, MUSE-News, and
+  RWKU; stress settings (marked) can never rescue a failure. We do not pool
+  parents into a universal effect.}
+  \label{tab:robustness}
+  \centering
+  \small
+  \setlength{\tabcolsep}{5pt}
+  \begin{tabular}{@{}llccccc@{}}
+    \toprule
+    & & & \multicolumn{3}{c}{Eligible/passing counts} & \\
+    \cmidrule(lr){4-6}
+    Axis & Setting
+      & Plan/done
+      & RQ1 parents
+      & RQ2 cert.
+      & RQ3 parents
+      & Chain \\
+    \midrule
+    Request & held-out TOFU requests (Qwen2.5-7B) & 7/0 & 0/0 & 0/0 & 0/0 & -- \\
+    \addlinespace[2pt]
+    Dataset & WMDP-bio/MMLU        & 7/0 & 0/0 & 0/0 & 0/0 & -- \\
+            & MUSE-News            & 7/0 & 0/0 & \textit{n.a.} & 0/0 & -- \\
+            & RWKU                 & 7/0 & 0/0 & 0/0 & 0/0 & -- \\
+            & MUSE-Books (stress)  & 7/0 & 0/0 & \textit{n.a.} & 0/0 & -- \\
+            & PISTOL (stress)      & 7/0 & 0/0 & \textit{n.a.} & 0/0 & -- \\
+    \addlinespace[2pt]
+    Model   & Qwen2.5-1.5B (boundary) & 7/0 & 0/0 & \textit{n.a.} & 0/0 & -- \\
+            & Qwen2.5-14B          & 7/0 & 0/0 & 0/0 & 0/0 & -- \\
+            & Llama-3.1-8B         & 7/0 & 0/0 & 0/0 & 0/0 & -- \\
+    \bottomrule
+  \end{tabular}
+\end{table*}
+
+\begin{table*}[!t]
+  \caption{\textbf{Predeclared evidence funnel and failure boundaries.} For
+  each setting, columns follow the stages a setting--parent row must survive
+  before any claim can pass, so a drop between adjacent columns localizes the
+  failure: sealed profiles valid (of planned), trajectories reaching the
+  common forgetting gate (of planned), audit cells with complete common
+  support for prediction, tail-eligible cells among them, and rows with all
+  five repair arms feasible (of reached rows with a valid profile). No stage
+  removes a row from the declared denominator. \emph{Worst bounds} are the
+  least-favorable one-sided bounds among attempted rows --- the minimum RQ1
+  and RQ2 lower bounds and the maximum individual RQ3 damage upper bound --- reported as
+  descriptive extrema of how close the setting came to the boundary, not as
+  claims. \emph{Failure modes} name the dominant predeclared reasons
+  (invalid profile, non-reach, no common support, tail miss, infeasible arm,
+  fallback weight, \ldots); \emph{not attempted} marks settings whose
+  campaign has not started.}
+  \label{tab:robustness-funnel}
+  \centering
+  \small
+  \setlength{\tabcolsep}{5pt}
+  \resizebox{\textwidth}{!}{%
+  \begin{tabular}{@{}llccccccl@{}}
+    \toprule
+    & & \multicolumn{5}{c}{Survival down the sealed pipeline} & & \\
+    \cmidrule(lr){3-7}
+    Axis & Setting
+      & Profiles valid
+      & Gate reached
+      & Common $n$
+      & Tail-elig.\ $n$
+      & All-arm feas.
+      & Worst RQ1/RQ2/RQ3
+      & Failure modes \\
+    \midrule
+    Request & held-out TOFU requests (Qwen2.5-7B) & -- & -- & -- & -- & -- & -- & not attempted \\
+    \addlinespace[2pt]
+    Dataset & WMDP-bio/MMLU        & -- & -- & -- & -- & -- & -- & not attempted \\
+            & MUSE-News            & -- & -- & -- & -- & -- & -- & not attempted \\
+            & RWKU                 & -- & -- & -- & -- & -- & -- & not attempted \\
+            & MUSE-Books (stress)  & -- & -- & -- & -- & -- & -- & not attempted \\
+            & PISTOL (stress)      & -- & -- & -- & -- & -- & -- & not attempted \\
+    \addlinespace[2pt]
+    Model   & Qwen2.5-1.5B (boundary) & -- & -- & -- & -- & -- & -- & not attempted \\
+            & Qwen2.5-14B          & -- & -- & -- & -- & -- & -- & not attempted \\
+            & Llama-3.1-8B         & -- & -- & -- & -- & -- & -- & not attempted \\
+    \bottomrule
+  \end{tabular}}
+\end{table*}

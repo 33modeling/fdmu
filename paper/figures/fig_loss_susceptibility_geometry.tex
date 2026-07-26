@@ -1,0 +1,196 @@
+\begingroup
+\definecolor{lsViolet}{HTML}{6A51A3}
+\definecolor{lsOrange}{HTML}{D95F02}
+\definecolor{lsGray}{HTML}{737373}
+
+\resizebox{0.98\columnwidth}{!}{%
+\begin{tikzpicture}[
+  x=1cm,
+  y=1cm,
+  line cap=round,
+  line join=round,
+  >={Latex[length=1.7mm,width=1.05mm]},
+  every node/.style={font=\sffamily},
+  probevec/.style={
+    -{Latex[length=1.55mm,width=.98mm]},
+    draw=lsViolet!74,
+    line width=.72pt
+  },
+  pairvec/.style={
+    -{Latex[length=1.75mm,width=1.10mm]},
+    draw=lsOrange,
+    line width=1.05pt
+  },
+  response/.style={
+    draw=lsViolet!40,
+    fill=lsViolet!5,
+    rounded corners=.65mm,
+    minimum width=1.12cm,
+    minimum height=.47cm,
+    inner sep=.55mm,
+    font=\sffamily\fontsize{6.4}{7.0}\selectfont
+  },
+  result/.style={
+    draw=lsOrange!68!black,
+    fill=lsOrange!5,
+    rounded corners=.8mm,
+    minimum width=1.55cm,
+    minimum height=1.06cm,
+    align=center,
+    inner sep=.75mm,
+    font=\sffamily\fontsize{6.3}{7.0}\selectfont
+  },
+  smalllabel/.style={
+    text=lsGray,
+    font=\sffamily\fontsize{6.1}{6.7}\selectfont
+  }
+]
+
+\def\R{1.18}
+\coordinate (origin) at (1.42,1.67);
+
+% ------------------------------------------------------------------
+% One shared fixed-radius neighborhood
+\fill[lsViolet!4]
+  (origin) circle (\R);
+
+\draw[lsGray!58,line width=.70pt]
+  (origin) circle (\R);
+
+% ------------------------------------------------------------------
+% Multiple paired random directions on the same sphere
+\foreach \ang in {7,51,93,136,177}{
+  \draw[probevec]
+    (origin)
+    --
+    ({1.42+\R*cos(\ang)},
+     {1.67+\R*sin(\ang)});
+
+  \draw[probevec]
+    (origin)
+    --
+    ({1.42-\R*cos(\ang)},
+     {1.67-\R*sin(\ang)});
+
+  \fill[lsViolet!78]
+    ({1.42+\R*cos(\ang)},
+     {1.67+\R*sin(\ang)})
+    circle[radius=.030];
+
+  \fill[lsViolet!78]
+    ({1.42-\R*cos(\ang)},
+     {1.67-\R*sin(\ang)})
+    circle[radius=.030];
+}
+
+% ------------------------------------------------------------------
+% Highlight one symmetric probe pair
+\def\pairang{28}
+
+\draw[pairvec]
+  (origin)
+  --
+  ({1.42+\R*cos(\pairang)},
+   {1.67+\R*sin(\pairang)});
+
+\draw[pairvec]
+  (origin)
+  --
+  ({1.42-\R*cos(\pairang)},
+   {1.67-\R*sin(\pairang)});
+
+\fill[lsOrange]
+  ({1.42+\R*cos(\pairang)},
+   {1.67+\R*sin(\pairang)})
+  circle[radius=.042];
+
+\fill[lsOrange]
+  ({1.42-\R*cos(\pairang)},
+   {1.67-\R*sin(\pairang)})
+  circle[radius=.042];
+
+% Frozen checkpoint
+\fill[black!82]
+  (origin) circle[radius=.052];
+
+\node[
+  anchor=north,
+  text=black!82,
+  font=\sffamily\bfseries\fontsize{6.6}{7.2}\selectfont
+] at (1.42,1.59)
+  {$\theta_0$};
+
+% Symmetric endpoints
+\node[
+  anchor=south west,
+  text=lsOrange,
+  font=\sffamily\bfseries\fontsize{5.9}{6.5}\selectfont
+] at (
+  {1.42+\R*cos(\pairang)+.03},
+  {1.67+\R*sin(\pairang)+.02}
+)
+  {$+\eta v_r$};
+
+\node[
+  anchor=north east,
+  text=lsOrange,
+  font=\sffamily\bfseries\fontsize{5.9}{6.5}\selectfont
+] at (
+  {1.42-\R*cos(\pairang)-.03},
+  {1.67-\R*sin(\pairang)-.02}
+)
+  {$-\eta v_r$};
+
+\node[
+  anchor=north,
+  align=center,
+  smalllabel
+] at (1.42,.30)
+  {one shared sphere\\
+   $\|\Delta\theta_{\mathcal B}\|_2=\eta$};
+
+% ------------------------------------------------------------------
+% Direction-specific squared responses
+\node[response] (d1) at (3.78,2.57)
+  {$\delta_1(x)^2$};
+
+\node[response] (d2) at (3.78,1.97)
+  {$\delta_2(x)^2$};
+
+\node[
+  text=lsGray,
+  font=\sffamily\fontsize{8.0}{8.5}\selectfont
+] at (3.78,1.39)
+  {$\vdots$};
+
+\node[response] (dR) at (3.78,.82)
+  {$\delta_R(x)^2$};
+
+\draw[
+  -{Latex[length=1.55mm,width=.98mm]},
+  lsGray!75,
+  line width=.65pt
+] (2.75,1.67) -- (3.12,1.67);
+
+% ------------------------------------------------------------------
+% Aggregate over all R directions
+\node[result] (susceptibility) at (5.88,1.67)
+  {\textbf{Loss Susceptibility}\\[.25mm]
+   $\displaystyle
+    \widehat q_G(x)
+    =
+    \frac{d_{\mathcal B}}{R}
+    \sum_{r=1}^{R}\delta_r(x)^2$};
+
+\draw[
+  -{Latex[length=1.65mm,width=1.02mm]},
+  lsOrange!78!black,
+  line width=.78pt
+] (4.42,1.67) -- (susceptibility.west);
+
+\path[use as bounding box]
+  (0.05,.02) rectangle (6.90,3.08);
+
+\end{tikzpicture}%
+}
+\endgroup

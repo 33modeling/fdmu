@@ -1,50 +1,32 @@
 \section{Discussion}
 \label{sec:implications}
 
-\paragraph{From a single score to a conditional one.}
-The literature's implicit model has been
-$\text{risk}(x)=f(\text{model},\text{data})$: some one signal --
-similarity, alignment, magnitude -- should rank vulnerable candidates for
-any unlearner. We instead test the conditional model
-$\text{risk}(x \mid \text{channel})$. The proposed interaction is the right
-evidence for this claim precisely because it is immune to the two
-confounds that plague probe leaderboards: a uniformly better probe and a
-uniformly more predictable objective both cancel in the double
-difference. Cross-channel signal, reversals, and floor regimes remain part
-of the evidence rather than exceptions to it. That the conditioning
-variable is cheap to evaluate -- a static read of the loss definition --
-is useful only if the frozen family-level interaction confirms its
-non-obvious consequence.
+\paragraph{What ``when'' means in this paper.}
+We do not claim that retained-behavior damage risk is a universal property
+of an example or that one scalar explains the causal mechanism of collateral
+damage. Loss Susceptibility is the gradient-based first-order responsiveness
+of the behavior loss within the declared block; Representation Proximity
+describes
+exposure to the current forget request.
+The sealed score combines these two prospective coordinates for a declared
+model, request, and parent regime. RQ1 determines empirically whether that
+ordering anticipates later damage and where it breaks down.
 
-\paragraph{Operational picture.}
-A practitioner declares the checkpoint, candidate scope, parameter block,
-loss, and probe settings; reads the parent objective's channel off its
-loss definition; and runs the matched probe. The profile's high-risk tail
-localizes where post-unlearning measurement should concentrate, and it
-allocates the protection budget before any audit is opened. The router
-adds no tuning surface: the channel table is a lookup, and both probes are
-forward-only at candidate scale. The profile does not decide whether a
-request should be served by unlearning, retraining, or refusal, and a high
-score does not mandate preservation; those remain application decisions.
+\paragraph{Why prediction and protection are separate.}
+A useful ranking need not identify examples that a fixed repair operator can
+protect efficiently. Conversely, a repair pool may work because its examples
+generalize well under rehearsal even when the original rank correlation is
+modest. RQ3 therefore holds the operator, quota, compute budget, and
+feasibility region fixed and changes only the selector. Improvement on the
+score-selected discovery pool is insufficient; decision value requires lower
+damage on the untouched audit fold and net benefit over no repair.
 
-\paragraph{Selection is not confirmation.}
-A profile-selected pool may guide optimization, but improvement on that
-pool is not evidence of preservation -- it rewards the method for
-protecting what it was handed. All confirmatory outcomes are therefore
-sealed-audit quantities, with both mean and tail reported because
-concentrated damage hides in means.
-
-\paragraph{What the score means.}
-Each profile is conditional on the model, block, loss, precision, and
-radius, and should be recomputed after material model changes. Randomized
-sensitivity is an update-sensitivity prior rather than an
-unlearning-specific quantity; its unlearning reading must be licensed by
-the specificity controls, and its trustworthiness by the fidelity gate,
-rather than assumed.
-
-\paragraph{Prediction and intervention are separate tests.}
-A predictor can rank damage yet fail to support safe repair, and a repair
-procedure can help for reasons unrelated to its selector. The crossed
-design keeps the two claims apart: Table~\ref{tab:channel-matrix}
-tests conditional prediction, and Table~\ref{tab:crossed} independently
-tests whether acting on the matched prediction moves the sealed tail.
+\paragraph{Operational role.}
+The framework is most useful when exhaustive retained-behavior auditing or
+repair is too expensive. It narrows an enumerated candidate universe to
+behaviors worth inspecting or protecting before target outcomes are available.
+This benefit is amortized only when suitable development trajectories exist to
+calibrate the scalar mixture and repair contract. Invalid profiles,
+gate-non-reaching parents, unsupported damage tails, and infeasible repairs
+are therefore substantive deployment boundaries, not missing data to be
+silently removed.

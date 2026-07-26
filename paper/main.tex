@@ -1,6 +1,6 @@
 %% =========================================================================
 %% When Does LLM Unlearning Fail? Predicting and Protecting Susceptible Retained Behavior
-%% From Update-Conditioned Susceptibility to Profile-Guided Protection
+%% From a Sealed Two-Signal Profile to Prediction and Protection
 %%
 %% KDD 2027 Research Track submission draft (San Jose, CA, August 2027).
 %% Template: ACM acmart, sigconf + anonymous + review
@@ -10,9 +10,12 @@
 %% FILE STRUCTURE
 %%   main.tex           preamble, metadata, and \input skeleton (this file)
 %%   sections/*.tex     one file per section, numbered in reading order
+%%   sections/generated evidence-rendered table bodies and result macros
+%%   figures/*.tex      one file per figure (TikZ), input by sections
+%%   tables/*.tex       stable include wrappers plus hand-authored appendix tables
 %%   references.bib     bibliography
 %%
-%% The paper asks whether a pre-unlearning susceptibility profile predicts
+%% The paper asks whether a pre-unlearning two-signal profile predicts
 %% realized collateral damage and improves protection of retained behavior.
 %% =========================================================================
 \documentclass[sigconf,anonymous,review]{acmart}
@@ -34,6 +37,7 @@
 \usepackage{booktabs}
 \usepackage{amsmath}
 \usepackage{xcolor}
+\usepackage{placeins}
 \usepackage[ruled,linesnumbered]{algorithm2e}
 \usepackage{tikz}
 \usetikzlibrary{arrows.meta,calc,positioning,matrix,shapes}
@@ -48,6 +52,21 @@
 %% ---- result placeholders (Sec. 5 shell) -----------------------------------
 \newcommand{\tblph}{\textcolor{gray}{--}}      % empty table cell, result pending
 \newcommand{\resph}[1]{\textcolor{gray}{[#1]}} % inline result placeholder
+\providecommand{\TailHeadline}{\resph{Tail concentration, semantic coherence,
+and the largest observed boundary condition.}}
+\providecommand{\PredictionHeadline}{\resph{Prediction-score correlation, gains over both
+signal endpoints, uncertainty, and the strongest reversal.}}
+\providecommand{\FidelityHeadline}{\resph{Frozen Loss Susceptibility operating point;
+rank fidelity to the direct-gradient reference on
+declared setting-level support, top-$K_{\mathrm{fid}}$ overlap, time, memory,
+and integrity coverage.}}
+\providecommand{\ProtectionHeadline}{\resph{Protection effects, no-repair
+net benefit, feasibility slack, and the strongest failure mode.}}
+\providecommand{\TransferHeadline}{\resph{Coverage across models, benchmarks,
+requests, and parents, together with observed failure boundaries.}}
+\providecommand{\ConclusionHeadline}{\resph{Strongest prediction, Loss
+Susceptibility fidelity, protection, and failure-boundary result.}}
+\InputIfFileExists{sections/generated/results_macros.tex}{}{}
 
 \begin{document}
 
@@ -95,9 +114,9 @@
 \ccsdesc[500]{Computing methodologies~Machine learning}
 \ccsdesc[300]{Security and privacy~Privacy protections}
 
-\keywords{machine unlearning, large language models, collateral damage,
-damage channels, retain-set selection, randomized sensitivity,
-backward-free profiling, unlearning evaluation}
+\keywords{machine unlearning, large language models, trustworthy AI,
+collateral damage, retained-behavior risk, Loss Susceptibility,
+pre-unlearning risk prediction}
 
 \maketitle
 

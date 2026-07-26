@@ -1,0 +1,318 @@
+% Generated-table shell; experiments/paper/build_evidence.py owns this path.
+% Claim-bearing layout for RQ1--RQ3: rank prediction, estimator fidelity,
+% harmful-tail recovery, and protection effect/contract tables.
+%
+% Data sources per column (fill from the evidence pipeline, never by hand):
+%   [ledger]   already in results/paper/evidence_ledger.json
+%   [derived]  point estimate derivable from ledger fields
+%              (rho(S_0) = joint_rho - g_G est., rho(S_1) = joint_rho - g_H est.)
+%   [export+]  needs a small export extension (per-endpoint tail recall, chance
+%              level q, estimator cost rows from the fidelity certificate /
+%              tab:bwfree materials, exact-in-profile swap diagnostic)
+% Keep this layout synchronized with src/rsus/evidence/tables.py.
+
+% =============================================================================
+% Table I -- RQ1 (rank condition): what does the sealed mixture add over
+%            either signal alone?
+% Reader model: each row is one parent unlearner (one evaluation setting).
+% Columns walk the argument left to right: frozen weight -> what each signal
+% alone achieves -> what the sealed mixture achieves -> paired gains with the
+% one-sided bounds the claim consumes -> verdict.
+% =============================================================================
+\begin{table*}[t]
+  \caption{\textbf{Prospective damage prediction (RQ1, rank condition): the
+  sealed mixture against its own ingredients.} Each row is one parent
+  unlearner; all scores are computed at $\theta_0$ and sealed before the
+  parent runs, and $d$ is realized retained damage ($\Delta$NLL) on held-out
+  audit candidates at the first checkpoint reaching the common forgetting
+  condition. $\widehat\alpha_{\mathrm{pred}}$ is the mixture weight of
+  $S_\alpha=(1-\alpha)\widetilde q_G+\alpha\widetilde q_H$, frozen on
+  target-disjoint development folds ($\dagger$: unresolved fallback,
+  claim-ineligible). The next three columns report the prospective Spearman
+  correlation with $d$ achieved by the Loss Susceptibility endpoint $S_0$
+  obtained by rank-normalizing $\widehat q_G$, by Representation Proximity alone ($S_1$),
+  and by the sealed mixture
+  $S_{\widehat\alpha_{\mathrm{pred}}}$ with its one-sided 95\% lower bound.
+  The paired gains $g_G$, $g_H$ (over the two endpoints) and
+  $g_{\mathrm{ctl}}$ (over the strongest predeclared simple control
+  $b^\star$) carry the bounds the claim consumes. The rank condition
+  (\texttt{E/P}: eligible/pass) requires positive lower bounds for
+  $\rho(S_{\widehat\alpha_{\mathrm{pred}}})$, $g_G$, $g_H$, and
+  $g_{\mathrm{ctl}}$; with the tail condition of
+  Table~\ref{tab:tail-recovery} it decides RQ1.}
+  \label{tab:pred-value}
+  \centering
+  \small
+  \setlength{\tabcolsep}{5pt}
+  \begin{tabular}{@{}lcccccccc@{}}
+    \toprule
+    & & \multicolumn{3}{c}{Prospective rank corr.\ $\rho(\cdot,d)$}
+      & \multicolumn{3}{c}{Paired gain of the mixture [95\% LB]} & \\
+    \cmidrule(lr){3-5}\cmidrule(lr){6-8}
+    Parent
+      & $\widehat\alpha_{\mathrm{pred}}$                    % [ledger] prediction_selection.alpha
+      & $S_0$                                               % [derived] Loss Susceptibility
+      & $S_1$ (prox.)                                       % [derived]
+      & $S_{\widehat\alpha_{\mathrm{pred}}}$ (ours) [LB]    % [ledger] joint_rho, joint.lower_bound
+      & $g_G$                                               % [ledger] vs_s0
+      & $g_H$                                               % [ledger] vs_s1
+      & $g_{\mathrm{ctl}}$                                  % [ledger] vs_control
+      & Rank E/P \\
+    \midrule
+    \multicolumn{9}{@{}l}{\emph{Output-readout parents}} \\
+    GradDiff & -- & -- & -- & -- & -- & -- & -- & n/-- \\
+    NPO      & -- & -- & -- & -- & -- & -- & -- & n/-- \\
+    SimNPO   & -- & -- & -- & -- & -- & -- & -- & n/-- \\
+    GRU      & -- & -- & -- & -- & -- & -- & -- & n/-- \\
+    \addlinespace[2pt]
+    \multicolumn{9}{@{}l}{\emph{Representation-readout parents}} \\
+    RMU      & -- & -- & -- & -- & -- & -- & -- & n/-- \\
+    RepNoise & -- & -- & -- & -- & -- & -- & -- & n/-- \\
+    CB       & -- & -- & -- & -- & -- & -- & -- & n/-- \\
+    \bottomrule
+  \end{tabular}
+\end{table*}
+
+% =============================================================================
+% Table II -- RQ2: does the forward-only Loss Susceptibility estimator recover
+%             the ordering and screening set of exact q_G^star?
+% This is an estimator claim, deliberately separated from prediction: Panel A
+% compares computation (fidelity + cost against direct-gradient evaluation on
+% matched support and protocol fields); Panel B reports a no-refit prediction
+% diagnostic and does not enter RQ2.
+% =============================================================================
+\begin{table*}[t]
+  \caption{\textbf{Loss Susceptibility estimation fidelity against its exact target
+  (RQ2).} \emph{Panel A} compares the forward-only estimate $\widehat q_G$
+  with exact Loss Susceptibility
+  $q_G^\star(x)=\|\nabla_{\mathcal B}\ell_x(\theta_0)\|_2^2$ on the same
+  block, loss and masking, precision, device, and declared setting-level
+  fidelity support. Each $f_\rho$ and $f_K$ cell gives the point estimate and
+  $[\mathrm{LB}-\tau]$, its bootstrap lower-bound margin over the frozen floor.
+  RQ2 (\texttt{E/P}) passes only when both margins and the outcome-blind
+  numerical checks pass. Each target profile separately requires split-bank,
+  perturbation-survival, and integrity checks; these establish eligibility,
+  not rank fidelity on that target support. Wall time and peak memory are
+  reported separately.
+  \emph{Panel B} is a post-hoc prediction diagnostic. It maps $q_G^\star$
+  through a separately discovery-fitted empirical midrank map, as in
+  Eq.~\eqref{eq:midrank-normalization}, to obtain $\widetilde q_G^\star$ and
+  forms the $q_G^\star$-substituted mixture while holding
+  $\widehat\alpha_{\mathrm{pred}}$ fixed. Thus
+  $\Delta\rho_{\mathrm{swap}}=\rho((1-\widehat\alpha_{\mathrm{pred}})
+  \widetilde q_G^\star+\widehat\alpha_{\mathrm{pred}}\widetilde q_H,d)
+  -\rho(S_{\widehat\alpha_{\mathrm{pred}}},d)$. This no-refit diagnostic tests
+  whether direct-gradient substitution changes prediction; it does not enter
+  RQ2.}
+  \label{tab:loss-susceptibility-fidelity}
+  \centering
+  \footnotesize
+  \setlength{\tabcolsep}{5pt}
+  % ---------------- Panel A: computation ----------------
+  \resizebox{\textwidth}{!}{%
+  \begin{tabular}{@{}llccccccc@{}}
+    \toprule
+    \multicolumn{9}{@{}l}{\textbf{A. Estimator versus direct-gradient reference on declared setting-level fidelity support}} \\
+    \midrule
+    Estimator & Access
+      & $f_\rho$ [LB$-\tau_\rho$]            % [export+] point estimate and margin
+      & $f_K$ [LB$-\tau_K$]                  % [export+] point estimate and margin
+      & Split-bank $\rho$                    % [export+] split-bank rank agreement
+      & Survival                             % [export+] valid-perturbation fraction
+      & Time (s)                             % [export+] tab:bwfree materials
+      & Mem (GB)                             % [export+] tab:bwfree materials
+      & RQ2 E/P \\
+    \midrule
+    Direct-gradient reference & reverse, per-cand. & 1.00 [--] & 1.00 [--] & -- & -- & -- & -- & -- \\
+    Loss Susceptibility, $2R$ forward sweeps (\textbf{ours}) & forward-only & -- [--] & -- [--] & -- & -- & -- & -- & n/-- \\
+    \bottomrule
+  \end{tabular}}
+
+  \vspace{6pt}
+
+  % ---------------- Panel B: nothing predictive lost ----------------
+  \begin{tabular}{@{}lcc@{}}
+    \toprule
+    \multicolumn{3}{@{}l}{\textbf{B. $q_G^\star$-substituted mixture inside the frozen profile (diagnostic only)}} \\
+    \midrule
+    Parent
+      & $\Delta\rho_{\mathrm{swap}}$ [95\% CI]   % [export+] exact-in-profile diagnostic
+      & $g_H$ [LB] (Tab.~\ref{tab:pred-value}) \\ % [ledger] vs_s1
+    \midrule
+    \multicolumn{3}{@{}l}{\emph{Output-readout parents}} \\
+    GradDiff & -- & -- \\
+    NPO      & -- & -- \\
+    SimNPO   & -- & -- \\
+    GRU      & -- & -- \\
+    \addlinespace[2pt]
+    \multicolumn{3}{@{}l}{\emph{Representation-readout parents}} \\
+    RMU      & -- & -- \\
+    RepNoise & -- & -- \\
+    CB       & -- & -- \\
+    \bottomrule
+  \end{tabular}
+\end{table*}
+
+% =============================================================================
+% Table III -- RQ1 (tail condition): does the score find the candidates that
+%              are damaged the most, not just order the bulk?
+% Chance level q makes "how good is good" self-contained; the endpoint recall
+% columns show the tail story is not inherited from either signal alone.
+% =============================================================================
+\begin{table*}[t]
+  \caption{\textbf{Harmful-tail recovery (RQ1, tail condition).} Aggregate
+  correlation can hide whether the profile finds the specific behaviors that
+  are damaged the most. For each parent, the
+  $K_{\mathrm{tail}}=\lceil q_{\mathrm{tail}}|\mathcal C_{\mathrm{audit}}|\rceil$
+  audit candidates with the largest realized damage form the harmful tail;
+  $\mathrm{Recall}_{\mathrm{tail}}$ is the fraction recovered by a score's
+  top $K_{\mathrm{tail}}$, and random selection attains the exact finite-sample
+  chance level $q_{\mathrm{tail}}^{\mathrm{eff}}=
+  K_{\mathrm{tail}}/|\mathcal C_{\mathrm{audit}}|$. The lift
+  $L_{\mathrm{tail}}=\mathrm{Recall}_{\mathrm{tail}}/
+  q_{\mathrm{tail}}^{\mathrm{eff}}-1$ of the sealed mixture is reported
+  with its one-sided 95\% lower bound. The condition is defined only when at
+  least $K_{\mathrm{tail}}$ candidates have positive damage;
+  \emph{tail-eligible} counts such
+  cells ($n$ of $N$; coverage $\ge 80\%$ required, and ineligible cells never
+  leave the RQ1 denominator). \texttt{RQ1 E/P} combines this tail condition
+  with the rank condition of Table~\ref{tab:pred-value}.}
+  \label{tab:tail-recovery}
+  \centering
+  \small
+  \setlength{\tabcolsep}{5pt}
+  \begin{tabular}{@{}lccccccc@{}}
+    \toprule
+    & & & \multicolumn{3}{c}{Tail recall $\mathrm{Recall}_{\mathrm{tail}}$} & & \\
+    \cmidrule(lr){4-6}
+    Parent
+      & Tail-eligible $n/N$                                  % [ledger] tail_eligible_n / tail_total_n
+      & Chance $q_{\mathrm{tail}}^{\mathrm{eff}}$            % [export+] K_tail / |C_audit|
+      & $S_0$                                                % [export+] Loss Susceptibility
+      & $S_1$ (prox.)                                        % [export+]
+      & $S_{\widehat\alpha_{\mathrm{pred}}}$ (ours)          % [export+] (= q(1+L_tail))
+      & $L_{\mathrm{tail}}$ [LB]                             % [ledger] tail_lift
+      & RQ1 E/P \\
+    \midrule
+    \multicolumn{8}{@{}l}{\emph{Output-readout parents}} \\
+    GradDiff & -- & -- & -- & -- & -- & -- & n/-- \\
+    NPO      & -- & -- & -- & -- & -- & -- & n/-- \\
+    SimNPO   & -- & -- & -- & -- & -- & -- & n/-- \\
+    GRU      & -- & -- & -- & -- & -- & -- & n/-- \\
+    \addlinespace[2pt]
+    \multicolumn{8}{@{}l}{\emph{Representation-readout parents}} \\
+    RMU      & -- & -- & -- & -- & -- & -- & n/-- \\
+    RepNoise & -- & -- & -- & -- & -- & -- & n/-- \\
+    CB       & -- & -- & -- & -- & -- & -- & n/-- \\
+    \bottomrule
+  \end{tabular}
+\end{table*}
+
+
+\begin{table*}[t]
+  \caption{\textbf{Fixed-budget protection (RQ3, effect condition):
+  allocation is the only free variable.} Every confirmatory repair arm branches
+  from the same entry checkpoint $\theta_{t^\dagger}$ and shares the repair operator,
+  neutral stream, example order, optimizer seed, processed-token budget
+  $B_{\mathrm{tok}}$, damped constraint-gradient filter, and guards;
+  confirmatory repair arms differ \emph{only} in
+  which $K_p$ discovery examples receive repair. Cells report damage on
+  repair-held-out audit candidates as mean;\,$\mathrm{CVaR}_{.95}$ of
+  $\Delta$NLL (lower is better), for the untouched no-repair entry checkpoint,
+  the three control selectors (repeated random, Loss Susceptibility endpoint
+  $S_0$, and Proximity endpoint $S_1$), and the same sealed score
+  $S_{\widehat\alpha_{\mathrm{pred}}}$ used for prediction. For comparator $a$
+  and outcome $k$, let
+  $\widehat\Delta_{a,k}=Y_{\mathrm{ours},k}-Y_{a,k}$ be the paired point
+  estimate and $U^{95}_{a,k}$ its one-sided 95\% upper confidence bound. The
+  decisive cell reports $\max_{a,k}\widehat\Delta_{a,k}$ and, separately,
+  $\max_{a,k}U^{95}_{a,k}$, the worst individual bound. The latter is not a
+  confidence bound constructed for the composite maximum. The effect condition
+  (\texttt{E/P}) holds only when $\max_{a,k}U^{95}_{a,k}<0$, i.e.\ every
+  comparator--outcome contrast favors ours.
+  With the contract condition of Table~\ref{tab:prot-contract} it decides
+  RQ3.}
+  \label{tab:prot-effect}
+  \centering
+  \small
+  \setlength{\tabcolsep}{5pt}
+  \begin{tabular}{@{}lccccccc@{}}
+    \toprule
+    & & \multicolumn{3}{c}{Control selectors, same budget}
+      & & & \\
+    \cmidrule(lr){3-5}
+    Parent
+      & No repair
+      & Random
+      & $S_0$
+      & $S_1$ (prox.)
+      & $S_{\widehat\alpha_{\mathrm{pred}}}$ (ours)
+      & \shortstack{$\max_{a,k}\widehat\Delta_{a,k}$ (point)\\
+          $\max_{a,k}U^{95}_{a,k}$ (indiv.)}
+      & Effect E/P \\
+    \multicolumn{8}{@{}r}{\footnotesize all damage cells: mean;\,$\mathrm{CVaR}_{.95}$ of held-out $\Delta$NLL} \\
+    \midrule
+    \multicolumn{8}{@{}l}{\emph{Output-readout parents}} \\
+    GradDiff & -- & -- & -- & -- & -- & --/-- & n/-- \\
+    NPO      & -- & -- & -- & -- & -- & --/-- & n/-- \\
+    SimNPO   & -- & -- & -- & -- & -- & --/-- & n/-- \\
+    GRU      & -- & -- & -- & -- & -- & --/-- & n/-- \\
+    \addlinespace[2pt]
+    \multicolumn{8}{@{}l}{\emph{Representation-readout parents}} \\
+    RMU      & -- & -- & -- & -- & -- & --/-- & n/-- \\
+    RepNoise & -- & -- & -- & -- & -- & --/-- & n/-- \\
+    CB       & -- & -- & -- & -- & -- & --/-- & n/-- \\
+    \bottomrule
+  \end{tabular}
+\end{table*}
+
+\begin{table*}[t]
+  \caption{\textbf{Fixed-budget protection (RQ3, contract condition): the
+  comparison is constraint-matched.} A damage reduction in
+  Table~\ref{tab:prot-effect} counts only if nothing else was traded away.
+  Orient the native metric $M_{\mathrm{nat}}$ so that larger is better and let
+  $\widehat h_a=M_{\mathrm{nat}}^{\mathrm{ours}}-M_{\mathrm{nat}}^a+
+  \delta_{\mathrm{nat}}$ be the comparator-specific point estimate, with
+  dataset-specific margin $\delta_{\mathrm{nat}}$ frozen before target runs.
+  Let $L^{95}_a$ be its one-sided 95\% lower confidence bound. The decisive
+  native-metric cell reports $\min_a\widehat h_a$ and, separately,
+  $\min_aL^{95}_a$, the worst individual bound. The latter is not a confidence
+  bound constructed for the composite minimum, and the contract requires
+  $\min_aL^{95}_a>0$. Forget and utility slack are the smallest margins, over all
+  arms, to the shared feasibility region $\mathcal F$: a negative slack makes
+  the cell \emph{ineligible} rather than failed, and such rows stay in the
+  declared denominator. Feasible arms counts how many of the five arms
+  (including no-repair) hold a common-support outcome inside $\mathcal F$.
+  Updates/rollback reports accepted versus rolled-back guarded repair steps:
+  zero accepted updates would make a favorable comparison vacuous, and heavy
+  rollback flags an arm operating at the guard boundary.
+  \texttt{RQ3 E/P} is the final verdict: the effect condition of
+  Table~\ref{tab:prot-effect} jointly with this contract.}
+  \label{tab:prot-contract}
+  \centering
+  \small
+  \setlength{\tabcolsep}{5pt}
+  \begin{tabular}{@{}lcccccc@{}}
+    \toprule
+    Parent
+      & \shortstack{$\min_a\widehat h_a$ (point)\\
+          $\min_aL^{95}_a$ (indiv.)}
+      & Forget slack
+      & Utility slack
+      & Feasible arms
+      & Updates/rollback
+      & RQ3 E/P \\
+    \midrule
+    \multicolumn{7}{@{}l}{\emph{Output-readout parents}} \\
+    GradDiff & --/-- & -- & -- & --/5 & -- & n/-- \\
+    NPO      & --/-- & -- & -- & --/5 & -- & n/-- \\
+    SimNPO   & --/-- & -- & -- & --/5 & -- & n/-- \\
+    GRU      & --/-- & -- & -- & --/5 & -- & n/-- \\
+    \addlinespace[2pt]
+    \multicolumn{7}{@{}l}{\emph{Representation-readout parents}} \\
+    RMU      & --/-- & -- & -- & --/5 & -- & n/-- \\
+    RepNoise & --/-- & -- & -- & --/5 & -- & n/-- \\
+    CB       & --/-- & -- & -- & --/5 & -- & n/-- \\
+    \bottomrule
+  \end{tabular}
+\end{table*}

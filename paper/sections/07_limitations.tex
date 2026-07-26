@@ -1,24 +1,31 @@
-
 \section{Limitations}
 \label{sec:limitations}
 
-The channel dichotomy is an empirical classification of where current
-objectives read the model, not a law: hybrid objectives inherit partial
-signal from both families, and an objective reading a third quantity would
-require a third probe. We preregistered this clause and stress-test it
-(PISTOL, MUSE-Books) rather than treating the two channels as exhaustive.
+Loss Susceptibility is local to $\theta_0$, restricted to the declared
+parameter block, and dependent on the parameterization and loss. Its
+estimate additionally depends on precision, perturbation radius, and the finite
+direction bank. It does not encode update sign, realized alignment, curvature,
+or off-block damage. Estimating it with $\widehat q_G$ uses $2R$ pool-forward
+sweeps that avoid candidate-side
+backpropagation during target profiling, but do not guarantee fewer FLOPs or
+lower wall-clock time. The exact-rank certificate is evaluated on one declared
+setting-level fidelity support; target candidate supports receive separate
+split-bank, perturbation-survival, and integrity checks rather than their own
+$q_G^\star$ comparison. Representation Proximity measures answer-token
+hidden-state similarity, not causal dependence.
 
-Both probes are local and block-scoped: profiles are conditional on the
-declared block, loss, precision, and radius, certified by the fidelity
-gate only within that geometry, and should be recomputed after material
-model changes. The randomized probe is additionally an update-sensitivity
-prior whose unlearning-specific reading rests on the reported specificity
-controls.
+The combined score is not fully calibration-free. Its scalar weight is fitted
+from completed, target-request-disjoint development trajectories and should be
+revalidated when the model, request type, trainable block, or parent unlearner
+changes. The method also assumes an enumerated prompt--answer universe. Its
+primary outcome, $\Delta$NLL, is fine-grained and scalable but cannot capture
+every change in generation, refusal, calibration, or downstream task
+performance.
 
-The profile ranks an enumerated candidate universe and a finite sealed
-audit; behavior outside both is uncovered, and shared templates across
-folds can shrink the effective sample. Guarded repair caps forgetting
-regression empirically -- first-order projection plus a paired guard -- and
-certifies neither data removal nor robustness to extraction or relearning
-attacks. Claims beyond the completed datasets, scales, and request types
-remain bounded by the transfer experiments.
+Repaired selectors share a feasibility region rather than identical final
+forgetting scores, so forgetting and utility slack must accompany every
+comparison. Frozen guards evaluate extraction, generation, and utility only
+on declared sets; they do not establish broad resistance to unenumerated
+prompts, relearning, or adversarial extraction. The framework is a
+prospective screening and allocation layer, neither a new unlearning objective
+nor a deletion certificate.
