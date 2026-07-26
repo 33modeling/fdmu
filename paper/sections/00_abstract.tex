@@ -1,21 +1,36 @@
 \begin{abstract}
-Approximate LLM unlearning can preserve aggregate utility yet severely damage
-a small set of retained behaviors. We ask whether such failures can
-be anticipated before unlearning and selectively mitigated.
+An LLM asked to forget specific information should preserve unrelated
+knowledge and capabilities. Yet approximate unlearning can cause concentrated
+collateral damage that aggregate scores hide. We ask whether susceptible
+retained behaviors can be identified before a target unlearning run and
+selectively protected without modifying the parent unlearner.
 
-We introduce a sealed two-signal profile. \emph{Loss Susceptibility} is a
-gradient-based measure: the squared norm of a retained behavior's loss gradient
-restricted to a declared parameter block. A pool-shared forward-only estimator avoids
-materializing candidate-specific gradients.
-\emph{Representation Proximity} captures exposure to the forget request. Their
-mixture is calibrated on target-request-disjoint development runs and fixed
-before any target outcome is observed.
+We combine two model-derived signals that require no candidate-side
+backpropagation during target profiling. \emph{Loss Susceptibility} is a
+gradient-defined quantity: the maximum squared first-order loss response over
+unit-norm perturbations within a declared parameter block, without conditioning
+on the later update direction. Its pool-shared forward-only estimator uses
+shared symmetric perturbations.
+\emph{Representation Proximity} estimates the behavior's exposure to the
+current forget request in hidden-state space. During target profiling, both
+signal estimates use forward evaluations only: perturbations are shared across
+the candidate pool and hidden states are reused, so no candidate-specific
+gradient is materialized. A scalar mixture weight is calibrated on
+target-request-disjoint development trajectories, and the resulting score is
+sealed before the target run.
 
-We test prospective damage prediction, estimator fidelity to its exact
-direct-gradient target, and decision value for fixed-budget selective
-protection.
-\resph{Report the resolved prediction, fidelity, protection, and
-failure-boundary results.} This connects pre-unlearning risk localization to
-fixed-budget protection without modifying the parent method.
+Together, these signals turn collateral damage from a failure observed after
+unlearning into a risk that can be anticipated and managed. The forward-only
+profile requires no realized target update, so it can screen retained
+behaviors before the target trajectory. When exhaustive auditing or repair is
+impractical, it narrows a large candidate universe to those most worth
+monitoring or protecting. Under a fixed quota and repair budget, protection
+becomes an allocation question: where should limited capacity be spent? We
+evaluate held-out damage prediction, the forward-only estimator's fidelity to
+exact Loss Susceptibility on each setting's declared fidelity support, and
+repair selection under one feasibility contract. \resph{Report the resolved
+prediction, fidelity, protection, and failure-boundary results.} This connects
+early warning to selective protection across models and unlearning objectives
+without modifying the parent method or claiming a deletion certificate.
 
 \end{abstract}
