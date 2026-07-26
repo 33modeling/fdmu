@@ -21,6 +21,20 @@ dependency/CUDA/data 검사
   -> trial 검증과 종료 판정
 ```
 
+`joint_sweep/BEST.json`이 생성된 뒤 해당 winner의 D_prot를 재사용해
+`D_pred -> selection freeze -> target -> raw evidence -> table1.tex`을
+한 번에 실행한다.
+
+```bash
+APPROVE_JOINT_BEST=1 GPU_IDS=0,1 \
+  bash local_run/finalize_joint_sweep_to_latex.sh
+```
+
+최종 LaTeX는 기본적으로
+`/rdata/minsoo3.kim/results/paper/tofu_qwen25_1p5b/final/table1.tex`에
+생성된다. 완료된 prediction/target unit은 manifest와 artifact SHA-256을
+검증한 뒤 재사용하며, 전체 로그는 `final/launcher_logs/current.log`에서 본다.
+
 Parent calibration의 exit `4`는 실패가 아니라 resolved proposal에 대한
 승인 경계다. 원큐 실행기는 이 상태만 정상으로 받아 다음
 `parent-freeze-approval` 단계로 진행한다. Exit `3`

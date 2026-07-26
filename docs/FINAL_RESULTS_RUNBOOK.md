@@ -75,6 +75,19 @@ total:             280
 
 ## 3. 전체 TOFU 결과 실행
 
+4090 x2 joint sweep이 이미 `BEST.json`을 만들었다면 calibration과 D_prot를
+다시 실행하지 않고 다음 단일 명령을 사용한다.
+
+```bash
+APPROVE_JOINT_BEST=1 GPU_IDS=0,1 \
+  bash local_run/finalize_joint_sweep_to_latex.sh
+```
+
+이 명령은 winning D_prot를 재사용해 D_pred, prospective selection freeze,
+target evaluation, raw aggregation, evidence 판정, `final/table1.tex` 생성을
+순서대로 수행한다. `APPROVE_JOINT_BEST=1`은 target을 보기 전에
+`joint_sweep/BEST.json`을 검토했다는 명시적 승인이다.
+
 최종 결과를 처음부터 만드는 단일 진입점은 다음 명령이다.
 
 ```bash

@@ -58,6 +58,14 @@ Calibration, parent-freeze 승인, joint 개발 스윕을 순서대로 실행한
 unit과 검증된 SFT cache는 재사용한다. 결과와 로그는 기본적으로
 `/rdata/minsoo3.kim/results/paper/tofu_qwen25_1p5b/`에 쓴다.
 
+`joint_sweep/BEST.json`을 검토한 뒤 prediction부터 target 평가와 LaTeX
+생성까지 이어서 실행한다.
+
+```bash
+APPROVE_JOINT_BEST=1 GPU_IDS=0,1 \
+  bash local_run/finalize_joint_sweep_to_latex.sh
+```
+
 ### 범용 로컬 PDF-v4 진단
 
 ```bash
@@ -73,6 +81,7 @@ bash local_run.sh run
 
 ### H100 7B와 14B
 
+현재 H100 실험에 사용하는 머신은 **총 4대**다.
 서로 다른 머신에서 각각 한 명령을 실행한다.
 
 ```bash
