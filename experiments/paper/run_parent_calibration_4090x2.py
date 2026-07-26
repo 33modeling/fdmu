@@ -21,9 +21,11 @@ from experiments.paper.run_joint_dev_sweep import (  # noqa: E402
     _atomic_json,
     _environment_snapshot,
     _load_yaml,
+    _recover_git_snapshot,
     _run_lanes,
     _seal_trial,
     _sha256,
+    _snapshot_current_config,
     _status,
     _unit_complete,
     _write_once,
@@ -147,23 +149,45 @@ def run(args: argparse.Namespace) -> int:
     config_dir = output_root / "config"
     campaign_path = config_dir / "campaign.local.yaml"
     runtime_path = config_dir / "tofu_v4.local.yaml"
+    evidence_snapshot = config_dir / "evidence.frozen.yaml"
     _write_once(campaign_path, yaml.safe_dump(campaign_local, sort_keys=False))
     _write_once(runtime_path, yaml.safe_dump(runtime_local, sort_keys=False))
-    manifest = build_manifest(
-        campaign_local,
-        evidence,
-        stage="calibration",
-        setting_id=args.setting,
-        campaign_path=campaign_path,
-        evidence_path=evidence_source,
-        runtime_path=runtime_path,
-        unit_root=output_root / "units",
-        python=str(python),
-    )
-    for unit in manifest["units"]:
-        unit["setting"] = args.setting
     manifest_path = output_root / "manifest.yaml"
-    _write_once(manifest_path, yaml.safe_dump(manifest, sort_keys=False))
+    if manifest_path.is_file():
+        manifest = _load_yaml(manifest_path)
+        expected_evidence_hash = str(manifest.get("evidence_config_sha256", ""))
+        if len(expected_evidence_hash) != 64:
+            raise SweepError("existing calibration manifest lacks evidence SHA-256")
+        evidence_path = _recover_git_snapshot(
+            evidence_source,
+            expected_evidence_hash,
+            evidence_snapshot,
+        )
+    else:
+        evidence_path = _snapshot_current_config(evidence_source, evidence_snapshot)
+        manifest = build_manifest(
+            campaign_local,
+            _load_yaml(evidence_path),
+            stage="calibration",
+            setting_id=args.setting,
+            campaign_path=campaign_path,
+            evidence_path=evidence_path,
+            runtime_path=runtime_path,
+            unit_root=output_root / "units",
+            python=str(python),
+        )
+        for unit in manifest["units"]:
+            unit["setting"] = args.setting
+        _write_once(manifest_path, yaml.safe_dump(manifest, sort_keys=False))
+
+    original_evidence = str(evidence_source)
+    for unit in manifest["units"]:
+        command = unit.get("command")
+        if isinstance(command, list):
+            unit["command"] = [
+                str(evidence_path) if value == original_evidence else value
+                for value in command
+            ]
 
     _environment_snapshot(output_root, python, gpus)
     events = _EventLog(output_root / "events.jsonl")
@@ -176,7 +200,7 @@ def run(args: argparse.Namespace) -> int:
         }
     )
     campaign_hash = _sha256(campaign_path)
-    evidence_hash = _sha256(evidence_source)
+    evidence_hash = _sha256(evidence_path)
     runtime_hash = _sha256(runtime_path)
     pending = [
         unit
@@ -207,7 +231,7 @@ def run(args: argparse.Namespace) -> int:
     _seal_trial(
         python=python,
         campaign_path=campaign_path,
-        evidence_path=evidence_source,
+        evidence_path=evidence_path,
         manifest_path=manifest_path,
         trial_dir=output_root,
     )

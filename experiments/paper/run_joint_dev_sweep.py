@@ -114,6 +114,58 @@ def _write_once(path: Path, text: str) -> None:
     _atomic_text(path, text)
 
 
+def _recover_git_snapshot(source: Path, expected_sha256: str, destination: Path) -> Path:
+    source = source.resolve()
+    destination = destination.resolve()
+    if source.is_file() and _sha256(source) == expected_sha256:
+        return source
+    if destination.is_file() and _sha256(destination) == expected_sha256:
+        return destination
+    try:
+        relative = source.relative_to(ROOT).as_posix()
+    except ValueError as error:
+        raise SweepError(f"changed config has no frozen snapshot: {source}") from error
+    history = subprocess.run(
+        ["git", "log", "--format=%H", "--", relative],
+        cwd=ROOT,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.splitlines()
+    for commit in history:
+        blob = subprocess.run(
+            ["git", "show", f"{commit}:{relative}"],
+            cwd=ROOT,
+            check=False,
+            capture_output=True,
+        )
+        if blob.returncode or hashlib.sha256(blob.stdout).hexdigest() != expected_sha256:
+            continue
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        temporary = destination.with_name(destination.name + ".tmp")
+        temporary.write_bytes(blob.stdout)
+        os.replace(temporary, destination)
+        _status(
+            f"CONFIG_SNAPSHOT_RECOVERED commit={commit[:12]} "
+            f"snapshot={destination} sha256={expected_sha256}"
+        )
+        return destination
+    raise SweepError(
+        f"cannot recover config sha256={expected_sha256} from Git history: {source}"
+    )
+
+
+def _snapshot_current_config(source: Path, destination: Path) -> Path:
+    source = source.resolve()
+    destination = destination.resolve()
+    if not destination.exists():
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        temporary = destination.with_name(destination.name + ".tmp")
+        temporary.write_bytes(source.read_bytes())
+        os.replace(temporary, destination)
+    return destination
+
+
 def _resolve(value: str | Path, *, base: Path = ROOT) -> Path:
     expanded = os.path.expanduser(os.path.expandvars(str(value)))
     path = Path(expanded)
