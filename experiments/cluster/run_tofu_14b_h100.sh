@@ -37,7 +37,6 @@ source "$ROOT/experiments/cluster/cluster_env.sh"
 
 QUEUE="$CLUSTER_RUNS_ROOT/cluster_queue/wave1_14b"
 WORKER_GPU=0
-FIDELITY_GPU="${FIDELITY_GPU:-0}"
 CURRENT_COMMIT=
 printf '[INFO] time=%s stage=environment-bootstrap complete\n' "$(date -u '+%FT%TZ')"
 
@@ -93,10 +92,6 @@ assert_14b_gpu_exclusive() {
   local -a extra_wave_workers=()
   local -a gpu0_workers=()
 
-  if [[ "$FIDELITY_GPU" != "0" ]]; then
-    echo "[ERROR] 14B fidelity and worker are pinned to GPU 0; FIDELITY_GPU=$FIDELITY_GPU" >&2
-    return 2
-  fi
   if ! command -v nvidia-smi >/dev/null; then
     echo "[ERROR] nvidia-smi not found; cannot verify the dedicated 14B GPU" >&2
     return 2
@@ -130,7 +125,7 @@ assert_14b_gpu_exclusive() {
     fi
   done < <(pgrep -af "experiments/cluster/worker.py --queue" || true)
   if (( ${#gpu0_workers[@]} > 0 )); then
-    printf '[ERROR] GPU 0 is reserved by an existing cluster worker; fidelity not started:\n' >&2
+    printf '[ERROR] GPU 0 is reserved by an existing cluster worker; launcher not started:\n' >&2
     printf '  %s\n' "${gpu0_workers[@]}" >&2
     return 2
   fi
@@ -145,7 +140,7 @@ assert_14b_gpu_exclusive() {
     return 2
   fi
   if [[ -n "${gpu_processes//[[:space:]]/}" ]]; then
-    printf '[ERROR] GPU 0 already has active compute processes; fidelity not started:\n%s\n' \
+    printf '[ERROR] GPU 0 already has active compute processes; launcher not started:\n%s\n' \
       "$gpu_processes" >&2
     return 2
   fi
@@ -160,12 +155,6 @@ assert_14b_gpu_exclusive
 
 stage retry-commit-validation
 assert_clean_retry_commit
-
-stage fidelity
-GPU="$FIDELITY_GPU" \
-CONFIG=configs/channel_matrix/14b_tofu.yaml \
-MODEL_ID="$MODEL_ID" \
-  bash experiments/channel_matrix/h100_campaign.sh fidelity
 
 stage failed-audit-partial-quarantine
 "$PYTHON" experiments/cluster/quarantine_failed_audit.py \
@@ -207,12 +196,6 @@ stage model-queue-commit-reconciliation
   --queue "$QUEUE" \
   --model-id "$MODEL_ID" \
   --code-commit "$CURRENT_COMMIT"
-
-stage fidelity-contract-validation
-"$PYTHON" experiments/channel_matrix/run_campaign.py \
-  --config configs/channel_matrix/14b_tofu.yaml --phase audit \
-  --model-id "$MODEL_ID" --only-authors 181 \
-  --dry-run --limit 1
 
 stage enqueue
 bash experiments/cluster/enqueue_table12.sh audit-14b

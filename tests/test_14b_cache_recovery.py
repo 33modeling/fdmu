@@ -546,12 +546,13 @@ class CacheRecoveryTest(unittest.TestCase):
 
 
 class LauncherContractTest(unittest.TestCase):
-    def test_gpu_preflight_precedes_fidelity_and_retry_is_audit_scoped(self):
+    def test_gpu_preflight_precedes_recovery_and_retry_is_audit_scoped(self):
         source = LAUNCHER.read_text(encoding="utf-8")
         self.assertLess(
             source.index("stage gpu-exclusive-preflight"),
-            source.index("stage fidelity"),
+            source.index("stage failed-audit-partial-quarantine"),
         )
+        self.assertNotIn("stage fidelity", source)
         self.assertIn("wave1_14b must not retain GPU1-7 workers", source)
         self.assertIn("--query-compute-apps=pid,process_name,used_gpu_memory", source)
         self.assertIn('config["audit"]["authors"]', source)

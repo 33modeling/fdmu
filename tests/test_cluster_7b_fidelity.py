@@ -72,6 +72,17 @@ class Cluster7BFidelityTest(unittest.TestCase):
         self.cfg = yaml.safe_load(
             self.live_config_path.read_text(encoding="utf-8")
         )
+        self.cfg["fidelity"] = {
+            "author": 198,
+            "n_candidates": 128,
+            "candidate_seed": 314159,
+            "min_rho_ab": 0.70,
+            "min_rho_bc": 0.80,
+            "min_rho_ac": 0.80,
+            "min_eff_ratio": 0.90,
+            "min_frac_changed": 0.90,
+        }
+        self.cfg["audit"]["fidelity_certificates"] = {}
         self.model = campaign._enabled_models(self.cfg, {"qwen25_7b"})[0]
 
     def _certificate(self, **overrides) -> dict:
@@ -447,10 +458,10 @@ class Cluster7BFidelityTest(unittest.TestCase):
         ).read_text(encoding="utf-8")
         recovery = launcher.split(
             "stage failed-audit-recovery", 1
-        )[1].split("stage fidelity-contract-validation", 1)[0]
+        )[1].split("stage model-queue-commit-reconciliation", 1)[0]
 
-        self.assertIn("validate_fidelity_artifact_pair", launcher)
-        self.assertIn("validate_fidelity_artifact_pair", enqueue)
+        self.assertNotIn("validate_fidelity_artifact_pair", launcher)
+        self.assertNotIn("validate_fidelity_artifact_pair", enqueue)
         for author in (181, 186, 191):
             self.assertIn(f"--unit aud__qwen25_7b__a{author}", recovery)
         self.assertEqual(recovery.count("--unit aud__qwen25_7b__"), 3)

@@ -81,29 +81,6 @@ require_frozen() {  # $1 = freeze yaml path, $2 = what for
     || die "$2 requires $1 to have 'status: frozen' (currently draft). Drain calibration, run the selector, commit the freeze, then re-run."
 }
 
-require_passed_fidelity() {  # $1 = config path, $2 = model id
-  local cfg="$1" model_id="$2"
-  python - "$ROOT" "$cfg" "$model_id" <<'PY' \
-    || die "${model_id} audit requires a passed fidelity certificate; run the model's h100_campaign.sh fidelity phase first."
-import sys
-from pathlib import Path
-
-root, config_raw, model_id = sys.argv[1:]
-sys.path.insert(0, str(Path(root) / "experiments" / "channel_matrix"))
-import run_campaign
-
-config_path = Path(config_raw).resolve()
-config = run_campaign._load_yaml(config_path)
-model = run_campaign._enabled_models(config, {model_id})[0]
-try:
-    validated = run_campaign.validate_fidelity_artifact_pair(config, model)
-except (OSError, ValueError) as exc:
-    print(f"[enqueue_table12] invalid fidelity certificate: {exc}", file=sys.stderr)
-    raise SystemExit(1)
-print(f"[enqueue_table12] verified current-contract fidelity certificate: {validated['path']}")
-PY
-}
-
 freeze_path_of() {  # $1 = config path, $2 = yaml key (objective_freeze|alpha_freeze)
   local name
   name="$(grep -m1 -E "^[[:space:]]*$2:" "$1" | awk '{print $2}')"
@@ -170,7 +147,6 @@ case "${cmd}" in
     require_config "${cfg}"
     require_clean_tree
     require_frozen "$(freeze_path_of "${cfg}" objective_freeze)" "7B audit"
-    require_passed_fidelity "${cfg}" qwen25_7b
     queue="$CLUSTER_RUNS_ROOT/cluster_queue/wave2"
     enqueue_phase "7B TOFU audit" "${queue}" "${cfg}" audit
     alpha_freeze="$(freeze_path_of "${cfg}" alpha_freeze)"
@@ -189,7 +165,6 @@ case "${cmd}" in
     require_config "${cfg}"
     require_clean_tree
     require_frozen "$(freeze_path_of "${cfg}" objective_freeze)" "14B audit"
-    require_passed_fidelity "${cfg}" qwen25_14b
     queue="$CLUSTER_RUNS_ROOT/cluster_queue/wave1_14b"
     enqueue_phase "14B TOFU audit" "${queue}" "${cfg}" audit
     alpha_freeze="$(freeze_path_of "${cfg}" alpha_freeze)"

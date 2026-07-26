@@ -207,17 +207,9 @@ class ChannelCampaignContractTest(unittest.TestCase):
 
             run.assert_called_once_with(cmd, True, mock.ANY)
 
-    def test_fidelity_uses_only_frozen_development_cell(self):
-        commands = list(campaign.fidelity_commands(
-            self.config, self.models, ROOT / "runs/channel_matrix_7b"
-        ))
-        self.assertEqual(len(commands), len(self.models))
-        _, _, command = commands[0]
-        self.assertEqual(command[command.index("--dtype") + 1], "float32")
-        self.assertEqual(command[command.index("--dirs") + 1], "64")
-        self.assertEqual(command[command.index("--etas") + 1], "0.003")
-        self.assertIn("--enforce-gate", command)
-        self.assertEqual(command[command.index("--dataset") + 1], "tofu")
+    def test_tofu_h100_campaign_has_no_fidelity_certificate_gate(self):
+        self.assertNotIn("fidelity", self.config)
+        self.assertNotIn("fidelity_certificates", self.config["audit"])
 
     def test_fidelity_command_carries_campaign_dataset(self):
         cfg = yaml.safe_load(
@@ -275,49 +267,7 @@ class ChannelCampaignContractTest(unittest.TestCase):
             (root / "freeze.yaml").write_text(
                 yaml.safe_dump(freeze), encoding="utf-8"
             )
-            thresholds = {
-                "rho_AB": float(cfg["fidelity"]["min_rho_ab"]),
-                "rho_BC": float(cfg["fidelity"]["min_rho_bc"]),
-                "rho_AC": float(cfg["fidelity"]["min_rho_ac"]),
-                "eff_over_eta": float(cfg["fidelity"]["min_eff_ratio"]),
-                "frac_changed": float(cfg["fidelity"]["min_frac_changed"]),
-            }
-            certificate = {
-                "schema": "fd-fidelity-certificate-v2",
-                "passed": True,
-                "model": self.models[0]["path"],
-                "dtype": cfg["common"]["dtype"],
-                "dataset": cfg.get("dataset", "tofu"),
-                "author": cfg["fidelity"]["author"],
-                "candidate_authors": sorted(campaign._expand_int_ranges(
-                    cfg["common"]["candidate_author_pools"]["calibration"]
-                )),
-                "candidate_seed": cfg["fidelity"]["candidate_seed"],
-                "n_candidates": cfg["fidelity"]["n_candidates"],
-                "block_last_n": cfg["common"]["block_last_n"],
-                "R": cfg["common"]["probe_dirs"],
-                "eta": cfg["common"]["probe_norm_eta"],
-                "probe_seed": cfg["common"]["probe_seed"],
-                "code_commit": campaign._git_state()["code_commit"],
-                "model_fingerprint": campaign._model_fingerprint(
-                    self.models[0]["path"]
-                ),
-                "csv_sha256": "not-used-by-audit-command-construction",
-                "csv_rows": 1,
-                "metrics": dict(thresholds),
-                "thresholds": thresholds,
-            }
-            csv_path = output_root / "fidelity" / "qwen25_7b.csv"
-            csv_path.parent.mkdir(parents=True)
-            csv_path.write_text("seed,R\n0,64\n", encoding="utf-8")
-            certificate["csv_sha256"] = hashlib.sha256(
-                csv_path.read_bytes()
-            ).hexdigest()
-            certificate["csv_rows"] = 1
-            cert_path = output_root / "fidelity" / "qwen25_7b.json"
-            cert_path.write_text(json.dumps(certificate), encoding="utf-8")
             cfg["audit"]["objective_freeze"] = "freeze.yaml"
-            cfg["audit"]["fidelity_certificates"]["qwen25_7b"] = str(cert_path)
             config_path = root / "campaign.yaml"
             config_path.write_text(yaml.safe_dump(cfg), encoding="utf-8")
 

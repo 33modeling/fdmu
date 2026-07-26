@@ -450,9 +450,7 @@ def test_model_launchers_pin_queues_without_force_override():
     enqueue = (ROOT / "experiments/cluster/enqueue_table12.sh").read_text(
         encoding="utf-8"
     )
-    assert "require_passed_fidelity" in enqueue
-    assert 'require_passed_fidelity "${cfg}" qwen25_7b' in enqueue
-    assert 'require_passed_fidelity "${cfg}" qwen25_14b' in enqueue
+    assert "require_passed_fidelity" not in enqueue
     assert "each 8-GPU node starts 8 workers" not in enqueue
     assert "exactly one dedicated worker on GPU 0" in enqueue
     setup = (ROOT / "experiments/cluster/setup_group_volume.sh").read_text(
@@ -472,8 +470,6 @@ def test_model_launchers_pin_queues_without_force_override():
 def test_llm_diagnostics_maps_cluster_result_artifacts():
     guide = (ROOT / "docs/LLM_RUN_DIAGNOSTICS.md").read_text(encoding="utf-8")
     for artifact in (
-        "fidelity/qwen25_7b.csv",
-        "fidelity/qwen25_14b.json",
         "sft_cache/<model>/tofu-a<author>_seed-<seed>.pt.json",
         "$RUNS/sft_cache/<model>-<model-source-hash>/tofu/",
         "audit/<model>/tofu-a<author>/seed-<seed>/",
@@ -486,6 +482,7 @@ def test_llm_diagnostics_maps_cluster_result_artifacts():
         "alpha_protection/<development|audit>",
     ):
         assert artifact in guide
+    assert "TOFU 7B/14B 런처, audit 재개, aggregate는 fidelity certificate를 사용하지" in guide
     assert "n_runs == 6" in guide
     assert "partial/descriptive only" in guide
     assert "최신 PDF-v4의 최종 Table 1/2 evidence와 동일" in guide

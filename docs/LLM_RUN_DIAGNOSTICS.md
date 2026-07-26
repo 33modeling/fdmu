@@ -91,8 +91,6 @@ user volume에 같은 이름의 오래된 디렉터리가 있어도 혼용하지
 
 | 단계/역할 | 7B | 14B |
 |---|---|---|
-| Fidelity 원자료 | `$R7/fidelity/qwen25_7b.csv` | `$R14/fidelity/qwen25_14b.csv` |
-| Fidelity v2 인증서 | `$R7/fidelity/qwen25_7b.json` | `$R14/fidelity/qwen25_14b.json` |
 | Campaign SFT cache | `$R7/sft_cache/qwen25_7b/` | `$R14/sft_cache/qwen25_14b/` |
 | Automatic audit SFT cache | `$RUNS/sft_cache/qwen25_7b-*/` | `$RUNS/sft_cache/qwen25_14b-*/` |
 | Audit cell root | `$R7/audit/qwen25_7b/` | `$R14/audit/qwen25_14b/` |
@@ -100,24 +98,11 @@ user volume에 같은 이름의 오래된 디렉터리가 있어도 혼용하지
 | Alpha audit | `$R7/alpha_protection/audit/qwen25_7b/` | `$R14/alpha_protection/audit/qwen25_14b/` |
 | Pooled aggregate | `$R7/aggregate/` | `$R14/aggregate/` |
 
-#### Fidelity
+#### 과거 Fidelity 파일
 
-CSV와 JSON은 하나의 artifact pair다. JSON에서 다음을 확인한 뒤에만 CSV를
-유효한 결과로 사용한다.
-
-```text
-schema == fd-fidelity-certificate-v2
-passed == true
-csv_sha256 == 실제 CSV SHA-256
-csv_rows == 실제 CSV data row 수
-code_commit == 분석 대상 run의 commit
-model_fingerprint, thresholds, metrics가 존재
-```
-
-CSV에는 finite-difference grid의 cell별 수치가 있고, JSON `metrics`에는 frozen
-cell의 판정 수치가 있다. `passed=false`인 파일은 완료된 측정 결과이지만 audit을
-허용하는 인증서는 아니다. `.lock` 파일은 결과가 아니므로 분석하거나 삭제하지
-않는다.
+TOFU 7B/14B 런처, audit 재개, aggregate는 fidelity certificate를 사용하지
+않는다. `$R7/fidelity/` 또는 `$R14/fidelity/` 아래에 남은 CSV, JSON, `.lock`
+파일은 과거 실행 artifact이며 현재 실행 상태나 Table 1/2 결과로 해석하지 않는다.
 
 #### SFT cache
 
@@ -289,13 +274,6 @@ Claim owner와 heartbeat:
 /group-volume/fdmu/runs/forensics/audit-partials/
 ```
 
-7B 원클릭 런처는 fidelity CSV와 certificate를 한 쌍으로 검사한다. Certificate가
-`fd-fidelity-certificate-v2`가 아니거나 현재 config/model/code와 일치하지 않으면
-기존 파일을 삭제하거나 재사용하지 않는다. 같은 호스트가 소유한 7B audit의
-worker와 자식 process group을 종료 확인하고 claim을 release한 뒤, 기존 파일을
-`forensics/fidelity-artifacts/`로 옮기고 fidelity를 다시 생성한다. 다른 호스트가
-소유한 claim이 있으면 이 자동 복구는 중단되며 해당 owner를 로그에 출력한다.
-
 ## 원인 분류
 
 | 증거 | 분류 |
@@ -307,7 +285,7 @@ worker와 자식 process group을 종료 확인하고 claim을 release한 뒤, �
 | `setup.lock` timeout | 공유 venv 설치/검증 경쟁 |
 | `inline_container.cc`, `unexpected pos` | 손상된 PyTorch cache/container |
 | `ModuleNotFoundError` | 로그에 기록된 Python executable의 환경 |
-| `fidelity certificate mismatch ... /schema` | 구형 certificate; 7B 런처가 보존 후 v2 재생성 |
+| `fidelity certificate mismatch ... /schema` | 과거 코드 로그; 현재 TOFU 7B/14B 경로에서는 발생하지 않음 |
 | `STALE CLAIM`만 존재 | 원인 미확정; owner worker/unit 로그 추가 조사 |
 
 로컬 LLM은 filesystem/terminal 접근 권한이 있으면 위 파일을 직접 읽는다.

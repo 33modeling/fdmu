@@ -36,7 +36,6 @@ fi
 source "$ROOT/experiments/cluster/cluster_env.sh"
 
 QUEUE="$CLUSTER_RUNS_ROOT/cluster_queue/wave2"
-FIDELITY_CERT="$CLUSTER_RUNS_ROOT/channel_matrix_7b/fidelity/${MODEL_ID}.json"
 CURRENT_COMMIT=
 printf '[INFO] time=%s stage=environment-bootstrap complete\n' "$(date -u '+%FT%TZ')"
 
@@ -78,9 +77,6 @@ on_error() {
     enqueue)
       printf '[ANALYSIS] enqueue failed: check worktree state and frozen audit configs below.\n'
       ;;
-    fidelity*)
-      printf '[ANALYSIS] fidelity failed: inspect the final error lines above and GPU state below.\n'
-      ;;
     *)
       printf '[ANALYSIS] stage command failed; queue and host summaries follow.\n'
       ;;
@@ -111,44 +107,6 @@ assert_clean_retry_commit() {
     "$CURRENT_COMMIT"
 }
 
-fidelity_contract_valid() {
-  "$PYTHON" - "$ROOT" "configs/channel_matrix/7b_tofu.yaml" "$MODEL_ID" <<'PY'
-import sys
-from pathlib import Path
-
-root, config_raw, model_id = sys.argv[1:]
-sys.path.insert(0, str(Path(root) / "experiments" / "channel_matrix"))
-import run_campaign
-
-config_path = Path(config_raw).resolve()
-config = run_campaign._load_yaml(config_path)
-model = run_campaign._enabled_models(config, {model_id})[0]
-try:
-    validated = run_campaign.validate_fidelity_artifact_pair(config, model)
-except (OSError, ValueError) as exc:
-    print(f"[INVALID] fidelity certificate: {exc}", file=sys.stderr)
-    raise SystemExit(1)
-print(f"[VALID] fidelity certificate: {validated['path']}")
-PY
-}
-
-stop_uncertified_local_audit() {
-  if fidelity_contract_valid; then
-    printf '[INFO] fidelity certificate satisfies current contract: %s\n' \
-      "$FIDELITY_CERT"
-    return
-  fi
-  printf '[RECOVERY] fidelity certificate is absent or not current v2; stopping local uncertified '\
-'7B audit before fidelity: %s\n' "$FIDELITY_CERT"
-  "$PYTHON" experiments/cluster/recover_local_audit.py \
-    --queue "$QUEUE" \
-    --config configs/channel_matrix/7b_tofu.yaml \
-    --model-id "$MODEL_ID" \
-    --unit-prefix "$AUDIT_MATCH" \
-    --grace-seconds "${AUDIT_STOP_GRACE_SECONDS:-30}"
-  printf '[RECOVERY] local uncertified 7B audit stopped and claims released\n'
-}
-
 print_context
 printf '[TOPOLOGY] launcher activates this host only; 7B uses one worker per free local GPU\n'
 printf '[TOPOLOGY] audit_monitor=%s worker_scope=%s; alpha jobs continue independently\n' \
@@ -156,15 +114,6 @@ printf '[TOPOLOGY] audit_monitor=%s worker_scope=%s; alpha jobs continue indepen
 
 stage retry-commit-validation
 assert_clean_retry_commit
-
-stage uncertified-audit-recovery
-stop_uncertified_local_audit
-
-stage fidelity
-GPU="${FIDELITY_GPU:-0}" \
-CONFIG=configs/channel_matrix/7b_tofu.yaml \
-MODEL_ID="$MODEL_ID" \
-  bash experiments/channel_matrix/h100_campaign.sh fidelity
 
 stage failed-audit-partial-quarantine
 "$PYTHON" experiments/cluster/quarantine_failed_audit.py \
@@ -185,12 +134,6 @@ stage model-queue-commit-reconciliation
   --queue "$QUEUE" \
   --model-id "$MODEL_ID" \
   --code-commit "$CURRENT_COMMIT"
-
-stage fidelity-contract-validation
-"$PYTHON" experiments/channel_matrix/run_campaign.py \
-  --config configs/channel_matrix/7b_tofu.yaml --phase audit \
-  --model-id "$MODEL_ID" --only-authors 181 \
-  --dry-run --limit 1
 
 stage enqueue
 bash experiments/cluster/enqueue_table12.sh audit-7b

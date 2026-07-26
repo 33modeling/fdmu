@@ -420,13 +420,6 @@ def _alpha_freeze(config_path: Path, cfg: dict, models: list[dict]) -> tuple[Pat
     return path, freeze
 
 
-def _fidelity_certificate(cfg: dict, model: dict) -> tuple[Path, dict]:
-    from experiments.channel_matrix import run_campaign
-
-    validated = run_campaign.validate_fidelity_artifact_pair(cfg, model)
-    return Path(validated["path"]), validated["payload"]
-
-
 def _validate_contract(cfg: dict) -> None:
     from rsus.analysis.channels import DECLARED_CHANNEL
     from rsus.analysis.mixture import declared_alpha, validate_alpha
@@ -723,7 +716,6 @@ def _run_worker(
     model_cfg = models[0]
     if _git_state()["code_dirty"]:
         raise RuntimeError(f"refusing alpha {phase_name} worker from a dirty worktree")
-    fidelity_path, fidelity = _fidelity_certificate(cfg, model_cfg)
     allowed = cfg["alpha_protection"][phase_name]
     if author not in allowed["authors"] or seed not in allowed["seeds"]:
         raise ValueError(f"worker cell {phase_name}/a{author}/s{seed} is outside the roster")
@@ -1113,9 +1105,6 @@ def _run_worker(
         "objective_freeze": str(objective_path),
         "objective_freeze_id": objective_freeze["freeze_id"],
         "objective_freeze_sha256": _sha256(objective_path),
-        "fidelity_certificate": str(fidelity_path),
-        "fidelity_certificate_sha256": _sha256(fidelity_path),
-        "fidelity_gate_metrics": fidelity.get("metrics"),
         "alpha_freeze": str(alpha_path) if alpha_path else None,
         "alpha_freeze_id": alpha_freeze.get("freeze_id") if alpha_freeze else None,
         "alpha_freeze_sha256": _sha256(alpha_path) if alpha_path else None,
@@ -1140,7 +1129,7 @@ def _run_worker(
         immutable_keys = (
             "schema", "campaign_id", "campaign_phase", "model_id", "request", "seed",
             "candidate_universe_sha", "forget_sha", "objective_freeze_sha256",
-            "fidelity_certificate_sha256", "alpha_freeze_sha256",
+            "alpha_freeze_sha256",
             "campaign_config_sha256", "partitions", "repeated_random",
             "exact_energy_partition_by_parent", "shared_neutral_ids_sha256",
             "repair_eligible_ids_sha256", "repair_eligibility_status",

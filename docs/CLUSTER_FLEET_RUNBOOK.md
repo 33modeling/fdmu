@@ -82,45 +82,19 @@ python -m pytest -q
 
 ### 실험 전 필수 확인
 
-7B와 14B audit은 다음 순서를 지켜야 한다.
+7B와 14B audit은 다음 순서를 지킨다.
 
 1. `/group-volume/fdmu/.venv`를 활성화하고 `yaml`, `torch`, `datasets`,
    `transformers` import 및 GPU 인식을 preflight로 확인한다.
-2. 해당 모델의 frozen fidelity cell을 실행한다.
-3. CSV와 통과한 fidelity certificate JSON이 모두 생성됐는지 확인한다.
-4. 그 뒤에만 audit unit을 enqueue한다.
+2. 커밋된 objective freeze와 clean worktree를 확인한다.
+3. 모델별 원클릭 런처를 실행한다. 런처가 audit enqueue/monitor, aggregate,
+   LaTeX 생성을 순서대로 수행한다.
 
-```bash
-# 7B
-GPU=0 CONFIG=configs/channel_matrix/7b_tofu.yaml MODEL_ID=qwen25_7b \
-  bash experiments/channel_matrix/h100_campaign.sh fidelity
-test -s /group-volume/fdmu/runs/channel_matrix_7b/fidelity/qwen25_7b.csv
-test -s /group-volume/fdmu/runs/channel_matrix_7b/fidelity/qwen25_7b.json
-
-# 14B
-GPU=0 CONFIG=configs/channel_matrix/14b_tofu.yaml MODEL_ID=qwen25_14b \
-  bash experiments/channel_matrix/h100_campaign.sh fidelity
-test -s /group-volume/fdmu/runs/channel_matrix_14b/fidelity/qwen25_14b.csv
-test -s /group-volume/fdmu/runs/channel_matrix_14b/fidelity/qwen25_14b.json
-```
-
-`run_tofu_7b_h100.sh`와 `run_tofu_14b_h100.sh`는 이 순서를 자동으로 수행한다.
-수동 audit에서 certificate 검사를 끄거나 누락을 무시하면 그 결과는 Table
-1/2 evidence로 사용할 수 없다. 7B 원클릭 실행기는 certificate가 없는 상태에서
-같은 머신의 이전 `wave2` audit worker가 남아 있으면 해당 worker와 audit
-자식만 먼저 종료한다. 따라서 GPU 0를 비운 상태에서 fidelity를 생성하고,
-certificate 생성 후 그 실패 unit만 자동으로 재대기시킨다.
-
-Fidelity 생성은 certificate별 공유 `flock`으로 직렬화한다. CSV와 JSON은
-임시 파일을 `fsync`한 뒤 원자적으로 게시하고, resume/enqueue/audit은 모두
-모델 fingerprint, 코드 commit, dataset, author, dtype, block, `R`, eta, seed,
-candidate roster, threshold와 CSV SHA-256을 같은 validator로 검사한다.
-락은 기본 30분 후 소유 host/PID/log와 함께 실패하며 무한 대기하지 않는다.
-오래됐거나 한쪽만 있는 artifact는
-`runs/forensics/fidelity-artifacts/`로 이동한 뒤 다시 생성한다.
-현재 계약과 일치하지만 `passed=false`인 결과는 metric별 기준을 출력하고
-그 자리에 보존한다. 같은 deterministic cell을 자동으로 반복하지 않으며,
-threshold를 낮추거나 audit을 강행하지 않는다.
+TOFU 7B/14B 실행에는 fidelity certificate 단계나 certificate gate가 없다.
+공유 볼륨에 남아 있는 과거 `fidelity/*.json`, `fidelity/*.csv`, `.lock` 파일은
+실행·재개·집계에 사용하지 않는다. 기존 완료 audit 셀은 실제 실험 계약
+(objective freeze, dtype, predictor/objective roster, candidate pool)이 같으면
+재사용하고, 실패하거나 부분 저장된 셀만 격리 후 다시 실행한다.
 
 실행 중 `RuntimeError`가 발생하면 해당 unit은 완료된 것이 아니다. 특히
 `inline_container.cc:659 unexpected pos`는 Python 659줄이 아니라 PyTorch
@@ -300,9 +274,9 @@ bash experiments/cluster/enqueue_table12.sh rwku-audit   # RWKU audit → wave_r
 ```
 
 7B와 14B TOFU는 각각 다른 H100 머신에서 별도 큐와 원클릭 실행기를 사용한다.
-각 실행기는 GPU 0에서 fidelity certificate를 먼저 생성·검증한 뒤 audit을
-적재하며, certificate 누락으로 실패했던 해당 모델 audit unit만 재대기시킨다.
-중복 unit id는 다시 적재되지 않으며 빈 GPU마다 워커 하나가 시작된다.
+각 실행기는 certificate 없이 audit을 적재한다. 중복 unit id는 다시 적재되지
+않으며 실패하거나 부분 저장된 해당 모델 unit만 복구한다. 빈 GPU마다 워커
+하나가 시작된다.
 7B 원클릭 런처는 `wave2`를 코드에서 고정한 dedicated mode이므로 실행 머신의
 hostname을 `fleet.yaml`에 다시 등록할 필요가 없다. 다른 큐 worker가 같은
 머신에서 실행 중이면 GPU 이중 사용을 막기 위해 계속 중단한다.

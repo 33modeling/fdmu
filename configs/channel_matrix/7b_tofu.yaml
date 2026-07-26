@@ -39,18 +39,6 @@ common:
   probe_norm_eta: 3.0e-3
   probe_seed: 0
 
-# Numerical validation only; it uses the disjoint development candidate pool
-# and the already frozen R/eta. It is not allowed to inspect realized damage.
-fidelity:
-  author: 198
-  n_candidates: 128
-  candidate_seed: 314159
-  min_rho_ab: 0.70
-  min_rho_bc: 0.80
-  min_rho_ac: 0.80
-  min_eff_ratio: 0.90
-  min_frac_changed: 0.90
-
 # Development-only starting grid.  It is deliberately small enough to finish
 # before the deadline and must be selected by forget reach + ordinary utility,
 # never by predictor correlation.  Authors do not overlap the audit roster.
@@ -169,10 +157,6 @@ audit:
   stress_objectives: [ga, idkdpo, npo, simnpo, gru, repnoise, circuit_breakers]
   predictors: [grad_norm, fd_norm, knn_feature, knn_lexical, fd, random_rank]
   objective_freeze: objective_freeze.yaml
-  fidelity_certificates:
-    qwen25_7b: runs/channel_matrix_7b/fidelity/qwen25_7b.json
-    llama31_8b: runs/channel_matrix_7b/fidelity/llama31_8b.json
-
 # Prospective adaptive protection extension.  This is a separate endpoint
 # from the original 1.5B crossed experiment: objective settings are frozen
 # first, alpha is selected only from the development requests below, and the

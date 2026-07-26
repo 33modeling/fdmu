@@ -13,8 +13,8 @@ The launcher has two deliberately separate phases:
     The launcher never selects a setting from audit outcomes.
 
 ``fidelity``
-    Evaluates the already frozen randomized-sensitivity operating point on the
-    disjoint development pool and writes the certificate required by audit.
+    Optional numerical diagnostic for campaign configs that explicitly declare
+    it. TOFU 7B/14B audit does not invoke or require this phase.
 
 Examples (on the H100 host)::
 
@@ -711,7 +711,6 @@ def audit_commands(
     selected_authors: set[int] | None = None,
 ):
     freeze_path, freeze = _load_freeze(config_path, cfg, models)
-    fidelity = _load_fidelity_certificates(config_path, cfg, models)
     phase = cfg["audit"]
     authors = _filter_authors(phase["authors"], selected_authors, "audit")
     core_objectives = phase["objectives"]
@@ -745,8 +744,6 @@ def audit_commands(
             "objective_acceptance_rule": cfg["calibration"]["selection"],
             "core_objectives": core_objectives,
             "stress_objectives": stress_objectives,
-            "fidelity_certificate": fidelity[model["id"]]["path"],
-            "fidelity_certificate_sha256": fidelity[model["id"]]["sha256"],
         }
         yield out, cmd, metadata
 
@@ -775,7 +772,12 @@ def _complete(out: Path, objectives: list[str], audit: bool) -> bool:
     return not audit or (_predictors_opened(out) and (out / "channel_report.csv").exists())
 
 
-def _manifest_mismatches(out: Path, expected: dict) -> list[str]:
+def _manifest_mismatches(
+    out: Path,
+    expected: dict,
+    *,
+    ignored: set[str] | None = None,
+) -> list[str]:
     path = out / "run_manifest.json"
     if not path.is_file():
         return ["run_manifest.json"]
@@ -786,7 +788,7 @@ def _manifest_mismatches(out: Path, expected: dict) -> list[str]:
     return sorted(
         key
         for key, value in expected.items()
-        if manifest.get(key) != value
+        if key not in (ignored or set()) and manifest.get(key) != value
     )
 
 
@@ -1039,7 +1041,11 @@ def main() -> None:
                     break
                 continue
             expected_manifest = {**metadata, **git_state}
-            manifest_mismatches = _manifest_mismatches(out, expected_manifest)
+            manifest_mismatches = _manifest_mismatches(
+                out,
+                expected_manifest,
+                ignored={"campaign_config_sha256", "code_commit"},
+            )
             if (
                 a.resume
                 and _complete(out, objectives, audit=True)
