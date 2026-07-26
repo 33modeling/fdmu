@@ -69,10 +69,14 @@ stage fidelity-contract-validation
 
 stage enqueue
 bash experiments/cluster/enqueue_table12.sh audit-14b
-stage worker-run
+stage worker-launch
 printf '[CONFIG] model=%s worker_gpu=%s queue=%s python=%s\n' \
   "$MODEL_ID" "$WORKER_GPU" "$QUEUE" "$PYTHON"
-"$PYTHON" -u experiments/cluster/worker.py \
-  --queue "$QUEUE" --gpu "$WORKER_GPU" --log-dir "$LOG_DIR"
-stage final-status
+bash experiments/cluster/launch_node.sh --dedicated-queue "$QUEUE" 1
+printf '[RESULT] worker-launch complete; active local workers:\n'
+pgrep -af "experiments/cluster/worker.py --queue" || true
 "$PYTHON" experiments/cluster/workqueue.py status --brief --queue "$QUEUE"
+stage queue-monitor
+"$PYTHON" -u experiments/cluster/monitor_queue.py \
+  --queue "$QUEUE" --match "$MODEL_ID" \
+  --interval "${MONITOR_INTERVAL_SECONDS:-30}"

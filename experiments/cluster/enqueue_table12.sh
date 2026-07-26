@@ -116,7 +116,7 @@ post_enqueue_notes() {  # $1 = queue dir
   Reminders:
     - worker count and GPU selection belong to the caller-specific launcher.
       run_tofu_7b_h100.sh uses the fleet launcher; run_tofu_14b_h100.sh runs
-      exactly one foreground worker on GPU 0.
+      exactly one dedicated worker on GPU 0.
     - make_units-generated gate/audit units must KEEP the max_attempts that
       make_units set — do not hand-edit queue JSON to add retries (sealed
       runners refuse partial run dirs by design; see the runbook's triage).
