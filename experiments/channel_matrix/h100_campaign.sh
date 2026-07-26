@@ -165,14 +165,13 @@ PY
 }
 
 paper_v4() {
-  local campaign_root model_tag aggregate_root
+  local campaign_root aggregate_root
   mapfile -t campaign_values < <(campaign_paths)
   if (( ${#campaign_values[@]} != 2 )); then
     echo "failed to resolve campaign output root and model tag" >&2
     return 2
   fi
   campaign_root="${campaign_values[0]}"
-  model_tag="${campaign_values[1]}"
   aggregate_root="$campaign_root/aggregate"
   if [[ "$MODEL_ID" != "qwen25_7b" ]]; then
     echo "paper-v4 backfill currently requires MODEL_ID=qwen25_7b, found $MODEL_ID" >&2
@@ -187,8 +186,9 @@ paper_v4() {
     --prediction-alpha-freeze configs/channel_matrix/prediction_alpha_freeze_7b.yaml \
     --out-dir "$aggregate_root/paper_v4" \
     --combined-root "$CLUSTER_RUNS_ROOT/paper_v4"
-  echo "[RESULT] paper Table 1=$aggregate_root/paper_v4/table1_core_evidence_${model_tag}.tex"
-  echo "[RESULT] paper Table 2=$aggregate_root/paper_v4/table2_robustness_${model_tag}.tex"
+  echo "[RESULT] FINAL core evidence=$CLUSTER_RUNS_ROOT/paper_v4/table_core_evidence.tex"
+  echo "[RESULT] FINAL robustness=$CLUSTER_RUNS_ROOT/paper_v4/table_robustness.tex"
+  echo "[RESULT] per-run evidence ledger=$aggregate_root/paper_v4/evidence_ledger.json"
 }
 
 run_phase() {
@@ -274,16 +274,12 @@ case "${ACTION}" in
       --config "$CONFIG" \
       --model-id "$MODEL_ID" \
       --n-boot 2000
-    "$PYTHON" experiments/channel_matrix/make_main_table.py \
-      --report "$AGGREGATE_ROOT/pooled_channel_report.csv" \
-      --summary "$AGGREGATE_ROOT/pooled_channel_report.json" \
-      --out "$AGGREGATE_ROOT/table1_channel_matrix_${MODEL_TAG}.tex" \
-      --stress-out "$AGGREGATE_ROOT/table1_stress_${MODEL_TAG}.tex" \
-      --scale-label "$SCALE_LABEL" \
-      --table-label "tab:channel-matrix-${MODEL_TAG}" \
-      --stress-label "tab:channel-stress-${MODEL_TAG}"
+    rm -f \
+      "$AGGREGATE_ROOT/table1_channel_matrix_${MODEL_TAG}.tex" \
+      "$AGGREGATE_ROOT/table1_stress_${MODEL_TAG}.tex" \
+      "$AGGREGATE_ROOT/diagnostics/channel_matrix_${MODEL_TAG}.tex" \
+      "$AGGREGATE_ROOT/diagnostics/stress_${MODEL_TAG}.tex"
     echo "[RESULT] diagnostic aggregate=$AGGREGATE_ROOT"
-    echo "[RESULT] diagnostic channel matrix=$AGGREGATE_ROOT/table1_channel_matrix_${MODEL_TAG}.tex"
     if [[ "$MODEL_ID" == "qwen25_7b" ]]; then
       paper_v4
     else

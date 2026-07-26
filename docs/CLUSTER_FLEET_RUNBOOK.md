@@ -343,19 +343,20 @@ launcher 터미널에 표시한다. 각 14B unit 자체는 worker가 배정한
 
 단계별 `h100_campaign.sh` 로그는
 `/group-volume/fdmu/runs/users/<user>/logs/channel_matrix/`에 남는다. 7B 원클릭 런처는
-aggregate 뒤에 CPU-only PDF-v4 backfill을 실행하며, 논문에 넣을 최신 형식은
-다음 두 파일이다.
+aggregate 뒤에 CPU-only PDF-v4 publish를 실행한다. 모델별 디렉터리에는
+evidence ledger와 상태만 보존하고, 논문에 넣을 최종 LaTeX는 공용 경로의
+다음 두 파일만 사용한다.
 
 ```text
-/group-volume/fdmu/runs/users/<user>/channel_matrix_7b/aggregate/paper_v4/table1_core_evidence_qwen25_7b.tex
-/group-volume/fdmu/runs/users/<user>/channel_matrix_7b/aggregate/paper_v4/table2_robustness_qwen25_7b.tex
+/group-volume/fdmu/runs/paper_v4/table_core_evidence.tex
+/group-volume/fdmu/runs/paper_v4/table_robustness.tex
 ```
 
-기존
-`aggregate/table1_channel_matrix_qwen25_7b.tex`와 14B의 동명 파일은 진단용
-구형 channel matrix다. 논문 최종 Table 1로 사용하지 않는다. 7B channel
-matrix가 이미 생성됐다면 GPU 실험이나 기존 aggregate를 다시 돌리지 말고 다음
-CPU-only 후처리만 실행한다.
+Table 1은 7개 parent 전체, Table 2는 등록된 9개 setting 전체를 고정 분모로
+출력한다. evidence가 없는 행도 제거하지 않고 `\tblph` 또는 `n/--`로 남긴다.
+Channel-matrix 진단은 `aggregate/pooled_channel_report.csv`와 JSON으로만
+보존하며 별도 진단 `.tex`는 만들지 않는다. 7B 결과가 이미 있다면 GPU 실험이나
+기존 aggregate를 다시 돌리지 말고 다음 CPU-only 후처리만 실행한다.
 
 ```bash
 CONFIG=configs/channel_matrix/7b_tofu.yaml MODEL_ID=qwen25_7b \
@@ -363,17 +364,17 @@ CONFIG=configs/channel_matrix/7b_tofu.yaml MODEL_ID=qwen25_7b \
 ```
 
 완료된 RQ1 값은 최신 Table 1에 보존된다. 아직 alpha-audit 결과가 없는 RQ3와
-setting-level fidelity가 없는 RQ2 셀은 오류로 중단하지 않고 `--`로 표시된다.
-`aggregate/paper_v4/FINALIZATION_STATUS.json`에 사용한 parent 수, raw record 수,
-보호 결과 완성 여부와 최종 파일 경로가 기록된다.
+setting-level fidelity가 없는 RQ2 셀은 오류로 중단하지 않고 placeholder로
+표시된다. `aggregate/paper_v4/FINALIZATION_STATUS.json`에 사용한 parent 수,
+raw record 수, 보호 결과 완성 여부와 공용 최종 파일 경로가 기록된다.
 
 각 setting의 ledger는 해당 campaign 아래에 그대로 보존되고, 공용 결과는 다음
 위치에 setting/parent 키로 병합된다.
 
 ```text
 /group-volume/fdmu/runs/paper_v4/evidence_ledger.json
-/group-volume/fdmu/runs/paper_v4/table1.tex
-/group-volume/fdmu/runs/paper_v4/table2.tex
+/group-volume/fdmu/runs/paper_v4/table_core_evidence.tex
+/group-volume/fdmu/runs/paper_v4/table_robustness.tex
 /group-volume/fdmu/runs/paper_v4/PUBLISH_STATUS.json
 ```
 
@@ -381,7 +382,8 @@ setting-level fidelity가 없는 RQ2 셀은 오류로 중단하지 않고 `--`�
 ledger는 전역 `.publish.lock` 아래 병합한다. 이후 다른 사용자가 다른
 model/dataset setting을 publish하면 기존 setting 행은 유지되고 새 행만
 추가된다. 같은 setting/parent를 재실행한 경우에만 그 행이 갱신된다. publish 마지막에는 위
-`table1.tex`과 `table2.tex` 전체가 launcher 로그에 한 번 출력된다.
+`table_core_evidence.tex`과 `table_robustness.tex` 전체가 launcher 로그에 한 번
+출력된다.
 
 - `status`: wave2 / wave1_14b / wave_wmdp / wave_llama / wave3_alpha /
   wave4_alpha 큐별 `workqueue.py status --brief` 요약 + `fleet_status.py` 안내.

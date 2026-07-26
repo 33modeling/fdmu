@@ -20,8 +20,10 @@ from rsus.evidence.raw import write_ledger  # noqa: E402
 from rsus.evidence.registry import load_contract  # noqa: E402
 from rsus.evidence.rendering import write_readiness_json  # noqa: E402
 from rsus.evidence.schemas import EvidenceLedger, EvidenceValidationError  # noqa: E402
-from rsus.evidence.table1 import write_table1  # noqa: E402
-from rsus.evidence.tables import render_robustness_table  # noqa: E402
+from rsus.evidence.tables import (  # noqa: E402
+    render_core_evidence_table,
+    render_robustness_table,
+)
 
 
 def _read_mapping(path: Path) -> dict[str, Any]:
@@ -149,15 +151,16 @@ def publish(
         readiness = combined_root / "evidence_readiness.json"
         write_readiness_json(report, readiness)
 
-        table1 = combined_root / "table1.tex"
-        table2 = combined_root / "table2.tex"
-        write_table1(
-            ledger,
-            report,
+        table1 = combined_root / "table_core_evidence.tex"
+        table2 = combined_root / "table_robustness.tex"
+        _atomic_text(
             table1,
-            setting=primary_setting,
-            allow_incomplete=True,
-            fidelity_summary=fidelity.get(primary_setting),
+            render_core_evidence_table(
+                contract,
+                ledger,
+                report,
+                fidelity=fidelity,
+            ),
         )
         _atomic_text(
             table2,
@@ -175,6 +178,11 @@ def publish(
             "settings": sorted(
                 {str(row["setting"]) for row in merged_mapping["rows"]}
             ),
+            "table_contract": {
+                "table1": "main_core_evidence",
+                "table2": "main_robustness",
+                "primary_setting": primary_setting,
+            },
             "outputs": {
                 "ledger": str(ledger_out),
                 "readiness": str(readiness),
@@ -186,6 +194,12 @@ def publish(
             combined_root / "PUBLISH_STATUS.json",
             json.dumps(status, indent=2, sort_keys=True) + "\n",
         )
+        for obsolete in (
+            combined_root / "table1.tex",
+            combined_root / "table2.tex",
+        ):
+            if obsolete.exists() or obsolete.is_symlink():
+                obsolete.unlink()
         fcntl.flock(lock.fileno(), fcntl.LOCK_UN)
     if print_tables:
         print(f"\n===== PAPER TABLE 1: {table1} =====", flush=True)

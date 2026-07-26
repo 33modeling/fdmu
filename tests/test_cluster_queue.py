@@ -566,7 +566,7 @@ def test_llm_diagnostics_maps_cluster_result_artifacts():
         "traj_<objective>/damage.json",
         "channel_report.json",
         "aggregate/pooled_channel_report.json",
-        "table1_channel_matrix_<model>.tex",
+        "aggregate/pooled_channel_report.json",
         "alpha_protection/<development|audit>",
     ):
         assert artifact in guide

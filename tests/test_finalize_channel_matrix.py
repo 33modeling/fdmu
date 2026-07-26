@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 from experiments.paper.export_channel_matrix_raw import (
@@ -11,8 +12,9 @@ from experiments.paper.finalize_channel_matrix import (
     _load_yaml,
     _prediction_parents,
     _protection_selections,
+    _remove_obsolete_latex,
 )
-from experiments.paper.publish_evidence import merge_ledgers
+from experiments.paper.publish_evidence import merge_ledgers, publish
 from rsus.evidence.raw import raw_plan_from_mapping
 
 
@@ -139,3 +141,66 @@ def test_shared_ledger_preserves_other_settings_and_replaces_same_key():
         rows[("tofu_qwen25_7b", "graddiff")]["prediction_selection"]["alpha"]
         == 0.75
     )
+
+
+def test_publish_writes_only_complete_roster_table1_and_table2(tmp_path):
+    ledger_path = tmp_path / "incoming.json"
+    ledger_path.write_text(
+        json.dumps({"schema_version": 2, "rows": [], "artifacts": {}}),
+        encoding="utf-8",
+    )
+    output = tmp_path / "paper_v4"
+    output.mkdir()
+    (output / "table1.tex").write_text("obsolete", encoding="utf-8")
+    (output / "table2.tex").write_text("obsolete", encoding="utf-8")
+
+    paths = publish(
+        ledger_path=ledger_path,
+        combined_root=output,
+        evidence_config=ROOT / "configs/paper/evidence.yaml",
+        print_tables=False,
+    )
+
+    table1 = Path(paths["table1"]).read_text(encoding="utf-8")
+    table2 = Path(paths["table2"]).read_text(encoding="utf-8")
+    assert sorted(path.name for path in output.glob("*.tex")) == [
+        "table_core_evidence.tex",
+        "table_robustness.tex",
+    ]
+    for parent in ("GradDiff", "NPO", "SimNPO", "GRU", "RMU", "RepNoise", "CB"):
+        assert parent in table1
+    for setting in (
+        "held-out TOFU requests",
+        "WMDP-bio/MMLU",
+        "MUSE-News",
+        "RWKU",
+        "MUSE-Books (stress)",
+        "PISTOL (stress)",
+        "Qwen2.5-1.5B (boundary)",
+        "Qwen2.5-14B",
+        "Llama-3.1-8B",
+    ):
+        assert setting in table2
+    assert r"\label{tab:pred-value}" in table1
+    assert r"\label{tab:prot-contract}" in table1
+    assert r"\label{tab:robustness}" in table2
+    assert r"\label{tab:robustness-funnel}" in table2
+
+
+def test_finalizer_removes_pre_unified_latex_duplicates(tmp_path):
+    names = (
+        "table1.tex",
+        "table2.tex",
+        "table1_core_evidence_qwen25_7b.tex",
+        "table2_robustness_qwen25_7b.tex",
+    )
+    for name in names:
+        (tmp_path / name).write_text("obsolete", encoding="utf-8")
+    keep = tmp_path / "evidence_ledger.json"
+    keep.write_text("{}", encoding="utf-8")
+
+    removed = _remove_obsolete_latex(tmp_path, "qwen25_7b")
+
+    assert {Path(path).name for path in removed} == set(names)
+    assert all(not (tmp_path / name).exists() for name in names)
+    assert keep.is_file()

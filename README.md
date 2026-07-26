@@ -113,12 +113,11 @@ bash experiments/cluster/run_tofu_7b_h100.sh experiment
 bash experiments/cluster/run_tofu_14b_h100.sh
 ```
 
-7B 로그와 표는 각각
-`/group-volume/fdmu/runs/logs/cluster/launcher_qwen25_7b_<host>_current.out`,
-`/group-volume/fdmu/runs/channel_matrix_7b/aggregate/table1_channel_matrix_qwen25_7b.tex`
-에 생성된다. 14B도 같은 구조의 `qwen25_14b` 및
-`channel_matrix_14b` 경로를 사용한다. 14B 런처는 실행한 한 호스트의 GPU 0에
-worker 하나만 띄우며 H100 네 대 전체를 자동 활성화하지 않는다.
+사용자별 launcher 로그는
+`/group-volume/fdmu/runs/users/<user>/logs/cluster/`에 생성된다. 7B와 14B
+런처는 실행한 호스트에서 비어 있는 GPU마다 독립 worker를 띄운다. 한 unit은
+GPU 한 장을 사용하며, 서로 다른 호스트의 GPU는 각 호스트에서 런처를 실행해야
+활성화된다.
 
 `RuntimeError`, 특히 `inline_container.cc:659 unexpected pos`는 무시 가능한
 경고가 아니라 PyTorch checkpoint 저장 실패다. 전체 결과를 삭제할 필요는
@@ -127,17 +126,44 @@ worker 하나만 띄우며 H100 네 대 전체를 자동 활성화하지 않는�
 [클러스터 런북의 실험 전 필수 확인](docs/CLUSTER_FLEET_RUNBOOK.md#실험-전-필수-확인)을
 따른다.
 
-이 두 명령은 기존 channel-matrix campaign용이다. 최신 PDF-v4 전체 Table 1/2
-실행으로 오인하면 안 된다. 공유 큐, 로그, 복구 절차는 cluster runbook에 있다.
+7B aggregate는 최신 논문 표 publish까지 수행한다. 14B aggregate는 CSV/JSON
+진단 결과만 생성한다. 공유 큐, 로그, 복구 절차는 cluster runbook에 있다.
 
-### 최신 PDF-v4 TOFU Table 1
+### 최종 논문 Table 1/2
+
+이미 완료된 7B 결과로 표만 다시 만들 때는 다음 CPU-only 명령 하나를 실행한다.
+queue, worker, 학습은 시작하지 않는다.
 
 ```bash
-python experiments/paper/run_tofu_table1.py \
-  --action plan --setting tofu_qwen25_1p5b
+bash experiments/cluster/render_tofu_7b_h100.sh
 ```
 
-`plan` 결과와 freeze 상태를 검토한 뒤에만 `--action run`을 사용한다.
+최종 LaTeX는 아래 두 파일만 사용한다.
+
+```text
+/group-volume/fdmu/runs/paper_v4/table_core_evidence.tex
+/group-volume/fdmu/runs/paper_v4/table_robustness.tex
+```
+
+- `table_core_evidence.tex`: 최신 논문의 core evidence 형식이다. GradDiff, NPO, SimNPO,
+  GRU, RMU, RepNoise, CB 7개 parent를 항상 모두 출력한다.
+- `table_robustness.tex`: robustness와 evidence funnel 형식이다. 논문 계약의 9개
+  model/dataset setting을 항상 모두 출력한다.
+- 완료된 evidence는 숫자로 채우고, 미완료·비적격 evidence는 행을 없애지 않고
+  `\tblph` 또는 `n/--`로 표시한다. 값을 임의로 만들지 않는다.
+- 모델별 `aggregate/paper_v4/`에는 ledger, readiness, status만 둔다.
+  구형 중복 LaTeX는 재렌더 시 삭제한다.
+- channel-matrix 진단값은 `aggregate/pooled_channel_report.csv`와
+  `pooled_channel_report.json`에서 확인한다. 별도 진단 `.tex`는 만들지 않는다.
+
+최신 코드를 받은 뒤 기존 결과를 재렌더하는 전체 명령은 다음과 같다.
+
+```bash
+git pull --ff-only origin main
+bash experiments/cluster/render_tofu_7b_h100.sh
+sed -n '1,320p' /group-volume/fdmu/runs/paper_v4/table_core_evidence.tex
+sed -n '1,320p' /group-volume/fdmu/runs/paper_v4/table_robustness.tex
+```
 
 ## 핵심 구조
 

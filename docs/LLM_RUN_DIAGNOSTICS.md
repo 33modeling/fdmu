@@ -112,7 +112,7 @@ watcher는 기존 artifact를 읽고 `joint_sweep/live/`만 갱신한다. Partia
 | campaign | `logs/channel_matrix/qwen25_7b_<action>_<host>_current.log` | `logs/channel_matrix/qwen25_14b_<action>_<host>_current.log` |
 | queue | `cluster_queue/wave2` | `cluster_queue/wave1_14b` |
 | aggregate | `channel_matrix_7b/aggregate/` | `channel_matrix_14b/aggregate/` |
-| LaTeX | `channel_matrix_7b/aggregate/table1_channel_matrix_qwen25_7b.tex` | `channel_matrix_14b/aggregate/table1_channel_matrix_qwen25_14b.tex` |
+| 진단 수치 | `channel_matrix_7b/aggregate/pooled_channel_report.json` | `channel_matrix_14b/aggregate/pooled_channel_report.json` |
 
 ### 클러스터 결과 저장 구조
 
@@ -219,15 +219,11 @@ Audit cell 완료 조건은 다음을 모두 만족하는 것이다.
 <MODEL_ROOT>/aggregate/pooled_channel_report.csv
 <MODEL_ROOT>/aggregate/pooled_channel_report.json
 <MODEL_ROOT>/aggregate/model_channel_report.csv
-<MODEL_ROOT>/aggregate/table1_channel_matrix_<model>.tex
-<MODEL_ROOT>/aggregate/table1_stress_<model>.tex
 ```
 
 7B aggregate는 이어서 최신 PDF-v4 후처리를 수행한다.
 
 ```text
-<MODEL_ROOT>/aggregate/paper_v4/table1_core_evidence_qwen25_7b.tex
-<MODEL_ROOT>/aggregate/paper_v4/table2_robustness_qwen25_7b.tex
 <MODEL_ROOT>/aggregate/paper_v4/evidence_ledger.json
 <MODEL_ROOT>/aggregate/paper_v4/evidence_readiness.json
 <MODEL_ROOT>/aggregate/paper_v4/FINALIZATION_STATUS.json
@@ -240,13 +236,15 @@ predictor-objective별 `rho`, CI, AUROC, overlap, tail-rho를 후속 plot/table
 생성에 사용한다. `model_channel_report.csv`는 모델별 축약본이다. `.tex`는 표시용
 파생 artifact이므로 원수치 분석의 입력으로 사용하지 않는다.
 
-파일명이 `table1_channel_matrix`여도 이 H100 channel-matrix 결과는 기존 진단
-campaign 산출물이다. 최신 PDF-v4의 최종 Table 1/2 evidence와 동일하다고
-간주하지 않는다. 최신 paper evidence의 의미와 metric은
+`aggregate/pooled_channel_report.{csv,json}`은 진단 campaign 산출물이다.
+최신 PDF-v4의 최종 evidence와 동일하다고 간주하지 않는다. 최신 paper
+evidence의 의미와 metric은
 `docs/TABLE12_METRICS.md`, `docs/PREDICTOR_METRICS.md`,
 `docs/PAPER_EVIDENCE_PIPELINE.md`를 함께 읽어 구분한다.
 
-최종 논문형 표는 반드시 `aggregate/paper_v4/` 아래 파일을 사용한다. 이미
+최종 논문형 표는 반드시 공용
+`/group-volume/fdmu/runs/paper_v4/table_core_evidence.tex`과
+`table_robustness.tex`을 사용한다. 이미
 완료된 7B run에는 GPU나 channel-matrix bootstrap 재실행이 필요 없으며
 `bash experiments/cluster/render_tofu_7b_h100.sh`만 실행한다. 동일하게
 `bash experiments/cluster/run_tofu_7b_h100.sh render-only`도 사용할 수 있다.
@@ -258,7 +256,7 @@ namespace 도입 전 legacy audit에 `damage.json`이 존재하면 render-only
 `bash experiments/cluster/run_tofu_7b_h100.sh experiment`를 실행한다.
 옵션 없는 호출은 GPU 작업을 시작하지 않는다.
 
-Per-setting ledger는 `<MODEL_ROOT>/aggregate/paper_v4/`에 보존된다. 기본
+Per-setting ledger와 상태 JSON은 `<MODEL_ROOT>/aggregate/paper_v4/`에 보존된다. 기본
 `MODEL_ROOT`는
 `/group-volume/fdmu/runs/users/<user>/channel_matrix_<scale>`다. 여러
 실험의 사용자별 raw 결과는 서로 격리된다. 전 사용자의 최종 논문 ledger와

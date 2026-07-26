@@ -188,9 +188,7 @@ CONFIG=configs/channel_matrix/7b_tofu.yaml \
 MODEL_ID="$MODEL_ID" \
 SCALE_LABEL=7B \
   bash experiments/channel_matrix/h100_campaign.sh aggregate
-printf '[RESULT] LaTeX generation complete: %s\n' \
-  "$FDMU_CAMPAIGN_RUNS_ROOT/channel_matrix_7b/aggregate/paper_v4/table1_core_evidence_${MODEL_ID}.tex"
-printf '[RESULT] Table 2 LaTeX: %s\n' \
-  "$FDMU_CAMPAIGN_RUNS_ROOT/channel_matrix_7b/aggregate/paper_v4/table2_robustness_${MODEL_ID}.tex"
-printf '[RESULT] Legacy channel matrix (diagnostic only): %s\n' \
-  "$FDMU_CAMPAIGN_RUNS_ROOT/channel_matrix_7b/aggregate/table1_channel_matrix_${MODEL_ID}.tex"
+printf '[RESULT] FINAL core evidence LaTeX: %s\n' \
+  "$CLUSTER_RUNS_ROOT/paper_v4/table_core_evidence.tex"
+printf '[RESULT] FINAL robustness LaTeX: %s\n' \
+  "$CLUSTER_RUNS_ROOT/paper_v4/table_robustness.tex"

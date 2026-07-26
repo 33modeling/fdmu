@@ -39,8 +39,6 @@ from rsus.evidence.raw import (  # noqa: E402
 from rsus.evidence.registry import load_contract  # noqa: E402
 from rsus.evidence.rendering import write_readiness_json  # noqa: E402
 from rsus.evidence.schemas import EvidenceLedger, EvidenceValidationError  # noqa: E402
-from rsus.evidence.table1 import write_table1  # noqa: E402
-from rsus.evidence.tables import render_robustness_table  # noqa: E402
 
 
 PAPER_PARENTS = {
@@ -74,11 +72,20 @@ def _atomic_json(path: Path, value: Mapping[str, Any]) -> None:
     temporary.replace(path)
 
 
-def _atomic_text(path: Path, value: str) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    temporary = path.with_name(f".{path.name}.{os.getpid()}.tmp")
-    temporary.write_text(value, encoding="utf-8")
-    temporary.replace(path)
+def _remove_obsolete_latex(output: Path, model_id: str) -> list[str]:
+    """Remove duplicate LaTeX names emitted by the pre-unified finalizer."""
+    tag = model_id.replace("/", "_")
+    removed = []
+    for path in (
+        output / "table1.tex",
+        output / "table2.tex",
+        output / f"table1_core_evidence_{tag}.tex",
+        output / f"table2_robustness_{tag}.tex",
+    ):
+        if path.exists() or path.is_symlink():
+            path.unlink()
+            removed.append(str(path))
+    return removed
 
 
 def _request_id(dataset: str, author: int) -> str:
@@ -356,28 +363,7 @@ def finalize(args: argparse.Namespace) -> dict[str, Any]:
     readiness_path = output / "evidence_readiness.json"
     write_readiness_json(report, readiness_path)
 
-    tag = args.model_id.replace("/", "_")
-    table1_path = output / f"table1_core_evidence_{tag}.tex"
-    table2_path = output / f"table2_robustness_{tag}.tex"
-    write_table1(
-        ledger,
-        report,
-        table1_path,
-        setting=args.setting_id,
-        allow_incomplete=True,
-        fidelity_summary=fidelity.get(args.setting_id),
-    )
-    _atomic_text(
-        table2_path,
-        render_robustness_table(
-            contract,
-            ledger,
-            report,
-            fidelity=fidelity,
-        ),
-    )
-    _atomic_text(output / "table1.tex", table1_path.read_text(encoding="utf-8"))
-    _atomic_text(output / "table2.tex", table2_path.read_text(encoding="utf-8"))
+    removed_obsolete_latex = _remove_obsolete_latex(output, args.model_id)
 
     status = {
         "schema_version": 1,
@@ -393,15 +379,14 @@ def finalize(args: argparse.Namespace) -> dict[str, Any]:
         "protection_freeze": str(alpha_freeze_path) if alpha_freeze_path else None,
         "fidelity_summary": str(fidelity_path) if fidelity_path else None,
         "fidelity_warning": fidelity_warning,
+        "removed_obsolete_latex": removed_obsolete_latex,
         "outputs": {
-            "table1": str(table1_path),
-            "table2": str(table2_path),
             "ledger": str(ledger_path),
             "readiness": str(readiness_path),
         },
         "note": (
-            "Missing RQ2/RQ3 evidence is rendered as an explicit placeholder; "
-            "available RQ1 cells are retained."
+            "The shared Table 1 fixes all seven parent rows and Table 2 fixes "
+            "all registered settings. Missing evidence is an explicit placeholder."
         ),
     }
     combined_root = (
@@ -416,6 +401,12 @@ def finalize(args: argparse.Namespace) -> dict[str, Any]:
         fidelity_input=fidelity_path,
     )
     status["combined_outputs"] = combined_outputs
+    status["outputs"].update(
+        {
+            "table1": combined_outputs["table1"],
+            "table2": combined_outputs["table2"],
+        }
+    )
     _atomic_json(output / "FINALIZATION_STATUS.json", status)
     return status
 
@@ -465,15 +456,10 @@ def main(argv: list[str] | None = None) -> int:
             f"{status['outputs']['table2']}",
             flush=True,
         )
-        print(
-            "[RESULT] merged cross-setting Table 2: "
-            f"{status['combined_outputs']['table2']}",
-            flush=True,
-        )
         if not status["protection_complete"]:
             print(
                 "[RESULT] RQ3 protection evidence is incomplete; "
-                "Table 1 Panel B contains explicit placeholders.",
+                "Table 1 keeps all parent rows and marks missing cells explicitly.",
                 flush=True,
             )
         return 0

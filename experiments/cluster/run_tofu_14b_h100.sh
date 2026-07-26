@@ -161,5 +161,5 @@ CONFIG=configs/channel_matrix/14b_tofu.yaml \
 MODEL_ID="$MODEL_ID" \
 SCALE_LABEL=14B \
   bash experiments/channel_matrix/h100_campaign.sh aggregate
-printf '[RESULT] LaTeX generation complete: %s\n' \
-  "$FDMU_CAMPAIGN_RUNS_ROOT/channel_matrix_14b/aggregate/table1_channel_matrix_${MODEL_ID}.tex"
+printf '[RESULT] Diagnostic aggregate complete: %s\n' \
+  "$FDMU_CAMPAIGN_RUNS_ROOT/channel_matrix_14b/aggregate/pooled_channel_report.json"

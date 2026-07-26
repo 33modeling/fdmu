@@ -350,10 +350,10 @@ class ChannelCampaignContractTest(unittest.TestCase):
             Path("/group-volume/fdmu/runs/channel_matrix_14b"),
         )
         self.assertEqual(
-            resolved / "aggregate/table1_channel_matrix_qwen25_14b.tex",
+            resolved / "aggregate/pooled_channel_report.json",
             Path(
                 "/group-volume/fdmu/runs/channel_matrix_14b/aggregate/"
-                "table1_channel_matrix_qwen25_14b.tex"
+                "pooled_channel_report.json"
             ),
         )
 
