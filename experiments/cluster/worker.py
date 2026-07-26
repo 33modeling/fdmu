@@ -213,7 +213,13 @@ def build_env(base: dict[str, str], unit_env: dict[str, str], gpu: int, needs_gp
     return env
 
 
-def run_claim(queue: WorkQueue, claim: Claim, gpu: int, log_dir: Path) -> bool:
+def run_claim(
+    queue: WorkQueue,
+    claim: Claim,
+    gpu: int,
+    log_dir: Path,
+    shutdown: threading.Event | None = None,
+) -> bool:
     unit = claim.unit
     cmd = resolve_unit_command(unit.cmd)
     host = socket.gethostname()
@@ -274,6 +280,11 @@ def run_claim(queue: WorkQueue, claim: Claim, gpu: int, log_dir: Path) -> bool:
                     start_new_session=True,
                 )
                 while process.poll() is None:
+                    if shutdown is not None and shutdown.is_set():
+                        reason = "worker received termination signal"
+                        terminate_process_group(process, reason=reason, log=log)
+                        error = f"WorkerTerminated: {reason}"
+                        break
                     if claim_lost.wait(CHILD_POLL_INTERVAL_S):
                         reason = claim_lost_messages[-1]
                         terminate_process_group(process, reason=reason, log=log)
@@ -362,14 +373,14 @@ def main() -> None:
     log_dir.mkdir(parents=True, exist_ok=True)
     owner = {"host": socket.gethostname(), "gpu": args.gpu, "pid": os.getpid()}
 
-    interrupted = {"flag": False}
+    interrupted = threading.Event()
 
     def on_term(signum, frame):  # noqa: ANN001
-        interrupted["flag"] = True
+        interrupted.set()
 
     signal.signal(signal.SIGTERM, on_term)
 
-    while not interrupted["flag"]:
+    while not interrupted.is_set():
         try:
             claim = queue.claim(
                 owner=owner,
@@ -392,7 +403,7 @@ def main() -> None:
             time.sleep(args.poll_s)
             continue
         try:
-            run_claim(queue, claim, args.gpu, log_dir)
+            run_claim(queue, claim, args.gpu, log_dir, shutdown=interrupted)
         except Exception as exc:
             # The claim stays in claimed/ and requeue-stale will recover it;
             # the worker itself must survive to serve the next unit.

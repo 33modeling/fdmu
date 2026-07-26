@@ -103,6 +103,13 @@ Claim owner와 heartbeat:
 /group-volume/fdmu/runs/forensics/audit-partials/
 ```
 
+7B 원클릭 런처는 fidelity CSV와 certificate를 한 쌍으로 검사한다. Certificate가
+`fd-fidelity-certificate-v2`가 아니거나 현재 config/model/code와 일치하지 않으면
+기존 파일을 삭제하거나 재사용하지 않는다. 같은 호스트가 소유한 7B audit의
+worker와 자식 process group을 종료 확인하고 claim을 release한 뒤, 기존 파일을
+`forensics/fidelity-artifacts/`로 옮기고 fidelity를 다시 생성한다. 다른 호스트가
+소유한 claim이 있으면 이 자동 복구는 중단되며 해당 owner를 로그에 출력한다.
+
 ## 원인 분류
 
 | 증거 | 분류 |
@@ -114,6 +121,7 @@ Claim owner와 heartbeat:
 | `setup.lock` timeout | 공유 venv 설치/검증 경쟁 |
 | `inline_container.cc`, `unexpected pos` | 손상된 PyTorch cache/container |
 | `ModuleNotFoundError` | 로그에 기록된 Python executable의 환경 |
+| `fidelity certificate mismatch ... /schema` | 구형 certificate; 7B 런처가 보존 후 v2 재생성 |
 | `STALE CLAIM`만 존재 | 원인 미확정; owner worker/unit 로그 추가 조사 |
 
 로컬 LLM은 filesystem/terminal 접근 권한이 있으면 위 파일을 직접 읽는다.

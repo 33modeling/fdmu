@@ -133,36 +133,20 @@ PY
 }
 
 stop_uncertified_local_audit() {
-  local worker_pattern="experiments/cluster/worker.py --queue ${QUEUE}"
-  local audit_pattern="run_campaign.py.*7b_tofu.yaml.*--phase audit"
-  local attempt
-
   if fidelity_contract_valid; then
     printf '[INFO] fidelity certificate satisfies current contract: %s\n' \
       "$FIDELITY_CERT"
     return
   fi
-  if ! pgrep -f "$worker_pattern|$audit_pattern" >/dev/null; then
-    return
-  fi
-
-  printf '[RECOVERY] fidelity certificate missing; stopping local uncertified '\
+  printf '[RECOVERY] fidelity certificate is absent or not current v2; stopping local uncertified '\
 '7B audit before fidelity: %s\n' "$FIDELITY_CERT"
-  # Tell the worker to exit after its child, then terminate the invalid audit
-  # child so it records a retryable failed unit and releases GPU 0.
-  pkill -TERM -f "$worker_pattern" 2>/dev/null || true
-  pkill -TERM -f "$audit_pattern" 2>/dev/null || true
-  for attempt in {1..60}; do
-    if ! pgrep -f "$worker_pattern|$audit_pattern" >/dev/null; then
-      printf '[RECOVERY] local uncertified 7B audit stopped\n'
-      return
-    fi
-    sleep 1
-  done
-  printf '[ERROR] local 7B audit did not stop within 60 seconds; '\
-'refusing to double-book fidelity GPU\n' >&2
-  pgrep -af "$worker_pattern|$audit_pattern" >&2 || true
-  return 1
+  "$PYTHON" experiments/cluster/recover_local_audit.py \
+    --queue "$QUEUE" \
+    --config configs/channel_matrix/7b_tofu.yaml \
+    --model-id "$MODEL_ID" \
+    --unit-prefix "$AUDIT_MATCH" \
+    --grace-seconds "${AUDIT_STOP_GRACE_SECONDS:-30}"
+  printf '[RECOVERY] local uncertified 7B audit stopped and claims released\n'
 }
 
 print_context

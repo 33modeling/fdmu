@@ -19,6 +19,7 @@ sys.path.insert(0, str(ROOT / "experiments" / "cluster"))
 import make_units  # noqa: E402
 import monitor_queue  # noqa: E402
 import quarantine_failed_audit  # noqa: E402
+import recover_local_audit  # noqa: E402
 import worker  # noqa: E402
 from workqueue import ClaimLostError, Unit, WorkQueue  # noqa: E402
 
@@ -552,6 +553,78 @@ def test_worker_rejects_unit_pinned_to_another_commit(tmp_path):
         (q.root / "failed" / "wrong-commit.json").read_text(encoding="utf-8")
     )
     assert "CodeCommitMismatch" in failed["result"]["error"]
+
+
+def test_worker_termination_signal_stops_active_process_group(tmp_path, monkeypatch):
+    q = WorkQueue(tmp_path / "q")
+    q.enqueue([
+        Unit(
+            unit_id="interrupted",
+            cmd=[sys.executable, "-c", "import time; time.sleep(30)"],
+            gpus=0,
+            max_attempts=2,
+        )
+    ])
+    claim = q.claim(owner={"host": "test", "gpu": -1})
+    assert claim is not None
+    shutdown = threading.Event()
+    shutdown.set()
+    log_dir = tmp_path / "logs"
+    log_dir.mkdir()
+    monkeypatch.setattr(worker, "CHILD_TERMINATE_GRACE_S", 0.1)
+
+    assert not worker.run_claim(
+        q,
+        claim,
+        gpu=-1,
+        log_dir=log_dir,
+        shutdown=shutdown,
+    )
+    report = q.status()
+    assert report["counts"]["pending"] == 1
+    pending = json.loads(
+        (q.root / "pending" / "interrupted.json").read_text(encoding="utf-8")
+    )
+    assert "WorkerTerminated" in pending["last_failure"]["error"]
+
+
+def test_local_audit_recovery_releases_only_verified_local_claim(
+    tmp_path,
+    monkeypatch,
+):
+    q = WorkQueue(tmp_path / "q")
+    q.enqueue([_unit("aud__qwen25_7b__a181")])
+    claim = q.claim(owner={"host": "test-host", "gpu": 0, "pid": 12345})
+    assert claim is not None
+    monkeypatch.setattr(recover_local_audit.socket, "gethostname", lambda: "test-host")
+    monkeypatch.setattr(recover_local_audit, "process_snapshot", lambda: {})
+
+    released = recover_local_audit.recover(
+        queue=q.root.resolve(),
+        config=(ROOT / "configs/channel_matrix/7b_tofu.yaml").resolve(),
+        model_id="qwen25_7b",
+        unit_prefix="aud__qwen25_7b",
+        grace_seconds=0.1,
+    )
+
+    assert released == ["aud__qwen25_7b__a181"]
+    assert q.status()["counts"]["failed"] == 1
+
+
+def test_local_audit_recovery_refuses_remote_claim(tmp_path, monkeypatch):
+    q = WorkQueue(tmp_path / "q")
+    q.enqueue([_unit("aud__qwen25_7b__a181")])
+    assert q.claim(owner={"host": "other-host", "gpu": 0, "pid": 12345})
+    monkeypatch.setattr(recover_local_audit.socket, "gethostname", lambda: "test-host")
+
+    with pytest.raises(RuntimeError, match="another host"):
+        recover_local_audit.recover(
+            queue=q.root.resolve(),
+            config=(ROOT / "configs/channel_matrix/7b_tofu.yaml").resolve(),
+            model_id="qwen25_7b",
+            unit_prefix="aud__qwen25_7b",
+            grace_seconds=0.1,
+        )
 
 
 def test_stale_claim_terminates_entire_child_process_group(

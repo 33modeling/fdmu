@@ -181,7 +181,7 @@ class Cluster7BFidelityTest(unittest.TestCase):
             cfg["audit"]["fidelity_certificates"]["qwen25_7b"] = str(certificate)
             csv_path.parent.mkdir(parents=True)
             csv_path.write_text("old,csv\n", encoding="utf-8")
-            stale = self._certificate(dtype="bfloat16")
+            stale = self._certificate(schema="fd-fidelity-certificate-v1")
             stale["model"] = str(model_dir)
             certificate.write_text(json.dumps(stale), encoding="utf-8")
 
@@ -244,7 +244,10 @@ class Cluster7BFidelityTest(unittest.TestCase):
             )
             self.assertEqual(len(preserved), 1)
             old_payload = json.loads(preserved[0].read_text(encoding="utf-8"))
-            self.assertEqual(old_payload["dtype"], "bfloat16")
+            self.assertEqual(
+                old_payload["schema"],
+                "fd-fidelity-certificate-v1",
+            )
             self.assertTrue(
                 certificate.with_name(f"{certificate.name}.lock").is_file()
             )
