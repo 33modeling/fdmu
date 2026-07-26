@@ -1290,6 +1290,7 @@ def main():
 
     markers = []
     damage_by_opt: dict[str, dict[str, dict[str, float]]] = {}
+    reach_by_opt: dict[str, dict[str, object]] = {}
     for g in gens:
         log(f"generator: {g}")
         cfg_g = objective_cfgs[g]
@@ -1305,18 +1306,27 @@ def main():
             clear_cuda_cache()
         markers.append(out / f"traj_{g}" / "DONE")
         term = rec.terminal()
-        if term.forget_recall > a.gen_recall_gate:
-            raise RuntimeError(
-                f"generator {g} did not reach direct recall <= "
-                f"{a.gen_recall_gate:.3f}; refusing terminal-budget damage"
-            )
+        reached = term.forget_recall <= a.gen_recall_gate
         dmg_all = rec.damage_at()
         rem = [dmg_all[c] for c in audit_ids]
+        horizon = "first-reaching" if reached else "terminal-not-reached"
         log(
-            f"  first-reaching step={term.step} recall={term.forget_recall:.3f} "
+            f"  {horizon} step={term.step} recall={term.forget_recall:.3f} "
+            f"gate={a.gen_recall_gate:.3f} "
             f"mean_audit_dmg={sum(rem)/len(rem):+.3f}"
         )
+        reach_by_opt[g] = {
+            "request": req.request_id,
+            "reached": reached,
+            "horizon": horizon,
+            "step": term.step,
+            "terminal_recall": term.forget_recall,
+            "recall_gate": a.gen_recall_gate,
+        }
         damage_by_opt[g] = {req.request_id: {c: dmg_all[c] for c in audit_ids}}
+
+    with open(out / "generator_reach_status.json", "w", encoding="utf-8") as f:
+        json.dump(reach_by_opt, f, indent=2, sort_keys=True)
 
     sealed = {
         pred: {req.request_id: unseal(out / "seals", out / "seal_ledger.jsonl",
