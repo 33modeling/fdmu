@@ -17,6 +17,20 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class LauncherContractTests(unittest.TestCase):
+    def test_gpu_recovery_wrapper_preserves_artifacts_and_restarts_pipeline(self):
+        recovery = (
+            ROOT / "local_run/recover_and_run_tofu_1p5b_4090x2.sh"
+        ).read_text(encoding="utf-8")
+        self.assertIn("--query-compute-apps=pid", recovery)
+        self.assertIn('sudo kill -TERM "${!GPU_PIDS[@]}"', recovery)
+        self.assertIn('sudo kill -KILL "${!GPU_PIDS[@]}"', recovery)
+        self.assertIn("sudo nvidia-smi --gpu-reset", recovery)
+        self.assertIn(
+            'exec env GPU_IDS="$GPU_IDS" bash local_run/run_tofu_1p5b_4090x2.sh',
+            recovery,
+        )
+        self.assertNotIn("rm -", recovery)
+
     def test_yaml_compatibility_entrypoint_cannot_create_partial_venv(self):
         ensure = (ROOT / "local_run/ensure_4090_yaml.sh").read_text(
             encoding="utf-8"

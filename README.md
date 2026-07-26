@@ -54,6 +54,15 @@ GPU 머신에서는 기존 검증된 `.venv`가 있으면 다시 만들지 않�
 GPU_IDS=0,1 bash local_run/run_tofu_1p5b_4090x2.sh
 ```
 
+이전 실패에서 남은 4090 compute 프로세스까지 정리하고 같은 결과를 재개할
+때는 아래 복구 원클릭 명령을 사용한다. 선택한 GPU의 기존 compute
+프로세스를 종료하므로 전용 4090 머신에서만 실행한다. 결과와 cache는
+삭제하지 않는다.
+
+```bash
+bash local_run/recover_and_run_tofu_1p5b_4090x2.sh
+```
+
 환경 bootstrap, calibration, parent-freeze 자동 검증, joint 개발 스윕, declared
 fidelity, target, evidence, `table1.tex` 생성을 순서대로 실행한다. 원클릭
 실행은 사람의 입력을 기다리지 않는다. target-free 산출물을 재검증하고
