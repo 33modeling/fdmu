@@ -17,7 +17,6 @@ CERTIFICATE="$CAMPAIGN_ROOT/fidelity/qwen25_1p5b.json"
 SUMMARY="$FIDELITY_ROOT/fidelity_summary.json"
 LOG_DIR="$FIDELITY_ROOT/launcher_logs"
 
-bash local_run/bootstrap_4090_env.sh
 mkdir -p "$LOG_DIR" "$(dirname "$CONFIG")"
 LOG="$LOG_DIR/$(date -u '+%Y%m%dT%H%M%SZ')-$$.log"
 ln -sfn "$(basename "$LOG")" "$LOG_DIR/current.log"
@@ -37,6 +36,42 @@ printf '[%s] declared-fidelity start pid=%s\n' "$(date -u '+%FT%TZ')" "$$"
 printf '[CONFIG] model=%s output=%s certificate=%s summary=%s\n' \
   "$MODEL_PATH" "$CAMPAIGN_ROOT" "$CERTIFICATE" "$SUMMARY"
 printf '[CONFIG] fidelity_gpu=%s\n' "$FIDELITY_GPU"
+
+if [[ -x "$PYTHON" ]] \
+  && "$PYTHON" - "$SUMMARY" "$CERTIFICATE" <<'PY'
+import hashlib
+import json
+from pathlib import Path
+import sys
+
+summary_path, certificate_path = (Path(value).resolve() for value in sys.argv[1:])
+try:
+    summary = json.loads(summary_path.read_text(encoding="utf-8"))
+    certificate = json.loads(certificate_path.read_text(encoding="utf-8"))
+    valid = (
+        summary.get("setting") == "tofu_qwen25_1p5b"
+        and summary.get("support") == "declared_setting_fidelity"
+        and Path(str(summary.get("source_certificate", ""))).resolve()
+        == certificate_path
+        and summary.get("source_certificate_sha256")
+        == hashlib.sha256(certificate_path.read_bytes()).hexdigest()
+        and summary.get("certificate_passed") is True
+        and certificate.get("passed") is True
+    )
+except (OSError, ValueError, TypeError) as error:
+    print(f"[FIDELITY_STATUS] complete=false reason={type(error).__name__}: {error}")
+    raise SystemExit(1)
+if not valid:
+    print("[FIDELITY_STATUS] complete=false reason=summary/certificate mismatch")
+    raise SystemExit(1)
+print(f"[FIDELITY_STATUS] complete=true summary={summary_path}")
+PY
+then
+  printf '[DECLARED FIDELITY SKIPPED] validated summary already exists; rerun=0\n'
+  exit 0
+fi
+
+bash local_run/bootstrap_4090_env.sh
 
 "$PYTHON" - "$MODEL_PATH" "$CAMPAIGN_ROOT" "$CERTIFICATE" "$CONFIG" <<'PY'
 from pathlib import Path

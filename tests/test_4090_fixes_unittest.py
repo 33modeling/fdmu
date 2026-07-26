@@ -69,12 +69,12 @@ class LauncherContractTests(unittest.TestCase):
             "bash local_run/finalize_joint_sweep_to_latex.sh", top
         )
         self.assertIn(
-            "run_stage declared-fidelity bash local_run/run_tofu_1p5b_fidelity.sh",
+            "run_stage 5 declared-fidelity bash local_run/run_tofu_1p5b_fidelity.sh",
             top,
         )
         self.assertLess(
-            top.index("run_stage declared-fidelity"),
-            top.index("run_stage target-evidence-latex"),
+            top.index("run_stage 5 declared-fidelity"),
+            top.index("run_stage 6 target-evidence-latex"),
         )
         self.assertNotIn("require_file_approval", top)
         self.assertNotIn("APPROVE JOINT", top)

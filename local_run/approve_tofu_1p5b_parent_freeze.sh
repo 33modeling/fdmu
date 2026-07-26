@@ -23,6 +23,51 @@ fi
 
 bash local_run/ensure_4090_yaml.sh
 
+APPROVAL_RECORD="$CALIBRATION_ROOT/freeze_proposals/parent_freeze_approval.json"
+if "$PYTHON" - "$PARENT_FREEZE" "$PROPOSAL" "$SELECTION_INPUT" "$APPROVAL_RECORD" <<'PY'
+import hashlib
+import json
+from pathlib import Path
+import sys
+
+import yaml
+
+freeze_path, proposal_path, selection_path, record_path = (
+    Path(value).resolve() for value in sys.argv[1:]
+)
+
+def digest(path):
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+try:
+    record = json.loads(record_path.read_text(encoding="utf-8"))
+    freeze = yaml.safe_load(freeze_path.read_text(encoding="utf-8"))
+    valid = (
+        isinstance(freeze, dict)
+        and freeze.get("status") == "frozen"
+        and record.get("schema_version") == 1
+        and record.get("approved") is True
+        and Path(str(record.get("output", ""))).resolve() == freeze_path
+        and record.get("output_sha256") == digest(freeze_path)
+        and Path(str(record.get("proposal", ""))).resolve() == proposal_path
+        and record.get("proposal_sha256") == digest(proposal_path)
+        and Path(str(record.get("selection_input", ""))).resolve()
+        == selection_path
+        and record.get("selection_input_sha256") == digest(selection_path)
+    )
+except (OSError, ValueError, TypeError, yaml.YAMLError) as error:
+    print(f"[PARENT_FREEZE_STATUS] complete=false reason={type(error).__name__}: {error}")
+    raise SystemExit(1)
+if not valid:
+    print("[PARENT_FREEZE_STATUS] complete=false reason=approval record mismatch")
+    raise SystemExit(1)
+print(f"[PARENT_FREEZE_STATUS] complete=true freeze={freeze_path}")
+PY
+then
+  printf '[PARENT FREEZE SKIPPED] approved freeze is complete; recompute=0\n'
+  exit 0
+fi
+
 mkdir -p "$(dirname "$APPROVAL_LOG")"
 exec > >(tee -a "$APPROVAL_LOG") 2>&1
 printf '[%s] automatic parent freeze validation started\n' "$(date -u '+%FT%TZ')"

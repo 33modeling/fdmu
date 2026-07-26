@@ -3,8 +3,10 @@ from __future__ import annotations
 from copy import deepcopy
 import hashlib
 import json
+import os
 from pathlib import Path
 import sys
+import time
 
 import pytest
 import yaml
@@ -15,8 +17,10 @@ from experiments.paper.approve_parent_freeze import (
 )
 from experiments.paper.run_joint_dev_sweep import (
     SweepError,
+    _EventLog,
     _absolute_executable,
     _best_parent_freeze,
+    _run_lanes,
     _unit_complete,
     _write_or_rebind_manifest,
     _with_parent_freeze,
@@ -597,3 +601,48 @@ def test_parent_freeze_approval_rejects_unresolved_or_changed_draft(tmp_path):
     changed["parents"]["graddiff"]["steps"] = 240
     with pytest.raises(ApprovalError, match="recomputation"):
         validate_draft(proposal, changed, input_path=selection)
+
+
+def test_lane_failure_terminates_and_reaps_other_gpu_process(tmp_path):
+    slow_pid = tmp_path / "slow.pid"
+    units = [
+        {
+            "parent": "fail",
+            "request": "request",
+            "seed": "0",
+            "command": [
+                sys.executable,
+                "-c",
+                "import sys,time; time.sleep(0.5); sys.exit(7)",
+            ],
+        },
+        {
+            "parent": "slow",
+            "request": "request",
+            "seed": "1",
+            "command": [
+                sys.executable,
+                "-c",
+                (
+                    "import os,time; "
+                    f"open({str(slow_pid)!r}, 'w').write(str(os.getpid())); "
+                    "time.sleep(60)"
+                ),
+            ],
+        },
+    ]
+
+    started = time.monotonic()
+    with pytest.raises(SweepError, match="unit execution failed"):
+        _run_lanes(
+            units,
+            gpus=(0, 1),
+            trial_dir=tmp_path / "trial",
+            events=_EventLog(tmp_path / "events.jsonl"),
+            progress_interval=1.0,
+        )
+
+    assert time.monotonic() - started < 10
+    pid = int(slow_pid.read_text(encoding="utf-8"))
+    with pytest.raises(ProcessLookupError):
+        os.kill(pid, 0)

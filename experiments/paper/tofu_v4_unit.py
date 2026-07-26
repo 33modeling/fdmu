@@ -638,9 +638,17 @@ def run_unit(args: argparse.Namespace) -> None:
     )
     sft_cache_hit = sft_result is not None
     if sft_result is None:
-        log(f"SFT cache miss; training theta0 once for {args.request}/seed-{args.seed}")
+        log(
+            f"[SFT_CACHE] MISS request={args.request} seed={args.seed} "
+            f"path={cache_path} training_required=true"
+        )
         sft_result = gate_runtime.sft(
             model0, sft_examples, runtime_args, log, block
+        )
+    else:
+        log(
+            f"[SFT_CACHE] HIT request={args.request} seed={args.seed} "
+            f"path={cache_path} training_skipped=true"
         )
     if not sft_result["reached"]:
         raise TOFUUnitError(

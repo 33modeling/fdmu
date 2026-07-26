@@ -30,6 +30,25 @@ printf '[config] repo=%s spec=%s gpus=%s results=%s progress=%ss\n' \
 printf '[config] model=%s sft_cache=%s parent_freeze=%s\n' \
   "$MODEL_PATH" "$SFT_CACHE_ROOT" "$PARENT_FREEZE"
 
+SWEEP_COMMAND=(
+  "$PYTHON" -u experiments/paper/run_joint_dev_sweep.py
+  --spec "$SPEC"
+  --gpus "$GPU_IDS"
+  --python "$PYTHON"
+  --model-source "$MODEL_PATH"
+  --sft-cache-root "$SFT_CACHE_ROOT"
+  --parent-freeze "$PARENT_FREEZE"
+  --output-root "$RESULTS_ROOT"
+  --progress-interval "$PROGRESS_INTERVAL_SECONDS"
+)
+
+if [[ -x "$PYTHON" ]] \
+  && "$PYTHON" -c 'import yaml' >/dev/null 2>&1 \
+  && "${SWEEP_COMMAND[@]}" --check-complete; then
+  printf '[JOINT SWEEP SKIPPED] terminal winner is complete; retraining=0\n'
+  exit 0
+fi
+
 bash local_run/bootstrap_4090_env.sh
 "$PYTHON" -c 'import datasets, site, sys, torch, transformers, yaml; print(
     f"[deps] python={sys.executable} prefix={sys.prefix} "
@@ -124,13 +143,4 @@ if [[ "${INTERMEDIATE_WATCHER:-1}" == "1" ]]; then
     "$!" "$RESULTS_ROOT" "$RESULTS_ROOT"
 fi
 
-exec "$PYTHON" -u experiments/paper/run_joint_dev_sweep.py \
-  --spec "$SPEC" \
-  --gpus "$GPU_IDS" \
-  --python "$PYTHON" \
-  --model-source "$MODEL_PATH" \
-  --sft-cache-root "$SFT_CACHE_ROOT" \
-  --parent-freeze "$PARENT_FREEZE" \
-  --output-root "$RESULTS_ROOT" \
-  --progress-interval "$PROGRESS_INTERVAL_SECONDS" \
-  "$@"
+exec "${SWEEP_COMMAND[@]}" "$@"

@@ -25,6 +25,23 @@ printf '[%s] calibration launcher start pid=%s log=%s\n' \
 printf '[config] repo=%s gpus=%s output=%s progress=%ss\n' \
   "$ROOT" "$GPU_IDS" "$CALIBRATION_ROOT" "$PROGRESS_INTERVAL_SECONDS"
 
+CALIBRATION_COMMAND=(
+  "$PYTHON" -u experiments/paper/run_parent_calibration_4090x2.py
+  --python "$PYTHON"
+  --model-source "$MODEL_PATH"
+  --sft-cache-root "$SFT_CACHE_ROOT"
+  --output-root "$CALIBRATION_ROOT"
+  --gpus "$GPU_IDS"
+  --progress-interval "$PROGRESS_INTERVAL_SECONDS"
+)
+
+if [[ -x "$PYTHON" ]] \
+  && "$PYTHON" -c 'import yaml' >/dev/null 2>&1 \
+  && "${CALIBRATION_COMMAND[@]}" --check-complete; then
+  printf '[CALIBRATION SKIPPED] terminal artifacts are complete; retraining=0\n'
+  exit 0
+fi
+
 bash local_run/bootstrap_4090_env.sh
 "$PYTHON" -c 'import datasets, site, sys, torch, transformers, yaml; print(
     f"[deps] python={sys.executable} prefix={sys.prefix} "
@@ -103,11 +120,4 @@ if command -v nvidia-smi >/dev/null; then
   fi
 fi
 
-exec "$PYTHON" -u experiments/paper/run_parent_calibration_4090x2.py \
-  --python "$PYTHON" \
-  --model-source "$MODEL_PATH" \
-  --sft-cache-root "$SFT_CACHE_ROOT" \
-  --output-root "$CALIBRATION_ROOT" \
-  --gpus "$GPU_IDS" \
-  --progress-interval "$PROGRESS_INTERVAL_SECONDS" \
-  "$@"
+exec "${CALIBRATION_COMMAND[@]}" "$@"

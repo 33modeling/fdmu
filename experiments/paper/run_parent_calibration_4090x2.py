@@ -20,6 +20,7 @@ from experiments.paper.run_joint_dev_sweep import (  # noqa: E402
     _absolute_executable,
     _atomic_json,
     _environment_snapshot,
+    _load_json,
     _load_yaml,
     _recover_git_snapshot,
     _run_lanes,
@@ -27,7 +28,7 @@ from experiments.paper.run_joint_dev_sweep import (  # noqa: E402
     _sha256,
     _snapshot_current_config,
     _status,
-    _unit_complete,
+    _unit_completion_status,
     _write_once,
     _write_or_rebind_manifest,
     SweepError,
@@ -39,6 +40,76 @@ from experiments.paper.select_tofu_v4 import (  # noqa: E402
 
 
 SETTING = "tofu_qwen25_1p5b"
+
+
+def calibration_completion(
+    output_root: Path,
+    setting: str,
+) -> tuple[bool, str]:
+    """Validate the terminal calibration marker without loading a model."""
+    output_root = output_root.resolve()
+    status_path = output_root / "CALIBRATION_STATUS.json"
+    if not status_path.is_file():
+        return False, f"missing status marker {status_path}"
+    try:
+        status = _load_json(status_path)
+        if status.get("schema_version") != 1:
+            return False, "CALIBRATION_STATUS.json schema_version is not 1"
+        if status.get("setting") != setting:
+            return False, (
+                "CALIBRATION_STATUS.json setting mismatch: "
+                f"expected={setting} actual={status.get('setting')}"
+            )
+        if status.get("approval_ready") is not True:
+            return False, "calibration selection is not approval-ready"
+        if status.get("unresolved") != []:
+            return False, (
+                "calibration selection remains unresolved: "
+                f"{status.get('unresolved')}"
+            )
+
+        expected_proposal = (
+            output_root
+            / "freeze_proposals"
+            / "tofu_parent_freeze_1p5b.recommended.yaml"
+        ).resolve()
+        expected_selection = (
+            output_root / "stage" / "parent_selection_inputs.jsonl"
+        ).resolve()
+        proposal = Path(str(status.get("proposal", ""))).resolve()
+        selection = Path(str(status.get("selection_input", ""))).resolve()
+        if proposal != expected_proposal or not proposal.is_file():
+            return False, f"missing or mismatched proposal {proposal}"
+        if selection != expected_selection or not selection.is_file():
+            return False, f"missing or mismatched selection input {selection}"
+        selection_digest = str(status.get("selection_input_sha256", ""))
+        if len(selection_digest) != 64 or _sha256(selection) != selection_digest:
+            return False, "selection input SHA-256 mismatch"
+
+        proposal_digest = status.get("proposal_sha256")
+        if proposal_digest is not None and (
+            not isinstance(proposal_digest, str)
+            or len(proposal_digest) != 64
+            or _sha256(proposal) != proposal_digest
+        ):
+            return False, "proposal SHA-256 mismatch"
+        proposal_payload = _load_yaml(proposal)
+        if (
+            proposal_payload.get("schema_version") != 1
+            or proposal_payload.get("contract") != "tofu-pdf-v4-parent-freeze"
+            or proposal_payload.get("status") != "draft"
+            or proposal_payload.get("unresolved") != []
+        ):
+            return False, "proposal is not a resolved parent-freeze draft"
+        expected_source = {
+            "path": str(selection),
+            "sha256": selection_digest,
+        }
+        if proposal_payload.get("development_artifacts") != [expected_source]:
+            return False, "proposal does not reference the sealed selection input"
+    except (OSError, SweepError, TypeError, ValueError) as error:
+        return False, f"{type(error).__name__}: {error}"
+    return True, f"validated terminal marker {status_path}"
 
 
 def _setting(
@@ -104,6 +175,20 @@ def _write_proposal(
 
 
 def run(args: argparse.Namespace) -> int:
+    complete, completion_reason = calibration_completion(
+        args.output_root,
+        args.setting,
+    )
+    if complete:
+        _status(
+            "CALIBRATION_SKIPPED already_complete=true retraining=0 "
+            f"reason={completion_reason}"
+        )
+        return 0
+    _status(
+        "CALIBRATION_RESUME already_complete=false "
+        f"reason={completion_reason}"
+    )
     if args.progress_interval < 1.0:
         raise SweepError("--progress-interval must be at least 1 second")
     try:
@@ -196,17 +281,32 @@ def run(args: argparse.Namespace) -> int:
     campaign_hash = _sha256(campaign_path)
     evidence_hash = _sha256(evidence_path)
     runtime_hash = _sha256(runtime_path)
+    completion = [
+        (
+            unit,
+            *_unit_completion_status(
+                unit,
+                campaign_hash=campaign_hash,
+                evidence_hash=evidence_hash,
+                runtime_hash=runtime_hash,
+                stage="calibration",
+            ),
+        )
+        for unit in manifest["units"]
+    ]
     pending = [
         unit
-        for unit in manifest["units"]
-        if not _unit_complete(
-            unit,
-            campaign_hash=campaign_hash,
-            evidence_hash=evidence_hash,
-            runtime_hash=runtime_hash,
-            stage="calibration",
-        )
+        for unit, complete, _reason in completion
+        if not complete
     ]
+    for unit, complete, reason in completion:
+        identity = (
+            f"{unit.get('parent')}__{unit.get('request')}__seed-{unit.get('seed')}"
+        )
+        if complete:
+            _status(f"CALIBRATION_REUSE unit={identity} retraining=0")
+        else:
+            _status(f"CALIBRATION_PENDING unit={identity} reason={reason}")
     _status(
         f"CALIBRATION_UNITS planned={len(manifest['units'])} "
         f"valid={len(manifest['units']) - len(pending)} pending={len(pending)}"
@@ -247,6 +347,7 @@ def run(args: argparse.Namespace) -> int:
         "schema_version": 1,
         "setting": args.setting,
         "proposal": str(proposal_path),
+        "proposal_sha256": _sha256(proposal_path),
         "selection_input": str(selection_input),
         "selection_input_sha256": _sha256(selection_input),
         "unresolved": unresolved,
@@ -290,12 +391,28 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--gpus", default="0,1")
     parser.add_argument("--progress-interval", type=float, default=15.0)
     parser.add_argument("--dry-run", action="store_true")
+    parser.add_argument(
+        "--check-complete",
+        action="store_true",
+        help="validate the terminal marker without starting calibration",
+    )
     return parser.parse_args(argv)
 
 
 def main(argv: list[str] | None = None) -> int:
     try:
-        return run(parse_args(argv))
+        args = parse_args(argv)
+        if args.check_complete:
+            complete, reason = calibration_completion(
+                args.output_root,
+                args.setting,
+            )
+            _status(
+                f"CALIBRATION_STATUS complete={str(complete).lower()} "
+                f"reason={reason}"
+            )
+            return 0 if complete else 1
+        return run(args)
     except (SweepError, OSError, ValueError, KeyError, TypeError) as error:
         print(f"parent calibration failed: {error}", file=sys.stderr)
         return 2

@@ -789,6 +789,71 @@ def _best_parent_freeze(
     return _resolve(parent_freeze)
 
 
+def joint_sweep_completion(
+    output_root: Path,
+    *,
+    setting: str,
+    parent_freeze: Path,
+) -> tuple[bool, str]:
+    """Validate a terminal joint winner without preparing any GPU work."""
+    output_root = output_root.resolve()
+    expected_freeze = parent_freeze.resolve()
+    best_path = output_root / "BEST.json"
+    status_path = output_root / "SWEEP_STATUS.json"
+    if not best_path.is_file():
+        return False, f"missing {best_path}"
+    if not status_path.is_file():
+        return False, f"missing {status_path}"
+    try:
+        best = _load_json(best_path)
+        status = _load_json(status_path)
+        if (
+            best.get("status") != "selected"
+            or best.get("automatic_freeze_ready") is not True
+            or best.get("development_only") is not True
+            or best.get("target_used") is not False
+        ):
+            return False, "BEST.json is not a terminal target-free selection"
+        if (
+            status.get("status") != "joint_best"
+            or status.get("terminal") is not True
+            or status.get("exit_code") != 0
+            or status.get("target_used") is not False
+        ):
+            return False, "SWEEP_STATUS.json is not a terminal joint winner"
+        trial_dir = Path(str(best.get("trial_dir", ""))).resolve()
+        if (
+            not trial_dir.is_dir()
+            or trial_dir != Path(str(status.get("trial_dir", ""))).resolve()
+        ):
+            return False, "BEST.json and SWEEP_STATUS.json trial directories differ"
+        comparison = Path(str(best.get("joint_comparison", ""))).resolve()
+        if not comparison.is_file() or _load_json(comparison).get("passed") is not True:
+            return False, "winning joint comparison is missing or not passing"
+        runtime = Path(str(best.get("recommended_runtime", ""))).resolve()
+        if not runtime.is_file():
+            return False, f"winning runtime is missing at {runtime}"
+        if _best_parent_freeze(best, setting) != expected_freeze:
+            return False, (
+                "winning parent freeze differs "
+                f"expected={expected_freeze} "
+                f"actual={_best_parent_freeze(best, setting)}"
+            )
+        if not expected_freeze.is_file():
+            return False, f"winning parent freeze is missing at {expected_freeze}"
+        metadata = _load_json(trial_dir / "trial.json")
+        resolved_runtime = (
+            metadata.get("resolved_configs", {}).get("runtime")
+            if isinstance(metadata.get("resolved_configs"), Mapping)
+            else None
+        )
+        if Path(str(resolved_runtime or "")).resolve() != runtime:
+            return False, "winning trial metadata points to a different runtime"
+    except (OSError, SweepError, TypeError, ValueError) as error:
+        return False, f"{type(error).__name__}: {error}"
+    return True, f"validated terminal joint winner {best_path}"
+
+
 def _valid_artifact(entry: object, expected: Path | None = None) -> bool:
     if not isinstance(entry, Mapping):
         return False
@@ -803,6 +868,146 @@ def _valid_artifact(entry: object, expected: Path | None = None) -> bool:
     )
 
 
+def _artifact_completion_status(
+    entry: object,
+    *,
+    label: str,
+    expected: Path | None = None,
+) -> tuple[bool, str]:
+    if not isinstance(entry, Mapping):
+        return False, f"{label}: manifest entry is missing"
+    raw_path = entry.get("path")
+    if not isinstance(raw_path, str) or not raw_path:
+        return False, f"{label}: artifact path is missing"
+    path = Path(raw_path).resolve()
+    if expected is not None and path != expected.resolve():
+        return False, (
+            f"{label}: path mismatch expected={expected.resolve()} actual={path}"
+        )
+    if not path.is_file():
+        return False, f"{label}: artifact is missing at {path}"
+    digest = entry.get("sha256")
+    if not isinstance(digest, str) or len(digest) != 64:
+        return False, f"{label}: SHA-256 is missing or malformed"
+    actual = _sha256(path)
+    if actual != digest:
+        return False, (
+            f"{label}: SHA-256 mismatch expected={digest} actual={actual}"
+        )
+    return True, "complete"
+
+
+def _unit_completion_status(
+    unit: Mapping[str, Any],
+    *,
+    campaign_hash: str,
+    evidence_hash: str,
+    runtime_hash: str,
+    stage: str = "protection",
+) -> tuple[bool, str]:
+    try:
+        run_manifest = Path(str(unit["run_manifest"])).resolve()
+        if not run_manifest.is_file():
+            return False, f"run manifest is missing at {run_manifest}"
+        raw = _load_json(run_manifest)
+        if raw.get("schema_version") != 1:
+            return False, (
+                "run manifest schema mismatch: "
+                f"expected=1 actual={raw.get('schema_version')}"
+            )
+        if raw.get("contract") != "tofu-pdf-v4-unit-output":
+            return False, (
+                "run manifest contract mismatch: "
+                f"actual={raw.get('contract')}"
+            )
+        if raw.get("stage") != stage:
+            return False, (
+                f"stage mismatch expected={stage} actual={raw.get('stage')}"
+            )
+        expected_setting = unit.get("setting", raw.get("setting"))
+        if raw.get("setting") != expected_setting:
+            return False, (
+                "setting mismatch "
+                f"expected={expected_setting} actual={raw.get('setting')}"
+            )
+        expected_hashes = {
+            "campaign_config_sha256": campaign_hash,
+            "evidence_config_sha256": evidence_hash,
+            "runtime_config_sha256": runtime_hash,
+        }
+        for name, digest in expected_hashes.items():
+            if raw.get(name) != digest:
+                return False, (
+                    f"{name} mismatch expected={digest} actual={raw.get(name)}"
+                )
+        for name in ("parent", "request"):
+            if raw.get(name) != unit.get(name):
+                return False, (
+                    f"{name} mismatch expected={unit.get(name)} "
+                    f"actual={raw.get(name)}"
+                )
+        if str(raw.get("seed")) != str(unit.get("seed")):
+            return False, (
+                f"seed mismatch expected={unit.get('seed')} actual={raw.get('seed')}"
+            )
+        outputs = unit.get("outputs")
+        raw_outputs = raw.get("outputs")
+        if not isinstance(outputs, Mapping) or not isinstance(raw_outputs, Mapping):
+            return False, "output artifact roster is missing"
+        if set(outputs) != set(raw_outputs):
+            return False, (
+                "output artifact roster mismatch "
+                f"expected={sorted(outputs)} actual={sorted(raw_outputs)}"
+            )
+        for name, path in outputs.items():
+            valid, reason = _artifact_completion_status(
+                raw_outputs[name],
+                label=f"output.{name}",
+                expected=Path(str(path)),
+            )
+            if not valid:
+                return False, reason
+        required_artifacts = [
+            ("profile_artifact", raw.get("profile_artifact")),
+            (
+                "score_independent_manifest",
+                raw.get("score_independent_manifest"),
+            ),
+        ]
+        if stage in {"calibration", "target_evaluation"}:
+            required_artifacts.append(
+                ("fidelity_diagnostics", raw.get("fidelity_diagnostics"))
+            )
+        if stage in {"protection", "target_evaluation"}:
+            required_artifacts.append(
+                ("protection_diagnostics", raw.get("protection_diagnostics"))
+            )
+        if stage == "target_evaluation":
+            required_artifacts.append(
+                ("selection_freeze", raw.get("selection_freeze"))
+            )
+        for label, artifact in required_artifacts:
+            valid, reason = _artifact_completion_status(
+                artifact,
+                label=label,
+            )
+            if not valid:
+                return False, reason
+        if stage != "calibration":
+            valid, reason = _artifact_completion_status(
+                {
+                    "path": raw.get("parent_freeze"),
+                    "sha256": raw.get("parent_freeze_sha256"),
+                },
+                label="parent_freeze",
+            )
+            if not valid:
+                return False, reason
+        return True, "all declared artifacts and hashes are valid"
+    except (KeyError, OSError, SweepError, TypeError, ValueError) as error:
+        return False, f"{type(error).__name__}: {error}"
+
+
 def _unit_complete(
     unit: Mapping[str, Any],
     *,
@@ -811,69 +1016,14 @@ def _unit_complete(
     runtime_hash: str,
     stage: str = "protection",
 ) -> bool:
-    try:
-        run_manifest = Path(str(unit["run_manifest"])).resolve()
-        raw = _load_json(run_manifest)
-        expected_hashes = {
-            "campaign_config_sha256": campaign_hash,
-            "evidence_config_sha256": evidence_hash,
-            "runtime_config_sha256": runtime_hash,
-        }
-        if (
-            raw.get("schema_version") != 1
-            or raw.get("contract") != "tofu-pdf-v4-unit-output"
-            or raw.get("stage") != stage
-            or raw.get("setting") != unit.get("setting", raw.get("setting"))
-            or any(raw.get(name) != digest for name, digest in expected_hashes.items())
-        ):
-            return False
-        if (
-            raw.get("parent") != unit.get("parent")
-            or raw.get("request") != unit.get("request")
-            or str(raw.get("seed")) != str(unit.get("seed"))
-        ):
-            return False
-        outputs = unit.get("outputs")
-        raw_outputs = raw.get("outputs")
-        if not isinstance(outputs, Mapping) or not isinstance(raw_outputs, Mapping):
-            return False
-        if set(outputs) != set(raw_outputs):
-            return False
-        outputs_valid = all(
-            _valid_artifact(raw_outputs[name], Path(str(path)))
-            for name, path in outputs.items()
-        )
-        if not outputs_valid:
-            return False
-        if not _valid_artifact(raw.get("profile_artifact")):
-            return False
-        if not _valid_artifact(raw.get("score_independent_manifest")):
-            return False
-        if stage in {"calibration", "target_evaluation"} and not _valid_artifact(
-            raw.get("fidelity_diagnostics")
-        ):
-            return False
-        if stage in {"protection", "target_evaluation"} and not _valid_artifact(
-            raw.get("protection_diagnostics")
-        ):
-            return False
-        if stage == "target_evaluation" and not _valid_artifact(
-            raw.get("selection_freeze")
-        ):
-            return False
-        if stage != "calibration":
-            parent_freeze = Path(str(raw.get("parent_freeze", ""))).resolve()
-            parent_freeze_digest = raw.get("parent_freeze_sha256")
-            if (
-                not isinstance(parent_freeze_digest, str)
-                or len(parent_freeze_digest) != 64
-                or not parent_freeze.is_file()
-                or _sha256(parent_freeze) != parent_freeze_digest
-            ):
-                return False
-        return True
-    except (KeyError, OSError, SweepError, TypeError, ValueError):
-        return False
+    complete, _reason = _unit_completion_status(
+        unit,
+        campaign_hash=campaign_hash,
+        evidence_hash=evidence_hash,
+        runtime_hash=runtime_hash,
+        stage=stage,
+    )
+    return complete
 
 
 class _EventLog:
@@ -895,6 +1045,8 @@ def _run_unit(
     gpu: int,
     trial_dir: Path,
     events: _EventLog,
+    active_processes: dict[int, subprocess.Popen[str]] | None = None,
+    process_lock: threading.Lock | None = None,
 ) -> tuple[bool, str]:
     identity = (
         f"{unit['parent']}__{unit['request']}__seed-{unit['seed']}"
@@ -939,14 +1091,30 @@ def _run_unit(
             text=True,
             bufsize=1,
         )
-        if process.stdout is None:
-            raise SweepError(f"cannot capture output for unit {identity}")
-        prefix = f"[GPU{gpu} {identity}]"
-        for line in process.stdout:
-            handle.write(line)
-            handle.flush()
-            print(f"{prefix} {line}", end="", flush=True)
-        returncode = process.wait()
+        if active_processes is not None and process_lock is not None:
+            with process_lock:
+                active_processes[gpu] = process
+        try:
+            if process.stdout is None:
+                raise SweepError(f"cannot capture output for unit {identity}")
+            prefix = f"[GPU{gpu} {identity}]"
+            for line in process.stdout:
+                handle.write(line)
+                handle.flush()
+                print(f"{prefix} {line}", end="", flush=True)
+            returncode = process.wait()
+        finally:
+            if process.poll() is None:
+                process.terminate()
+                try:
+                    process.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    process.kill()
+                    process.wait()
+            if active_processes is not None and process_lock is not None:
+                with process_lock:
+                    if active_processes.get(gpu) is process:
+                        active_processes.pop(gpu, None)
     duration = time.monotonic() - started_monotonic
     status = {
         "unit": identity,
@@ -998,12 +1166,45 @@ def _run_lanes(
     running: dict[int, str] = {}
     completed = 0
     failures: list[str] = []
+    process_lock = threading.Lock()
+    active_processes: dict[int, subprocess.Popen[str]] = {}
     started = time.monotonic()
     total = total_units if total_units is not None else len(units)
     cache_locks = {
         (str(unit["request"]), str(unit["seed"])): threading.Lock()
         for unit in units
     }
+
+    def terminate_active(reason: str) -> None:
+        with process_lock:
+            processes = list(active_processes.items())
+        if not processes:
+            return
+        _status(
+            f"UNIT_CLEANUP reason={reason} active_gpus="
+            f"{[gpu for gpu, _process in processes]} signal=TERM"
+        )
+        for _gpu, process in processes:
+            if process.poll() is None:
+                process.terminate()
+        deadline = time.monotonic() + 5.0
+        while (
+            any(process.poll() is None for _gpu, process in processes)
+            and time.monotonic() < deadline
+        ):
+            time.sleep(0.1)
+        survivors = [
+            (gpu, process)
+            for gpu, process in processes
+            if process.poll() is None
+        ]
+        if survivors:
+            _status(
+                f"UNIT_CLEANUP reason={reason} active_gpus="
+                f"{[gpu for gpu, _process in survivors]} signal=KILL"
+            )
+            for _gpu, process in survivors:
+                process.kill()
 
     def monitor() -> None:
         while not monitor_stopped.wait(progress_interval):
@@ -1051,6 +1252,8 @@ def _run_lanes(
                     gpu=gpu,
                     trial_dir=trial_dir,
                     events=events,
+                    active_processes=active_processes,
+                    process_lock=process_lock,
                 )
             with state_lock:
                 running.pop(gpu, None)
@@ -1059,6 +1262,7 @@ def _run_lanes(
                 with state_lock:
                     failures.append(identity)
                 stopped.set()
+                terminate_active(f"unit-failed:{identity}")
                 break
 
     monitor_thread = threading.Thread(
@@ -1072,6 +1276,10 @@ def _run_lanes(
         try:
             for future in futures:
                 future.result()
+        except BaseException:
+            stopped.set()
+            terminate_active("worker-exception")
+            raise
         finally:
             monitor_stopped.set()
             monitor_thread.join()
@@ -1478,16 +1686,38 @@ def run(args: argparse.Namespace) -> int:
         campaign_hash = _sha256(local_campaign)
         evidence_hash = _sha256(evidence_path)
         runtime_hash = _sha256(local_runtime)
+        completion = [
+            (
+                unit,
+                *_unit_completion_status(
+                    unit,
+                    campaign_hash=campaign_hash,
+                    evidence_hash=evidence_hash,
+                    runtime_hash=runtime_hash,
+                ),
+            )
+            for unit in manifest["units"]
+        ]
         pending = [
             unit
-            for unit in manifest["units"]
-            if not _unit_complete(
-                unit,
-                campaign_hash=campaign_hash,
-                evidence_hash=evidence_hash,
-                runtime_hash=runtime_hash,
-            )
+            for unit, complete, _reason in completion
+            if not complete
         ]
+        for unit, complete, reason in completion:
+            identity = (
+                f"{unit.get('parent')}__{unit.get('request')}"
+                f"__seed-{unit.get('seed')}"
+            )
+            if complete:
+                _status(
+                    f"TRIAL_REUSE trial={trial['id']} unit={identity} "
+                    "retraining=0"
+                )
+            else:
+                _status(
+                    f"TRIAL_PENDING trial={trial['id']} unit={identity} "
+                    f"reason={reason}"
+                )
         _status(
             f"[{index}/{len(spec['trials'])}] {trial['id']}: "
             f"alpha={trial['alpha']} Kp={trial['Kp']} repair={trial['repair']} "
@@ -1726,12 +1956,33 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--max-trials", type=int, default=None)
     parser.add_argument("--progress-interval", type=float, default=15.0)
     parser.add_argument("--dry-run", action="store_true")
+    parser.add_argument(
+        "--check-complete",
+        action="store_true",
+        help="validate an existing joint winner without starting GPU work",
+    )
     return parser.parse_args(argv)
 
 
 def main(argv: list[str] | None = None) -> int:
     try:
-        return run(parse_args(argv))
+        args = parse_args(argv)
+        if args.check_complete:
+            if args.output_root is None or args.parent_freeze is None:
+                raise SweepError(
+                    "--check-complete requires --output-root and --parent-freeze"
+                )
+            complete, reason = joint_sweep_completion(
+                args.output_root,
+                setting="tofu_qwen25_1p5b",
+                parent_freeze=args.parent_freeze,
+            )
+            _status(
+                f"JOINT_SWEEP_STATUS complete={str(complete).lower()} "
+                f"reason={reason}"
+            )
+            return 0 if complete else 1
+        return run(args)
     except HumanFreezeRequired as error:
         print(str(error), file=sys.stderr)
         return 4
