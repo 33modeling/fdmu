@@ -363,6 +363,10 @@ def test_model_launchers_pin_queues_without_force_override():
     assert "experiments/cluster/monitor_queue.py" in fourteen
     assert "setup_group_volume.sh" in seven
     assert "setup_group_volume.sh" in fourteen
+    assert "skipping shared setup lock" in seven
+    assert "skipping shared setup lock" in fourteen
+    assert "cluster_environment_imports_ready" in seven
+    assert "cluster_environment_imports_ready" in fourteen
     assert "stage aggregate-latex" in seven
     assert "stage aggregate-latex" in fourteen
     assert "h100_campaign.sh aggregate" in seven
@@ -402,7 +406,10 @@ def test_model_launchers_pin_queues_without_force_override():
         encoding="utf-8"
     )
     assert "sentence-transformers" not in setup
-    assert 'flock -x 9' in setup
+    assert 'flock -x -w "$LOCK_TIMEOUT_SECONDS" 9' in setup
+    assert "setup.lock.owner" in setup
+    assert "existing environment is ready; lock not required" in setup
+    assert "environment was prepared by another host while waiting" in setup
     assert '"torch==2.7.1"' in setup
     assert '"transformers==4.53.2"' in setup
     assert '"datasets==2.19.2"' in setup

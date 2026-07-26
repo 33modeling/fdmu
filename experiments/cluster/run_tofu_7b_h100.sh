@@ -27,9 +27,19 @@ bootstrap_error() {
 }
 trap bootstrap_error ERR
 
+cluster_environment_imports_ready() {
+  [[ -x "$PYTHON" ]] \
+    && "$PYTHON" -c 'import datasets, torch, transformers, yaml' >/dev/null 2>&1
+}
+
 printf '[INFO] time=%s stage=environment-bootstrap start\n' "$(date -u '+%FT%TZ')"
 if [[ "${BOOTSTRAP_CLUSTER_ENV:-1}" == "1" ]]; then
-  bash "$ROOT/experiments/cluster/setup_group_volume.sh"
+  if cluster_environment_imports_ready; then
+    printf '[INFO] existing cluster environment imports pass; skipping shared setup lock: %s\n' \
+      "$VENV"
+  else
+    bash "$ROOT/experiments/cluster/setup_group_volume.sh"
+  fi
 fi
 
 # shellcheck disable=SC1091
