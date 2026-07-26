@@ -118,8 +118,17 @@ bash experiments/cluster/run_tofu_14b_h100.sh
 `/group-volume/fdmu/runs/logs/cluster/launcher_qwen25_7b_<host>_current.out`,
 `/group-volume/fdmu/runs/channel_matrix_7b/aggregate/table1_channel_matrix_qwen25_7b.tex`
 에 생성된다. 14B도 같은 구조의 `qwen25_14b` 및
-`channel_matrix_14b` 경로를 사용한다. 14B 런처는 실행한 한 호스트의 GPU 0에
-worker 하나만 띄우며 H100 네 대 전체를 자동 활성화하지 않는다.
+`channel_matrix_14b` 경로를 사용한다. 14B 런처는 실행한 한 호스트에서
+fidelity를 GPU 0으로 먼저 수행한 뒤 audit/alpha 큐에 기본 worker 4개를 띄운다.
+다른 개수가 필요할 때만 `AUDIT_GPU_COUNT`를 지정한다.
+
+이전 단일-worker 버전으로 14B fidelity가 이미 진행 중이면 중단하지 않는다.
+최신 코드를 받은 두 번째 셸에서 아래 보조 실행기를 시작하면 worker-launch
+단계까지 기다렸다가 기존 결과를 유지한 채 총 worker 4개로 확장한다.
+
+```bash
+bash experiments/cluster/scale_tofu_14b_h100.sh
+```
 
 수동 실행이 필요한 경우에는 audit보다 먼저 다음 명령으로 인증서를 생성한다.
 

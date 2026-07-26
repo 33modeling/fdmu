@@ -371,14 +371,17 @@ def test_model_launchers_pin_queues_without_force_override():
     fourteen = (ROOT / "experiments/cluster/run_tofu_14b_h100.sh").read_text(
         encoding="utf-8"
     )
+    fourteen_scale = (
+        ROOT / "experiments/cluster/scale_tofu_14b_h100.sh"
+    ).read_text(encoding="utf-8")
     assert "FORCE_QUEUE" not in launch
     assert "FORCE_QUEUE" not in seven
     assert "FORCE_QUEUE" not in fourteen
     assert 'QUEUE="$CLUSTER_RUNS_ROOT/cluster_queue/wave2"' in seven
     assert 'QUEUE="$CLUSTER_RUNS_ROOT/cluster_queue/wave1_14b"' in fourteen
     assert 'launch_node.sh --dedicated-queue "$QUEUE"' in seven
-    assert "WORKER_GPU=0" in fourteen
-    assert 'launch_node.sh --dedicated-queue "$QUEUE" 1' in fourteen
+    assert 'AUDIT_GPU_COUNT="${AUDIT_GPU_COUNT:-4}"' in fourteen
+    assert '"$AUDIT_GPU_COUNT"' in fourteen
     assert "experiments/cluster/monitor_queue.py" in fourteen
     assert "setup_group_volume.sh" in seven
     assert "setup_group_volume.sh" in fourteen
@@ -388,7 +391,10 @@ def test_model_launchers_pin_queues_without_force_override():
     assert "stage aggregate-latex" in fourteen
     assert "h100_campaign.sh aggregate" in seven
     assert "h100_campaign.sh aggregate" in fourteen
-    assert "one dedicated worker on GPU 0" in fourteen
+    assert "14B fidelity uses GPU 0, audit uses %s GPUs" in fourteen
+    assert "stage=worker-launch start" in fourteen_scale
+    assert "validate_fidelity_artifact_pair" in fourteen_scale
+    assert '"$AUDIT_GPU_COUNT"' in fourteen_scale
     assert seven.count("--unit aud__qwen25_7b__") == 3
     assert 'RETRY_ARGS+=(--unit "$unit_id")' in fourteen
     assert 'WAIT=0 UNIT_MATCH="$MODEL_ID" UNIT_PREFER="$AUDIT_MATCH"' in seven
@@ -423,7 +429,7 @@ def test_model_launchers_pin_queues_without_force_override():
     assert 'require_passed_fidelity "${cfg}" qwen25_7b' in enqueue
     assert 'require_passed_fidelity "${cfg}" qwen25_14b' in enqueue
     assert "each 8-GPU node starts 8 workers" not in enqueue
-    assert "exactly one dedicated worker on GPU 0" in enqueue
+    assert "four dedicated workers by default" in enqueue
     setup = (ROOT / "experiments/cluster/setup_group_volume.sh").read_text(
         encoding="utf-8"
     )
