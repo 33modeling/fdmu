@@ -4,6 +4,7 @@ from copy import deepcopy
 import hashlib
 import json
 from pathlib import Path
+import sys
 
 import pytest
 import yaml
@@ -17,6 +18,7 @@ from experiments.paper.run_joint_dev_sweep import (
     _absolute_executable,
     _best_parent_freeze,
     _unit_complete,
+    _write_or_rebind_manifest,
     _with_parent_freeze,
     build_exhaustion_report,
     candidate_score,
@@ -48,6 +50,63 @@ def test_executable_path_keeps_virtualenv_symlink(tmp_path):
     assert resolved == venv_python
     assert resolved.is_symlink()
     assert resolved != base_python.resolve()
+
+
+def test_existing_manifest_rebinds_resolved_base_python_to_venv(tmp_path):
+    venv_python = tmp_path / ".venv/bin/python"
+    venv_python.parent.mkdir(parents=True)
+    venv_python.symlink_to(Path(sys.executable))
+    expected = {
+        "schema_version": 1,
+        "contract": "test",
+        "units": [
+            {
+                "parent": "npo",
+                "request": "tofu-a198",
+                "seed": "2025",
+                "setting": "tofu_qwen25_1p5b",
+                "command": [
+                    str(venv_python),
+                    "-u",
+                    "experiments/paper/tofu_v4_unit.py",
+                    "--runtime",
+                    "/tmp/runtime.yaml",
+                ],
+            }
+        ],
+    }
+    stale = deepcopy(expected)
+    stale["units"][0]["command"][0] = str(Path(sys.executable).resolve())
+    manifest_path = tmp_path / "manifest.yaml"
+    manifest_path.write_text(yaml.safe_dump(stale, sort_keys=False), encoding="utf-8")
+
+    rebound = _write_or_rebind_manifest(manifest_path, expected)
+
+    persisted = yaml.safe_load(manifest_path.read_text(encoding="utf-8"))
+    assert rebound == expected
+    assert persisted == expected
+    assert persisted["units"][0]["command"][0] == str(venv_python)
+
+
+def test_manifest_rebind_refuses_non_command_contract_change(tmp_path):
+    expected = {
+        "schema_version": 1,
+        "units": [
+            {
+                "parent": "npo",
+                "request": "tofu-a198",
+                "seed": "2025",
+                "command": ["/venv/python", "-u", "unit.py"],
+            }
+        ],
+    }
+    stale = deepcopy(expected)
+    stale["units"][0]["request"] = "tofu-a199"
+    manifest_path = tmp_path / "manifest.yaml"
+    manifest_path.write_text(yaml.safe_dump(stale, sort_keys=False), encoding="utf-8")
+
+    with pytest.raises(SweepError, match="unit roster changed"):
+        _write_or_rebind_manifest(manifest_path, expected)
 
 
 def _arm(name, mean, cvar, *, feasible=True, draw=None):

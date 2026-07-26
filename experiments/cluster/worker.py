@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import re
 import shutil
 import signal
 import socket
@@ -54,11 +55,26 @@ def gpu_memory_used_mib(gpu: int) -> int | None:
     return int(out.stdout.strip().splitlines()[0])
 
 
-def resolve_unit_command(cmd: list[str]) -> list[str]:
+def _worker_python() -> str:
+    raw = os.environ.get("FDMU_WORKER_PYTHON", sys.executable)
+    path = os.path.abspath(os.path.expanduser(os.path.expandvars(raw)))
+    if not os.path.isfile(path) or not os.access(path, os.X_OK):
+        raise RuntimeError(f"worker Python is missing or not executable: {path}")
+    return path
+
+
+def resolve_unit_command(
+    cmd: list[str],
+    *,
+    interpreter: str | None = None,
+) -> list[str]:
     """Pin queued Python commands to the worker's active interpreter."""
     resolved = list(cmd)
-    if resolved and resolved[0] in {"python", "python3"}:
-        resolved[0] = sys.executable
+    if resolved and re.fullmatch(
+        r"python(?:\d+(?:\.\d+)*)?",
+        Path(resolved[0]).name,
+    ):
+        resolved[0] = interpreter or _worker_python()
     return resolved
 
 

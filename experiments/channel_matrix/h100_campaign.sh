@@ -20,6 +20,7 @@ set -Eeuo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 VENV="/group-volume/fdmu/.venv"
+PYTHON="$VENV/bin/python"
 CONFIG="${CONFIG:-configs/channel_matrix/7b_tofu.yaml}"
 MODEL_ID="${MODEL_ID:-qwen25_7b}"
 GPU="${GPU:-0}"
@@ -39,6 +40,10 @@ fi
 
 # shellcheck disable=SC1090
 source "${VENV}/bin/activate"
+[[ -x "$PYTHON" ]] || {
+  echo "official Python is missing: $PYTHON" >&2
+  exit 1
+}
 cd "${ROOT}"
 # shellcheck disable=SC1091
 source "${ROOT}/experiments/cluster/cluster_env.sh"
@@ -84,7 +89,7 @@ preflight() {
   echo "AUTHORS=${AUTHORS:-all-phase-authors}"
   git status --short
   nvidia-smi
-  CUDA_VISIBLE_DEVICES="${GPU}" python - "${CONFIG}" "${MODEL_ID}" <<'PY'
+  CUDA_VISIBLE_DEVICES="${GPU}" "$PYTHON" - "${CONFIG}" "${MODEL_ID}" <<'PY'
 from pathlib import Path
 import sys
 
@@ -115,7 +120,7 @@ prefetch() {
   # Audit itself is forced offline. Populate every non-model dependency before
   # the freeze and audit boundary.
   unset HF_HUB_OFFLINE TRANSFORMERS_OFFLINE HF_DATASETS_OFFLINE
-  python - <<'PY'
+  "$PYTHON" - <<'PY'
 from datasets import load_dataset
 
 for subset in ("full", "forget10_perturbed"):
@@ -125,7 +130,7 @@ PY
 }
 
 campaign_paths() {
-  python - "${CONFIG}" "${MODEL_ID}" "${CLUSTER_RUNS_ROOT}" <<'PY'
+  "$PYTHON" - "${CONFIG}" "${MODEL_ID}" "${CLUSTER_RUNS_ROOT}" <<'PY'
 from pathlib import Path
 import re
 import sys
@@ -168,7 +173,7 @@ run_phase() {
     echo "AUTHORS is not applicable to the single frozen fidelity cell" >&2
     return 2
   fi
-  CUDA_VISIBLE_DEVICES="${GPU}" python -u experiments/channel_matrix/run_campaign.py \
+  CUDA_VISIBLE_DEVICES="${GPU}" "$PYTHON" -u experiments/channel_matrix/run_campaign.py \
     --config "${CONFIG}" \
     --phase "${phase}" \
     --resume \
@@ -178,7 +183,7 @@ run_phase() {
 
 run_alpha_phase() {
   local phase="$1"
-  CUDA_VISIBLE_DEVICES="${GPU}" python -u experiments/channel_matrix/alpha_protection.py \
+  CUDA_VISIBLE_DEVICES="${GPU}" "$PYTHON" -u experiments/channel_matrix/alpha_protection.py \
     --config "${CONFIG}" \
     --phase "${phase}" \
     --resume \
@@ -194,7 +199,7 @@ case "${ACTION}" in
     prefetch
     ;;
   dry-calibration)
-    CUDA_VISIBLE_DEVICES="${GPU}" python experiments/channel_matrix/run_campaign.py \
+    CUDA_VISIBLE_DEVICES="${GPU}" "$PYTHON" experiments/channel_matrix/run_campaign.py \
       --config "${CONFIG}" \
       --phase calibration \
       --dry-run \
@@ -210,7 +215,7 @@ case "${ACTION}" in
     run_phase calibration
     ;;
   select-freeze)
-    python experiments/channel_matrix/select_freeze.py \
+    "$PYTHON" experiments/channel_matrix/select_freeze.py \
       --config "${CONFIG}" \
       --root "$CLUSTER_RUNS_ROOT/channel_matrix_7b/calibration" \
       --out "$CLUSTER_RUNS_ROOT/channel_matrix_7b/objective_freeze.recommended.yaml"
@@ -236,13 +241,13 @@ case "${ACTION}" in
     SCALE_LABEL="${SCALE_LABEL:-${MODEL_TAG#qwen25_}}"
     AGGREGATE_ROOT="$CAMPAIGN_ROOT/aggregate"
     echo "[aggregate] config=$CONFIG model=$MODEL_ID root=$CAMPAIGN_ROOT"
-    python experiments/channel_matrix/aggregate.py \
+    "$PYTHON" experiments/channel_matrix/aggregate.py \
       --root "$CAMPAIGN_ROOT/audit" \
       --out "$AGGREGATE_ROOT" \
       --config "$CONFIG" \
       --model-id "$MODEL_ID" \
       --n-boot 2000
-    python experiments/channel_matrix/make_main_table.py \
+    "$PYTHON" experiments/channel_matrix/make_main_table.py \
       --report "$AGGREGATE_ROOT/pooled_channel_report.csv" \
       --summary "$AGGREGATE_ROOT/pooled_channel_report.json" \
       --out "$AGGREGATE_ROOT/table1_channel_matrix_${MODEL_TAG}.tex" \
@@ -254,7 +259,7 @@ case "${ACTION}" in
     echo "[RESULT] latex=$AGGREGATE_ROOT/table1_channel_matrix_${MODEL_TAG}.tex"
     ;;
   dry-alpha-development)
-    CUDA_VISIBLE_DEVICES="${GPU}" python experiments/channel_matrix/alpha_protection.py \
+    CUDA_VISIBLE_DEVICES="${GPU}" "$PYTHON" experiments/channel_matrix/alpha_protection.py \
       --config "${CONFIG}" \
       --phase development \
       --dry-run \
@@ -266,14 +271,14 @@ case "${ACTION}" in
     run_alpha_phase development
     ;;
   select-alpha-freeze)
-    python experiments/channel_matrix/select_alpha_freeze.py \
+    "$PYTHON" experiments/channel_matrix/select_alpha_freeze.py \
       --config "${CONFIG}" \
       --root "$CLUSTER_RUNS_ROOT/channel_matrix_7b/alpha_protection/development" \
       --out "$CLUSTER_RUNS_ROOT/channel_matrix_7b/alpha_protection_freeze.recommended.yaml"
     echo "STOP: review and commit configs/channel_matrix/alpha_protection_freeze.yaml before alpha audit."
     ;;
   dry-alpha-audit)
-    CUDA_VISIBLE_DEVICES="${GPU}" python experiments/channel_matrix/alpha_protection.py \
+    CUDA_VISIBLE_DEVICES="${GPU}" "$PYTHON" experiments/channel_matrix/alpha_protection.py \
       --config "${CONFIG}" \
       --phase audit \
       --dry-run \
@@ -290,7 +295,7 @@ case "${ACTION}" in
     run_alpha_phase audit
     ;;
   legacy-alpha-diagnostic)
-    python experiments/channel_matrix/aggregate_alpha_protection.py \
+    "$PYTHON" experiments/channel_matrix/aggregate_alpha_protection.py \
       --legacy-diagnostic \
       --config "${CONFIG}" \
       --root "$CLUSTER_RUNS_ROOT/channel_matrix_7b/alpha_protection/audit" \

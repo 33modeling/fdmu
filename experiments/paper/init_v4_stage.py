@@ -7,6 +7,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import shutil
 import sys
 from typing import Any, Mapping
 
@@ -39,6 +40,19 @@ def _load(path: Path) -> dict[str, Any]:
 def _resolve(value: str | Path) -> Path:
     path = Path(os.path.expanduser(os.path.expandvars(str(value))))
     return path if path.is_absolute() else (ROOT / path).resolve()
+
+
+def absolute_executable(value: str | Path, *, base: Path = ROOT) -> Path:
+    """Return an absolute command path without dereferencing a venv symlink."""
+    expanded = os.path.expanduser(os.path.expandvars(str(value)))
+    path = Path(expanded)
+    if path.is_absolute():
+        return Path(os.path.abspath(path))
+    if len(path.parts) == 1:
+        located = shutil.which(expanded)
+        if located:
+            return Path(os.path.abspath(located))
+    return Path(os.path.abspath(base / path))
 
 
 def _sha256(path: Path) -> str:
@@ -85,6 +99,7 @@ def build_manifest(
         raise ManifestInitError("stage roster, seeds, and parents must be non-empty lists")
 
     producer = _resolve(dataset.get("unit_producer", ""))
+    unit_python = str(absolute_executable(python))
     if not producer.is_file():
         raise ManifestInitError(f"TOFU unit producer is missing: {producer}")
     selection_freeze = _resolve(execution.get("selection_freeze", ""))
@@ -95,7 +110,7 @@ def build_manifest(
                 identity = f"{parent}__{request}__seed-{seed}"
                 output_dir = (unit_root / identity).resolve()
                 command = [
-                    python,
+                    unit_python,
                     "-u",
                     str(producer),
                     "--campaign",

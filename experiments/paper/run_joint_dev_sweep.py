@@ -114,6 +114,64 @@ def _write_once(path: Path, text: str) -> None:
     _atomic_text(path, text)
 
 
+def _write_or_rebind_manifest(
+    path: Path,
+    expected: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Refresh operational unit commands without weakening the frozen contract."""
+    expected_copy = json.loads(json.dumps(expected))
+    if not path.exists():
+        _atomic_text(path, yaml.safe_dump(expected_copy, sort_keys=False))
+        return expected_copy
+
+    existing = _load_yaml(path)
+    existing_units = existing.get("units")
+    expected_units = expected_copy.get("units")
+    if not isinstance(existing_units, list) or not isinstance(expected_units, list):
+        raise SweepError(f"manifest has no unit list: {path}")
+
+    def identity(unit: Mapping[str, Any]) -> tuple[str, str, str]:
+        return (
+            str(unit.get("parent")),
+            str(unit.get("request")),
+            str(unit.get("seed")),
+        )
+
+    expected_by_id = {
+        identity(unit): unit
+        for unit in expected_units
+        if isinstance(unit, Mapping)
+    }
+    existing_ids = {
+        identity(unit)
+        for unit in existing_units
+        if isinstance(unit, Mapping)
+    }
+    if len(expected_by_id) != len(expected_units) or existing_ids != set(expected_by_id):
+        raise SweepError(f"existing manifest unit roster changed: {path}")
+
+    rebound = json.loads(json.dumps(existing))
+    old_interpreters = set()
+    for unit in rebound["units"]:
+        command = unit.get("command")
+        if isinstance(command, list) and command:
+            old_interpreters.add(str(command[0]))
+        unit["command"] = list(expected_by_id[identity(unit)]["command"])
+
+    if rebound != expected_copy:
+        raise SweepError(f"append-only manifest contract changed beyond commands: {path}")
+    if existing != expected_copy:
+        _atomic_text(path, yaml.safe_dump(expected_copy, sort_keys=False))
+        new_interpreters = sorted({
+            str(unit["command"][0]) for unit in expected_units
+        })
+        _status(
+            f"MANIFEST_COMMAND_REBOUND path={path} "
+            f"old_python={sorted(old_interpreters)} new_python={new_interpreters}"
+        )
+    return expected_copy
+
+
 def _recover_git_snapshot(source: Path, expected_sha256: str, destination: Path) -> Path:
     source = source.resolve()
     destination = destination.resolve()
@@ -1128,7 +1186,7 @@ def _prepare_trial(
     for unit in manifest["units"]:
         unit["setting"] = setting
     manifest_path = trial_dir / "manifest.yaml"
-    _write_once(manifest_path, yaml.safe_dump(manifest, sort_keys=False))
+    manifest = _write_or_rebind_manifest(manifest_path, manifest)
     return trial_dir, campaign_path, runtime_path, manifest
 
 

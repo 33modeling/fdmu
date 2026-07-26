@@ -22,6 +22,7 @@ sys.path.insert(0, str(ROOT))
 from experiments.paper.run_joint_dev_sweep import (  # noqa: E402
     SweepError,
     _EventLog,
+    _absolute_executable,
     _run_lanes,
     _unit_complete,
 )
@@ -829,7 +830,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         parser.error(f"--gpus must be comma-separated integers: {error}")
     if not args.gpus or len(set(args.gpus)) != len(args.gpus):
         parser.error("--gpus must contain unique GPU ids")
-    args.python = args.python.resolve()
+    args.python = _absolute_executable(args.python)
     args.joint_root = args.joint_root.resolve()
     args.output_root = args.output_root.resolve()
     args.fidelity_input = args.fidelity_input.resolve()

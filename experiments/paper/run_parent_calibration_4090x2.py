@@ -29,6 +29,7 @@ from experiments.paper.run_joint_dev_sweep import (  # noqa: E402
     _status,
     _unit_complete,
     _write_once,
+    _write_or_rebind_manifest,
     SweepError,
 )
 from experiments.paper.select_tofu_v4 import (  # noqa: E402
@@ -154,8 +155,10 @@ def run(args: argparse.Namespace) -> int:
     _write_once(runtime_path, yaml.safe_dump(runtime_local, sort_keys=False))
     manifest_path = output_root / "manifest.yaml"
     if manifest_path.is_file():
-        manifest = _load_yaml(manifest_path)
-        expected_evidence_hash = str(manifest.get("evidence_config_sha256", ""))
+        existing_manifest = _load_yaml(manifest_path)
+        expected_evidence_hash = str(
+            existing_manifest.get("evidence_config_sha256", "")
+        )
         if len(expected_evidence_hash) != 64:
             raise SweepError("existing calibration manifest lacks evidence SHA-256")
         evidence_path = _recover_git_snapshot(
@@ -165,29 +168,20 @@ def run(args: argparse.Namespace) -> int:
         )
     else:
         evidence_path = _snapshot_current_config(evidence_source, evidence_snapshot)
-        manifest = build_manifest(
-            campaign_local,
-            _load_yaml(evidence_path),
-            stage="calibration",
-            setting_id=args.setting,
-            campaign_path=campaign_path,
-            evidence_path=evidence_path,
-            runtime_path=runtime_path,
-            unit_root=output_root / "units",
-            python=str(python),
-        )
-        for unit in manifest["units"]:
-            unit["setting"] = args.setting
-        _write_once(manifest_path, yaml.safe_dump(manifest, sort_keys=False))
-
-    original_evidence = str(evidence_source)
+    manifest = build_manifest(
+        campaign_local,
+        _load_yaml(evidence_path),
+        stage="calibration",
+        setting_id=args.setting,
+        campaign_path=campaign_path,
+        evidence_path=evidence_path,
+        runtime_path=runtime_path,
+        unit_root=output_root / "units",
+        python=str(python),
+    )
     for unit in manifest["units"]:
-        command = unit.get("command")
-        if isinstance(command, list):
-            unit["command"] = [
-                str(evidence_path) if value == original_evidence else value
-                for value in command
-            ]
+        unit["setting"] = args.setting
+    manifest = _write_or_rebind_manifest(manifest_path, manifest)
 
     _environment_snapshot(output_root, python, gpus)
     events = _EventLog(output_root / "events.jsonl")

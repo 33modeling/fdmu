@@ -80,3 +80,32 @@ def test_stage_manifest_expands_the_exact_primary_cartesian_roster(tmp_path):
         == {"fidelity_raw", "parent_selection_inputs"}
         for unit in calibration["units"]
     )
+
+
+def test_stage_manifest_preserves_virtualenv_python_symlink(tmp_path):
+    campaign_path = ROOT / "configs/paper/campaign.yaml"
+    evidence_path = ROOT / "configs/paper/evidence.yaml"
+    runtime_path = ROOT / "configs/paper/tofu_v4.yaml"
+    campaign = yaml.safe_load(campaign_path.read_text(encoding="utf-8"))
+    evidence = yaml.safe_load(evidence_path.read_text(encoding="utf-8"))
+    base_python = tmp_path / "base-python"
+    base_python.write_text("#!/bin/sh\n", encoding="utf-8")
+    venv_python = tmp_path / ".venv/bin/python"
+    venv_python.parent.mkdir(parents=True)
+    venv_python.symlink_to(base_python)
+
+    manifest = build_manifest(
+        campaign,
+        evidence,
+        stage="calibration",
+        setting_id="tofu_qwen25_1p5b",
+        campaign_path=campaign_path,
+        evidence_path=evidence_path,
+        runtime_path=runtime_path,
+        unit_root=tmp_path / "units",
+        python=str(venv_python),
+    )
+
+    assert {unit["command"][0] for unit in manifest["units"]} == {
+        str(venv_python)
+    }

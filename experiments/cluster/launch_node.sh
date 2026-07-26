@@ -15,6 +15,7 @@ set -Eeuo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 VENV="/group-volume/fdmu/.venv"
+PYTHON="$VENV/bin/python"
 WAIT="${WAIT:-1}"
 UNIT_MATCH="${UNIT_MATCH:-}"
 UNIT_PREFER="${UNIT_PREFER:-}"
@@ -32,12 +33,20 @@ if [[ ! -f "${VENV}/bin/activate" ]]; then
 fi
 # shellcheck disable=SC1090
 source "${VENV}/bin/activate"
+if [[ ! -x "$PYTHON" ]]; then
+  echo "official Python is missing or not executable: $PYTHON" >&2
+  exit 1
+fi
+export FDMU_WORKER_PYTHON="$PYTHON"
+"$PYTHON" -c 'import sys, yaml; print(
+    f"[worker-python] executable={sys.executable} prefix={sys.prefix} yaml={yaml.__file__}"
+)'
 cd "${ROOT}"
 # shellcheck disable=SC1091
 source "${ROOT}/experiments/cluster/cluster_env.sh"
 export PYTHONUNBUFFERED=1
 
-ASSIGNED="$(python - <<PY
+ASSIGNED="$("$PYTHON" - <<PY
 import yaml, pathlib
 cfg = pathlib.Path("configs/cluster/fleet.yaml")
 data = yaml.safe_load(cfg.read_text(encoding="utf-8")) if cfg.exists() else {}
@@ -125,9 +134,9 @@ fi
 
 LOGDIR="$CLUSTER_RUNS_ROOT/logs/cluster"
 mkdir -p "${LOGDIR}"
-python experiments/cluster/workqueue.py init --queue "${QUEUE}"
+"$PYTHON" experiments/cluster/workqueue.py init --queue "${QUEUE}"
 
-nohup python -u experiments/cluster/node_watch.py --replace \
+nohup "$PYTHON" -u experiments/cluster/node_watch.py --replace \
   --status-dir "$CLUSTER_RUNS_ROOT/cluster_status" \
   8>&- >> "${LOGDIR}/watch_${HOST}.out" 2>&1 &
 echo "node=${HOST} queue=${QUEUE} gpus=${NGPU}/${DETECTED} wait=${WAIT} unit_match=${UNIT_MATCH:-all} unit_prefer=${UNIT_PREFER:-none} watcher_pid=$!"
@@ -153,7 +162,7 @@ for (( g = 0; g < NGPU; g++ )); do
     continue
   fi
   out="${LOGDIR}/worker_${HOST}_gpu${g}.out"
-  nohup python -u experiments/cluster/worker.py \
+  nohup "$PYTHON" -u experiments/cluster/worker.py \
     --queue "${QUEUE}" --gpu "${g}" "${wait_flag[@]}" \
     "${match_flag[@]}" "${prefer_flag[@]}" \
     --log-dir "$LOGDIR" \

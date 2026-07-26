@@ -332,6 +332,36 @@ def test_worker_pins_queued_python_to_active_interpreter():
     assert worker.resolve_unit_command(["bash", "job.sh"]) == ["bash", "job.sh"]
 
 
+def test_worker_rebinds_stale_absolute_python_to_pinned_venv(
+    tmp_path, monkeypatch
+):
+    venv_python = tmp_path / ".venv/bin/python"
+    venv_python.parent.mkdir(parents=True)
+    venv_python.symlink_to(Path(sys.executable).resolve())
+    (venv_python.parent.parent / "pyvenv.cfg").write_text(
+        "include-system-site-packages = true\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("FDMU_WORKER_PYTHON", str(venv_python))
+
+    command = worker.resolve_unit_command(
+        ["/usr/bin/python3.11", "-u", "experiments/channel_matrix/run_campaign.py"]
+    )
+
+    assert command[0] == str(venv_python)
+    assert Path(command[0]).is_symlink()
+    subprocess.run(
+        worker.resolve_unit_command(
+            [
+                "/usr/bin/python3.11",
+                "-c",
+                "import sys, yaml; assert sys.prefix != sys.base_prefix",
+            ]
+        ),
+        check=True,
+    )
+
+
 def test_worker_env_replaces_node_local_tmpdir():
     env = worker.build_env(
         {
@@ -405,6 +435,10 @@ def test_model_launchers_pin_queues_without_force_override():
     assert "FORCE_QUEUE" not in launch
     assert "FORCE_QUEUE" not in seven
     assert "FORCE_QUEUE" not in fourteen
+    assert 'PYTHON="$VENV/bin/python"' in launch
+    assert 'export FDMU_WORKER_PYTHON="$PYTHON"' in launch
+    assert 'nohup "$PYTHON" -u experiments/cluster/worker.py' in launch
+    assert "nohup python -u experiments/cluster/worker.py" not in launch
     assert 'QUEUE="$CLUSTER_RUNS_ROOT/cluster_queue/wave2"' in seven
     assert 'QUEUE="$CLUSTER_RUNS_ROOT/cluster_queue/wave1_14b"' in fourteen
     assert 'launch_node.sh --dedicated-queue "$QUEUE"' in seven

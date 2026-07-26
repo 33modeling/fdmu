@@ -10,6 +10,7 @@ from experiments.paper.finalize_joint_sweep import (
     _record_joint_best_freeze,
     _validate_existing_freeze,
     _write_final_campaign,
+    parse_args,
     resolve_joint_winner,
 )
 
@@ -17,6 +18,32 @@ from experiments.paper.finalize_joint_sweep import (
 def _write_json(path: Path, value: object) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(value), encoding="utf-8")
+
+
+def test_finalize_preserves_virtualenv_python_symlink(tmp_path: Path) -> None:
+    base_python = tmp_path / "base-python"
+    base_python.write_text("#!/bin/sh\n", encoding="utf-8")
+    venv_python = tmp_path / ".venv/bin/python"
+    venv_python.parent.mkdir(parents=True)
+    venv_python.symlink_to(base_python)
+    fidelity = tmp_path / "fidelity.json"
+    fidelity.write_text("{}\n", encoding="utf-8")
+
+    args = parse_args(
+        [
+            "--python",
+            str(venv_python),
+            "--fidelity-input",
+            str(fidelity),
+            "--joint-root",
+            str(tmp_path / "joint"),
+            "--output-root",
+            str(tmp_path / "final"),
+        ]
+    )
+
+    assert args.python == venv_python
+    assert args.python.is_symlink()
 
 
 def test_resolve_joint_winner_uses_sealed_trial_artifacts(tmp_path: Path) -> None:

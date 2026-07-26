@@ -29,6 +29,7 @@ cd "${ROOT}"
 
 # venv activation — same default as launch_node.sh.
 VENV="/group-volume/fdmu/.venv"
+PYTHON="$VENV/bin/python"
 if [[ ! -f "${VENV}/bin/activate" ]]; then
   echo "[enqueue_table12] missing official environment: ${VENV}/bin/activate" >&2
   echo "[enqueue_table12] run: bash experiments/cluster/setup_group_volume.sh" >&2
@@ -36,6 +37,10 @@ if [[ ! -f "${VENV}/bin/activate" ]]; then
 fi
 # shellcheck disable=SC1090
 source "${VENV}/bin/activate"
+[[ -x "$PYTHON" ]] || {
+  echo "[enqueue_table12] official Python is missing: $PYTHON" >&2
+  exit 1
+}
 # shellcheck disable=SC1091
 source "${ROOT}/experiments/cluster/cluster_env.sh"
 
@@ -98,10 +103,10 @@ enqueue_phase() {  # $1 = description, $2 = queue dir, $3 = config, $4.. = phase
   # units, so a topped-up roster (e.g. an added audit author) would silently
   # lose the units after the duplicate.
   units_tmp="$(mktemp)"
-  python experiments/cluster/make_units.py \
+  "$PYTHON" experiments/cluster/make_units.py \
     --config "${cfg}" "${args[@]}" --out "${units_tmp}" \
     || die "${desc}: make_units failed."
-  python experiments/cluster/workqueue.py enqueue \
+  "$PYTHON" experiments/cluster/workqueue.py enqueue \
     --queue "${queue}" --units "${units_tmp}" --skip-existing \
     || die "${desc}: workqueue enqueue failed."
   rm -f "${units_tmp}"
@@ -132,7 +137,7 @@ case "${cmd}" in
       root="$CLUSTER_RUNS_ROOT/cluster_queue/${q}"
       echo "== ${root} =="
       if [[ -d "${root}" ]]; then
-        python experiments/cluster/workqueue.py status --brief --queue "${root}" \
+        "$PYTHON" experiments/cluster/workqueue.py status --brief --queue "${root}" \
           || log "status failed for ${root}"
       else
         echo "  (queue not initialized yet)"
