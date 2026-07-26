@@ -10,6 +10,7 @@ from experiments.paper.export_channel_matrix_raw import (
 from experiments.paper.finalize_channel_matrix import (
     _build_plan,
     _load_yaml,
+    _link_final_latex,
     _prediction_parents,
     _protection_selections,
     _remove_obsolete_latex,
@@ -204,3 +205,24 @@ def test_finalizer_removes_pre_unified_latex_duplicates(tmp_path):
     assert {Path(path).name for path in removed} == set(names)
     assert all(not (tmp_path / name).exists() for name in names)
     assert keep.is_file()
+
+
+def test_finalizer_links_shared_tables_into_per_run_directory(tmp_path):
+    shared = tmp_path / "shared"
+    per_run = tmp_path / "run" / "aggregate" / "paper_v4"
+    shared.mkdir()
+    per_run.mkdir(parents=True)
+    core = shared / "table_core_evidence.tex"
+    robustness = shared / "table_robustness.tex"
+    core.write_text("core", encoding="utf-8")
+    robustness.write_text("robustness", encoding="utf-8")
+
+    links = _link_final_latex(
+        per_run,
+        {"table1": str(core), "table2": str(robustness)},
+    )
+
+    assert Path(links["table1"]).is_symlink()
+    assert Path(links["table2"]).is_symlink()
+    assert Path(links["table1"]).read_text(encoding="utf-8") == "core"
+    assert Path(links["table2"]).read_text(encoding="utf-8") == "robustness"
