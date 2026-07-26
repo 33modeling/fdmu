@@ -252,6 +252,8 @@ campaign 산출물이다. 최신 PDF-v4의 최종 Table 1/2 evidence와 동일�
 `bash experiments/cluster/run_tofu_7b_h100.sh render-only`도 사용할 수 있다.
 두 경로는 queue/retry/enqueue/worker를 실행하지 않는다. 후처리는
 완료된 evidence cell을 유지하고 누락 block만 placeholder로 남긴다.
+namespace 도입 전 legacy audit에 `damage.json`이 존재하면 render-only
+스크립트가 해당 결과 root를 자동 선택한다.
 전체 7B 실험을 의도한 경우에만
 `bash experiments/cluster/run_tofu_7b_h100.sh experiment`를 실행한다.
 옵션 없는 호출은 GPU 작업을 시작하지 않는다.

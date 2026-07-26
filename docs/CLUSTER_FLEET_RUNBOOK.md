@@ -104,7 +104,8 @@ FDMU_SHARED_LEGACY_RUNS=1 \
 
 기존 7B 결과의 LaTeX만 다시 만들 때는 전체 원클릭 런처를 실행하지 않는다.
 아래 두 명령은 동일한 render-only 경로이며 queue/retry/enqueue/worker를 전혀
-실행하지 않는다.
+실행하지 않는다. render-only 경로는 namespace 도입 전 legacy audit 결과가
+실제로 존재하면 그 위치를 자동 선택한다.
 
 ```bash
 bash experiments/cluster/render_tofu_7b_h100.sh

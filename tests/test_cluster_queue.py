@@ -490,6 +490,9 @@ def test_model_launchers_pin_queues_without_force_override():
     assert "usage: $0 {experiment|render-only}" in seven
     assert "experiment|--experiment)" in seven
     assert "h100_campaign.sh paper-v4" in seven_render
+    assert "LEGACY_AUDIT_ROOT=/group-volume/fdmu/runs/channel_matrix_7b/audit" in seven_render
+    assert "export FDMU_SHARED_LEGACY_RUNS=1" in seven_render
+    assert "-name damage.json" in seven_render
     for forbidden in (
         "workqueue.py",
         "enqueue_table12.sh",
