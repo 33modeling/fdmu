@@ -88,6 +88,10 @@ and library caches to the runtime path and rejects paths outside
 
 ## 5. Safe execution
 
+Runtime 장애, 장기 실행 ETA, stale claim, 중간 결과를 조사할 때는 먼저
+`docs/LLM_RUN_DIAGNOSTICS.md`를 읽고 그 경로를 직접 검사한다. Terminal 또는
+filesystem 접근이 있으면 사용자에게 진단 명령 실행을 떠넘기지 않는다.
+
 Before GPU work:
 
 ```bash
