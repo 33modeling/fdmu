@@ -1392,6 +1392,43 @@ def aggregate_raw_evidence(
                     tail_common_data.append(data)
                     tail_points.append((unit.request, unit.seed, tail_metrics))
 
+        # A completed non-reaching trajectory is not claim support, but its
+        # last checkpoint is still useful descriptive evidence. Keep the
+        # confirmatory funnel at zero while rendering those observed effects.
+        effect_data = list(prediction_common_data)
+        effect_points = list(prediction_points)
+        effect_tail_data = list(tail_common_data)
+        effect_tail_points = list(tail_points)
+        if not effect_points:
+            for unit in row_units:
+                data = prediction.get(unit.key)
+                if (
+                    data is None
+                    or unit.key not in completed_units
+                    or unit.key not in valid_profiles
+                ):
+                    continue
+                metrics = _prediction_core_metrics(
+                    data.candidates,
+                    top_q=plan.top_q,
+                    tail_m=unit.tail_m,
+                    include_swap=row_has_swap,
+                )
+                if metrics is None:
+                    continue
+                effect_data.append(data)
+                effect_points.append((unit.request, unit.seed, metrics))
+                tail_metrics = _prediction_tail_metrics(
+                    data.candidates,
+                    top_q=plan.top_q,
+                    tail_m=unit.tail_m,
+                )
+                if tail_metrics is not None:
+                    effect_tail_data.append(data)
+                    effect_tail_points.append(
+                        (unit.request, unit.seed, tail_metrics)
+                    )
+
         rq2_common_data: list[RQ2UnitData] = []
         rq2_points: list[tuple[str, str, Mapping[str, float]]] = []
         for unit in row_units:
@@ -1427,10 +1464,11 @@ def aggregate_raw_evidence(
             selection_valid=prediction_selection.valid
             and not prediction_selection.fallback
         )
-        if prediction_points:
-            point = _equal_request_average(prediction_points)
-            bootstrap = _hierarchical_bootstrap(
-                prediction_common_data,
+        prediction_bootstrap: list[dict[str, float]] = []
+        if effect_points:
+            point = _equal_request_average(effect_points)
+            prediction_bootstrap = _hierarchical_bootstrap(
+                effect_data,
                 replicates=plan.bootstrap_replicates,
                 seed=plan.bootstrap_seed + row_index * 2,
                 request_of=lambda data: data.key[2],
@@ -1443,10 +1481,10 @@ def aggregate_raw_evidence(
                 ),
             )
             tail_effect: dict[str, float] = {}
-            if tail_points:
-                tail_point = _equal_request_average(tail_points)
+            if effect_tail_points:
+                tail_point = _equal_request_average(effect_tail_points)
                 tail_bootstrap = _hierarchical_bootstrap(
-                    tail_common_data,
+                    effect_tail_data,
                     replicates=plan.bootstrap_replicates,
                     seed=plan.bootstrap_seed + row_index * 3 + 1,
                     request_of=lambda data: data.key[2],
@@ -1475,8 +1513,10 @@ def aggregate_raw_evidence(
             else:
                 tail_details = {}
             swap_effect = {}
-            if row_has_swap and bootstrap:
-                swap_values = [draw["swap_delta"] for draw in bootstrap]
+            if row_has_swap and prediction_bootstrap:
+                swap_values = [
+                    draw["swap_delta"] for draw in prediction_bootstrap
+                ]
                 swap_effect = {
                     "estimate": point["swap_delta"],
                     "lower_bound": percentile(swap_values, plan.alpha / 2.0),
@@ -1494,19 +1534,19 @@ def aggregate_raw_evidence(
                 "tail_eligible_units": len(tail_common_data),
                 "joint_rho": summarize_bootstrap_effect(
                     point["joint_rho"],
-                    [draw["joint_rho"] for draw in bootstrap],
+                    [draw["joint_rho"] for draw in prediction_bootstrap],
                     beneficial="positive",
                     alpha=plan.alpha,
                 ),
                 "joint_minus_s0": summarize_bootstrap_effect(
                     point["gain_s0"],
-                    [draw["gain_s0"] for draw in bootstrap],
+                    [draw["gain_s0"] for draw in prediction_bootstrap],
                     beneficial="positive",
                     alpha=plan.alpha,
                 ),
                 "joint_minus_s1": summarize_bootstrap_effect(
                     point["gain_s1"],
-                    [draw["gain_s1"] for draw in bootstrap],
+                    [draw["gain_s1"] for draw in prediction_bootstrap],
                     beneficial="positive",
                     alpha=plan.alpha,
                 ),
@@ -1516,6 +1556,29 @@ def aggregate_raw_evidence(
             }
 
         rq2_evidence = _empty_rq2()
+        if effect_points:
+            rq2_evidence.update(
+                {
+                    "g_h": summarize_bootstrap_effect(
+                        point["gain_s1"],
+                        [
+                            draw["gain_s1"]
+                            for draw in prediction_bootstrap
+                        ],
+                        beneficial="positive",
+                        alpha=plan.alpha,
+                    ),
+                    "g_ctl": summarize_bootstrap_effect(
+                        point["gain_control"],
+                        [
+                            draw["gain_control"]
+                            for draw in prediction_bootstrap
+                        ],
+                        beneficial="positive",
+                        alpha=plan.alpha,
+                    ),
+                }
+            )
         if rq2_points:
             point = _equal_request_average(rq2_points)
             bootstrap = _hierarchical_bootstrap(

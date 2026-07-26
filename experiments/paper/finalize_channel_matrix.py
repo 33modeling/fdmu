@@ -155,6 +155,57 @@ def _prediction_parents(
     return parents, alphas
 
 
+def _prediction_roster(
+    cfg: Mapping[str, Any],
+    freeze: Mapping[str, Any],
+) -> tuple[list[str], dict[str, dict[str, object]]]:
+    """Return every paper parent with frozen or descriptive selection metadata."""
+    frozen_parents, frozen_alphas = _prediction_parents(cfg, freeze)
+    frozen_set = set(frozen_parents)
+    raw_descriptive = freeze.get("descriptive_prediction_alpha")
+    if not isinstance(raw_descriptive, Mapping):
+        raise EvidenceValidationError(
+            "prediction alpha freeze lacks descriptive_prediction_alpha"
+        )
+    descriptive_alphas = {
+        str(parent): float(alpha)
+        for parent, alpha in raw_descriptive.items()
+        if str(parent) in PAPER_PARENTS
+    }
+    audit = cfg["audit"]
+    roster = list(audit.get("objectives", [])) + list(
+        audit.get("stress_objectives", [])
+    )
+    parents = []
+    for parent in roster:
+        parent = str(parent)
+        if parent in PAPER_PARENTS and parent not in parents:
+            parents.append(parent)
+    missing = [
+        parent
+        for parent in parents
+        if parent not in frozen_set and parent not in descriptive_alphas
+    ]
+    if missing:
+        raise EvidenceValidationError(
+            "paper parents lack frozen or descriptive prediction alpha: "
+            f"{missing}"
+        )
+    selections = {
+        parent: {
+            "valid": parent in frozen_set,
+            "fallback": parent not in frozen_set,
+            "alpha": (
+                frozen_alphas[parent]
+                if parent in frozen_set
+                else descriptive_alphas[parent]
+            ),
+        }
+        for parent in parents
+    }
+    return parents, selections
+
+
 def _protection_selections(
     cfg: Mapping[str, Any],
     config_path: Path,
@@ -212,7 +263,7 @@ def _build_plan(
     *,
     setting_id: str,
     parents: list[str],
-    prediction_alphas: Mapping[str, float],
+    prediction_selections: Mapping[str, Mapping[str, object]],
     protection: Mapping[str, Mapping[str, object]],
     control: str,
     bootstrap_replicates: int,
@@ -235,11 +286,9 @@ def _build_plan(
                         "parent": parent,
                         "request": _request_id(dataset, int(author)),
                         "seed": str(seed),
-                        "prediction_selection": {
-                            "valid": True,
-                            "fallback": False,
-                            "alpha": float(prediction_alphas[parent]),
-                        },
+                        "prediction_selection": dict(
+                            prediction_selections[parent]
+                        ),
                         "protection_selection": dict(protection[parent]),
                         "simple_control_name": control,
                         "repeated_random_draws": [
@@ -286,7 +335,7 @@ def finalize(args: argparse.Namespace) -> dict[str, Any]:
 
     cfg = _load_yaml(config_path)
     freeze = _load_yaml(args.prediction_alpha_freeze.resolve())
-    parents, prediction_alphas = _prediction_parents(cfg, freeze)
+    parents, prediction_selections = _prediction_roster(cfg, freeze)
     protection, protection_frozen, alpha_freeze_path = _protection_selections(
         cfg, config_path, args.model_id, parents
     )
@@ -294,7 +343,7 @@ def finalize(args: argparse.Namespace) -> dict[str, Any]:
         cfg,
         setting_id=args.setting_id,
         parents=parents,
-        prediction_alphas=prediction_alphas,
+        prediction_selections=prediction_selections,
         protection=protection,
         control=args.control_predictor,
         bootstrap_replicates=args.bootstrap_replicates,
@@ -312,6 +361,7 @@ def finalize(args: argparse.Namespace) -> dict[str, Any]:
         control_predictor=args.control_predictor,
         prediction_alpha=None,
         prediction_alpha_freeze=str(args.prediction_alpha_freeze.resolve()),
+        prediction_selections=prediction_selections,
         setting_id=args.setting_id,
         native_metric_name="retain_answer_token_recall",
         top_q=0.10,

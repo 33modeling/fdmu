@@ -12,6 +12,7 @@ from experiments.paper.finalize_channel_matrix import (
     _load_yaml,
     _materialize_final_latex,
     _prediction_parents,
+    _prediction_roster,
     _protection_selections,
     _remove_obsolete_latex,
 )
@@ -32,13 +33,14 @@ def test_artifact_reference_accepts_external_campaign_root(tmp_path):
     )
 
 
-def test_7b_backfill_plan_uses_only_frozen_prediction_parents():
+def test_7b_backfill_plan_keeps_all_parents_and_marks_fallbacks():
     config_path = ROOT / "configs/channel_matrix/7b_tofu.yaml"
     cfg = _load_yaml(config_path)
     freeze = _load_yaml(
         ROOT / "configs/channel_matrix/prediction_alpha_freeze_7b.yaml"
     )
-    parents, alphas = _prediction_parents(cfg, freeze)
+    frozen_parents, _ = _prediction_parents(cfg, freeze)
+    parents, selections = _prediction_roster(cfg, freeze)
     protection, frozen, _ = _protection_selections(
         cfg, config_path, "qwen25_7b", parents
     )
@@ -46,17 +48,41 @@ def test_7b_backfill_plan_uses_only_frozen_prediction_parents():
         cfg,
         setting_id="tofu_qwen25_7b",
         parents=parents,
-        prediction_alphas=alphas,
+        prediction_selections=selections,
         protection=protection,
         control="knn_lexical",
         bootstrap_replicates=7,
     )
     plan = raw_plan_from_mapping(mapping)
 
-    assert parents == ["graddiff", "rmu"]
-    assert len(plan.units) == 12
+    assert frozen_parents == ["graddiff", "rmu"]
+    assert parents == [
+        "graddiff",
+        "rmu",
+        "npo",
+        "simnpo",
+        "gru",
+        "repnoise",
+        "circuit_breakers",
+    ]
+    assert len(plan.units) == 42
     assert frozen is False
-    assert all(unit.prediction_selection.valid for unit in plan.units.values())
+    by_parent = {
+        parent: next(
+            unit.prediction_selection
+            for unit in plan.units.values()
+            if unit.key[1] == parent
+        )
+        for parent in parents
+    }
+    assert by_parent["graddiff"].valid
+    assert by_parent["graddiff"].alpha == 1.0
+    assert by_parent["rmu"].valid
+    assert by_parent["rmu"].alpha == 0.75
+    for parent in ("npo", "simnpo", "gru", "repnoise", "circuit_breakers"):
+        assert not by_parent[parent].valid
+        assert by_parent[parent].fallback
+        assert by_parent[parent].alpha == 0.5
     assert all(unit.protection_selection.fallback for unit in plan.units.values())
 
 

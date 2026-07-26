@@ -135,7 +135,7 @@ GPU 한 장을 사용하며, 서로 다른 호스트의 GPU는 각 호스트에�
 queue, worker, 학습은 시작하지 않는다.
 
 ```bash
-bash experiments/cluster/render_tofu_7b_h100.sh
+bash experiments/cluster/run_tofu_7b_h100.sh render-only
 ```
 
 최종 LaTeX는 아래 두 파일만 사용한다.
@@ -151,6 +151,8 @@ bash experiments/cluster/render_tofu_7b_h100.sh
   model/dataset setting을 항상 모두 출력한다.
 - 완료된 evidence는 숫자로 채우고, 미완료·비적격 evidence는 행을 없애지 않고
   `\tblph` 또는 `n/--`로 표시한다. 값을 임의로 만들지 않는다.
+- forgetting 기준에 도달하지 못한 parent는 마지막 완료 checkpoint의 관측값을
+  descriptive 수치로 표시하고 `n/--`로 claim-ineligible임을 명시한다.
 - 모델별 `aggregate/paper_v4/`에는 ledger, readiness, status와 실제 일반
   파일인 `table_core_evidence.tex`, `table_robustness.tex`을 둔다. 구형 이름의
   중복 LaTeX는 재렌더 시 삭제한다.
@@ -161,7 +163,7 @@ bash experiments/cluster/render_tofu_7b_h100.sh
 
 ```bash
 git pull --ff-only origin main
-bash experiments/cluster/render_tofu_7b_h100.sh
+bash experiments/cluster/run_tofu_7b_h100.sh render-only
 sed -n '1,320p' /group-volume/fdmu/runs/paper_v4/table_core_evidence.tex
 sed -n '1,320p' /group-volume/fdmu/runs/paper_v4/table_robustness.tex
 ```

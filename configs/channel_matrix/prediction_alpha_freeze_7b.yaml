@@ -25,9 +25,17 @@ damage_source: development none-arm entry-checkpoint damage only
 prediction_alpha:
   graddiff: 1.0
   rmu: 0.75
-# Objectives that did not reach the forgetting criterion in the reduced 7B
-# core roster carry no resolved prediction weight; their audit rows stay
-# ineligible (non-reach) rather than taking a fallback.
+# Outcome-blind equal-weight profiles used only to report the observed final
+# checkpoint of non-reaching objectives. These are explicit per-parent values,
+# not an execution default or a claim-eligible frozen selection.
+descriptive_prediction_alpha:
+  npo: 0.5
+  simnpo: 0.5
+  gru: 0.5
+  repnoise: 0.5
+  circuit_breakers: 0.5
+# These objectives carry no resolved claim weight. Their descriptive audit
+# rows remain fallback=true and ineligible even when numerical values render.
 unresolved:
   - qwen25_7b/npo
   - qwen25_7b/simnpo

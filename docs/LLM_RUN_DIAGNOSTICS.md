@@ -246,8 +246,7 @@ evidence의 의미와 metric은
 `/group-volume/fdmu/runs/paper_v4/table_core_evidence.tex`과
 `table_robustness.tex`을 사용한다. 이미
 완료된 7B run에는 GPU나 channel-matrix bootstrap 재실행이 필요 없으며
-`bash experiments/cluster/render_tofu_7b_h100.sh`만 실행한다. 동일하게
-`bash experiments/cluster/run_tofu_7b_h100.sh render-only`도 사용할 수 있다.
+`bash experiments/cluster/run_tofu_7b_h100.sh render-only`만 실행한다.
 두 경로는 queue/retry/enqueue/worker를 실행하지 않는다. 후처리는
 완료된 evidence cell을 유지하고 누락 block만 placeholder로 남긴다.
 namespace 도입 전 legacy audit에 `damage.json`이 존재하면 render-only

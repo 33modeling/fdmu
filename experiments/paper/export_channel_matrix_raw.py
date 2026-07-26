@@ -302,6 +302,26 @@ def _prediction_alpha(args, parent: str) -> float:
     )
 
 
+def _prediction_selection(args, parent: str) -> dict[str, object]:
+    selections = getattr(args, "prediction_selections", None)
+    if isinstance(selections, Mapping) and parent in selections:
+        raw = selections[parent]
+        if not isinstance(raw, Mapping):
+            raise EvidenceValidationError(
+                f"prediction selection for {parent!r} must be a mapping"
+            )
+        return {
+            "valid": bool(raw.get("valid", False)),
+            "fallback": bool(raw.get("fallback", False)),
+            "alpha": float(raw["alpha"]),
+        }
+    return {
+        "valid": True,
+        "fallback": False,
+        "alpha": _prediction_alpha(args, parent),
+    }
+
+
 def export_prediction(
     args, cfg: Mapping[str, Any], out_path: Path
 ) -> tuple[int, int]:
@@ -461,7 +481,8 @@ def export_prediction(
                     reached = reach is not None
                     snapshot = snapshots[reach if reached else -1]
                     nll0 = payload["nll0"]
-                    alpha_pred = _prediction_alpha(args, parent)
+                    prediction_selection = _prediction_selection(args, parent)
+                    alpha_pred = float(prediction_selection["alpha"])
                     joint = channel_mixture_scores(
                         {**grad_disc, **grad_audit},
                         {**prox_disc, **prox_audit},
@@ -507,11 +528,7 @@ def export_prediction(
                             "parent": parent,
                             "request": request_id,
                             "seed": seed,
-                            "prediction_selection": {
-                                "valid": True,
-                                "fallback": False,
-                                "alpha": alpha_pred,
-                            },
+                            "prediction_selection": prediction_selection,
                             "candidate_id": candidate_id,
                             "group": groups.get(
                                 candidate_id,

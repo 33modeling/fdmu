@@ -152,8 +152,8 @@ audit:
   # claims; the demoted objectives keep best-effort stress settings so the
   # audit still measures every column (reported as notreached boundaries).
   objectives: [graddiff, rmu]
-  # These run before any score is opened but are excluded from the core
-  # interaction and main seven objective columns.
+  # These run before any score is opened. Paper export keeps their observed
+  # final-checkpoint values as claim-ineligible fixed-denominator rows.
   stress_objectives: [ga, idkdpo, npo, simnpo, gru, repnoise, circuit_breakers]
   predictors: [grad_norm, fd_norm, knn_feature, knn_lexical, fd, random_rank]
   objective_freeze: objective_freeze.yaml

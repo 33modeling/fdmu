@@ -34,8 +34,10 @@ def _plan(
     replicates: int = 39,
     native_orientation: str = "higher",
     native_margin: float = 0.05,
+    prediction_selection: dict | None = None,
 ):
     request_seeds = units or [("r1", "1"), ("r2", "1")]
+    frozen_prediction = prediction_selection or _selection(0.4)
     return raw_plan_from_mapping(
         {
             "schema_version": 2,
@@ -52,7 +54,7 @@ def _plan(
                     "parent": "npo",
                     "request": request,
                     "seed": seed,
-                    "prediction_selection": _selection(0.4),
+                    "prediction_selection": frozen_prediction,
                     "protection_selection": _selection(0.6),
                     "simple_control_name": "initial_nll",
                     "repeated_random_draws": ["d0", "d1"],
@@ -354,6 +356,28 @@ def test_unequal_seed_counts_are_averaged_within_request_then_equally():
     raw = aggregate_raw_evidence(plan, first + second + third, [])
     row = EvidenceLedger.from_mapping(raw).rows[("primary", "npo")]
     assert row.rq1.joint_rho.estimate == pytest.approx(0.0)
+
+
+def test_nonreaching_fallback_keeps_descriptive_values_but_not_claim_support():
+    fallback = {"valid": False, "fallback": True, "alpha": 0.5}
+    plan = _plan(prediction_selection=fallback)
+    prediction = _prediction("r1") + _prediction("r2")
+    for record in prediction:
+        record["prediction_selection"] = fallback
+        record["reached"] = False
+        record["parent_checkpoint_first_reaching"] = False
+
+    raw = aggregate_raw_evidence(plan, prediction, [])
+    row = EvidenceLedger.from_mapping(raw).rows[("primary", "npo")]
+
+    assert row.completed
+    assert row.funnel.trajectories_reached == 0
+    assert row.funnel.prediction_common == 0
+    assert row.rq1.joint_rho.estimate is not None
+    assert row.rq1.joint_minus_s0.estimate is not None
+    assert row.rq1.joint_minus_s1.estimate is not None
+    assert row.rq2.g_ctl.estimate is not None
+    assert not row.rq1.selection_valid
 
 
 def test_cli_writes_incomplete_rows_when_raw_shards_are_absent(tmp_path):
