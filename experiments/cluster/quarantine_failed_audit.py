@@ -38,7 +38,8 @@ def main() -> int:
     )
     stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     forensics = Path(
-        os.environ.get("CLUSTER_RUNS_ROOT", "/group-volume/fdmu/runs")
+        os.environ.get("FDMU_CAMPAIGN_RUNS_ROOT")
+        or os.environ.get("CLUSTER_RUNS_ROOT", "/group-volume/fdmu/runs")
     ) / "forensics" / "audit-partials"
 
     moved = 0

@@ -48,9 +48,9 @@ cd "${ROOT}"
 # shellcheck disable=SC1091
 source "${ROOT}/experiments/cluster/cluster_env.sh"
 export PYTHONUNBUFFERED=1
-mkdir -p "$CLUSTER_RUNS_ROOT/logs"
+mkdir -p "$FDMU_CAMPAIGN_RUNS_ROOT/logs"
 
-CAMPAIGN_LOG_DIR="$CLUSTER_RUNS_ROOT/logs/channel_matrix"
+CAMPAIGN_LOG_DIR="$FDMU_CAMPAIGN_RUNS_ROOT/logs/channel_matrix"
 mkdir -p "$CAMPAIGN_LOG_DIR"
 CAMPAIGN_LOG="$CAMPAIGN_LOG_DIR/${MODEL_ID}_${ACTION}_$(hostname)_$(date -u '+%Y%m%dT%H%M%SZ')_$$.log"
 export FDMU_CAMPAIGN_LOG="$CAMPAIGN_LOG"
@@ -59,7 +59,7 @@ ln -sfn "$(basename "$CAMPAIGN_LOG")" \
 exec > >(tee -a "$CAMPAIGN_LOG") 2>&1
 echo "[campaign] action=$ACTION config=$CONFIG model=$MODEL_ID gpu=$GPU"
 echo "[campaign] repo=$ROOT commit=$(git rev-parse --short HEAD) log=$CAMPAIGN_LOG"
-echo "[storage] runs=$CLUSTER_RUNS_ROOT runtime=$CLUSTER_WORK_ROOT hf=$HF_HOME"
+echo "[storage] user=$CLUSTER_RUN_USER runs=$FDMU_CAMPAIGN_RUNS_ROOT runtime=$CLUSTER_WORK_ROOT hf=$HF_HOME"
 
 on_campaign_error() {
   local code=$?
@@ -130,7 +130,7 @@ PY
 }
 
 campaign_paths() {
-  "$PYTHON" - "${CONFIG}" "${MODEL_ID}" "${CLUSTER_RUNS_ROOT}" <<'PY'
+  "$PYTHON" - "${CONFIG}" "${MODEL_ID}" "${FDMU_CAMPAIGN_RUNS_ROOT}" <<'PY'
 from pathlib import Path
 import re
 import sys
@@ -185,7 +185,8 @@ paper_v4() {
     --setting-id tofu_qwen25_7b \
     --model-id "$MODEL_ID" \
     --prediction-alpha-freeze configs/channel_matrix/prediction_alpha_freeze_7b.yaml \
-    --out-dir "$aggregate_root/paper_v4"
+    --out-dir "$aggregate_root/paper_v4" \
+    --combined-root "$CLUSTER_RUNS_ROOT/paper_v4"
   echo "[RESULT] paper Table 1=$aggregate_root/paper_v4/table1_core_evidence_${model_tag}.tex"
   echo "[RESULT] paper Table 2=$aggregate_root/paper_v4/table2_robustness_${model_tag}.tex"
 }
@@ -243,8 +244,8 @@ case "${ACTION}" in
   select-freeze)
     "$PYTHON" experiments/channel_matrix/select_freeze.py \
       --config "${CONFIG}" \
-      --root "$CLUSTER_RUNS_ROOT/channel_matrix_7b/calibration" \
-      --out "$CLUSTER_RUNS_ROOT/channel_matrix_7b/objective_freeze.recommended.yaml"
+      --root "$FDMU_CAMPAIGN_RUNS_ROOT/channel_matrix_7b/calibration" \
+      --out "$FDMU_CAMPAIGN_RUNS_ROOT/channel_matrix_7b/objective_freeze.recommended.yaml"
     echo "STOP: review the recommendation and commit a frozen objective_freeze.yaml before audit."
     ;;
   audit)
@@ -307,8 +308,8 @@ case "${ACTION}" in
   select-alpha-freeze)
     "$PYTHON" experiments/channel_matrix/select_alpha_freeze.py \
       --config "${CONFIG}" \
-      --root "$CLUSTER_RUNS_ROOT/channel_matrix_7b/alpha_protection/development" \
-      --out "$CLUSTER_RUNS_ROOT/channel_matrix_7b/alpha_protection_freeze.recommended.yaml"
+      --root "$FDMU_CAMPAIGN_RUNS_ROOT/channel_matrix_7b/alpha_protection/development" \
+      --out "$FDMU_CAMPAIGN_RUNS_ROOT/channel_matrix_7b/alpha_protection_freeze.recommended.yaml"
     echo "STOP: review and commit configs/channel_matrix/alpha_protection_freeze.yaml before alpha audit."
     ;;
   dry-alpha-audit)
@@ -332,8 +333,8 @@ case "${ACTION}" in
     "$PYTHON" experiments/channel_matrix/aggregate_alpha_protection.py \
       --legacy-diagnostic \
       --config "${CONFIG}" \
-      --root "$CLUSTER_RUNS_ROOT/channel_matrix_7b/alpha_protection/audit" \
-      --out "$CLUSTER_RUNS_ROOT/channel_matrix_7b/alpha_protection/aggregate" \
+      --root "$FDMU_CAMPAIGN_RUNS_ROOT/channel_matrix_7b/alpha_protection/audit" \
+      --out "$FDMU_CAMPAIGN_RUNS_ROOT/channel_matrix_7b/alpha_protection/aggregate" \
       --n-boot 2000
     ;;
   *)

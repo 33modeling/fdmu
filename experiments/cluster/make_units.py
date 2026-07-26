@@ -18,6 +18,8 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -45,7 +47,8 @@ def _enabled_models(cfg: dict, selected: set[str]) -> list[str]:
 
 
 def build_units(cfg: dict, config_rel: str, phase: str, models: list[str],
-                max_attempts: int, unit_suffix: str = "") -> list[Unit]:
+                max_attempts: int, unit_suffix: str = "",
+                unit_env: dict[str, str] | None = None) -> list[Unit]:
     python = "python"  # resolved by the worker's activated venv, not the enqueuing shell
     units: list[Unit] = []
     code_commit = subprocess.run(
@@ -63,6 +66,7 @@ def build_units(cfg: dict, config_rel: str, phase: str, models: list[str],
             Unit(
                 unit_id=unit_id,
                 cmd=cmd,
+                env=dict(unit_env or {}),
                 gpus=1,
                 max_attempts=max_attempts,
                 code_commit=code_commit,
@@ -130,6 +134,16 @@ def main() -> None:
     parser.add_argument("--unit-suffix", default="",
                         help="append __<suffix> to every unit id (e.g. r2 for a "
                              "grid-extension re-enqueue; the queue is append-only per id)")
+    parser.add_argument(
+        "--run-user",
+        default=os.environ.get("FDMU_RUN_USER", ""),
+        help="filesystem-safe user namespace pinned into every queue unit",
+    )
+    parser.add_argument(
+        "--campaign-runs-root",
+        default=os.environ.get("FDMU_CAMPAIGN_RUNS_ROOT", ""),
+        help="absolute per-user result root pinned into every queue unit",
+    )
     parser.add_argument("--out", help="write units JSONL here instead of/in addition to --enqueue")
     parser.add_argument("--enqueue", action="store_true", help="enqueue directly into --queue")
     parser.add_argument("--queue", help="queue root (required with --enqueue)")
@@ -140,11 +154,25 @@ def main() -> None:
     config_rel = args.config
     cfg = yaml.safe_load(config_path.read_text(encoding="utf-8"))
     models = _enabled_models(cfg, set(args.model_id))
+    if bool(args.run_user) != bool(args.campaign_runs_root):
+        parser.error("--run-user and --campaign-runs-root must be supplied together")
+    unit_env: dict[str, str] = {}
+    if args.run_user:
+        if re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]*", args.run_user) is None:
+            parser.error("--run-user must be filesystem-safe")
+        campaign_root_input = Path(args.campaign_runs_root)
+        if not campaign_root_input.is_absolute():
+            parser.error("--campaign-runs-root must be absolute")
+        campaign_root = campaign_root_input.resolve()
+        unit_env = {
+            "FDMU_RUN_USER": args.run_user,
+            "FDMU_CAMPAIGN_RUNS_ROOT": str(campaign_root),
+        }
 
     units: list[Unit] = []
     for phase in args.phase:
         units.extend(build_units(cfg, config_rel, phase, models, args.max_attempts,
-                                 unit_suffix=args.unit_suffix))
+                                 unit_suffix=args.unit_suffix, unit_env=unit_env))
 
     ids = [u.unit_id for u in units]
     if len(ids) != len(set(ids)):

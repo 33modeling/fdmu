@@ -175,10 +175,28 @@ def build_env(base: dict[str, str], unit_env: dict[str, str], gpu: int, needs_gp
         storage_root, group_root, "cluster storage"
     )
     runs_root = _require_group_volume(runs_root, group_root, "cluster runs")
+    campaign_runs_root = _require_group_volume(
+        env.get("FDMU_CAMPAIGN_RUNS_ROOT", runs_root),
+        group_root,
+        "user campaign runs",
+    )
+    allowed_campaign_parent = Path(runs_root) / "users"
+    campaign_path = Path(campaign_runs_root)
+    if campaign_path != Path(runs_root):
+        run_user = env.get("FDMU_RUN_USER", "")
+        if re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]*", run_user) is None:
+            raise ValueError("namespaced campaign unit lacks a safe FDMU_RUN_USER")
+        expected_campaign_path = allowed_campaign_parent / run_user
+        if campaign_path != expected_campaign_path:
+            raise ValueError(
+                "user campaign runs must exactly match its pinned user: "
+                f"expected={expected_campaign_path} found={campaign_path}"
+            )
     work_root = _require_group_volume(work_root, group_root, "cluster scratch")
     hf_home = _require_group_volume(hf_home, group_root, "HF_HOME")
     env["CLUSTER_STORAGE_ROOT"] = storage_root
     env["CLUSTER_RUNS_ROOT"] = runs_root
+    env["FDMU_CAMPAIGN_RUNS_ROOT"] = campaign_runs_root
     env["CLUSTER_WORK_ROOT"] = work_root
     env["HF_HOME"] = hf_home
     env["HF_DATASETS_CACHE"] = env.get(

@@ -9,8 +9,11 @@ AUDIT_MATCH="aud__${MODEL_ID}"
 STORAGE_ROOT=/group-volume/fdmu
 VENV="$STORAGE_ROOT/.venv"
 PYTHON="$VENV/bin/python"
-QUEUE="$STORAGE_ROOT/runs/cluster_queue/wave1_14b"
-LOG_DIR="$STORAGE_ROOT/runs/logs/cluster"
+CLUSTER_RUNS_ROOT="$STORAGE_ROOT/runs"
+# shellcheck disable=SC1091
+source "$ROOT/experiments/cluster/user_scope.sh"
+QUEUE="$CLUSTER_USER_QUEUE_ROOT/wave1_14b"
+LOG_DIR="$CLUSTER_USER_RUNS_ROOT/logs/cluster"
 mkdir -p "$LOG_DIR"
 LOG="$LOG_DIR/launcher_${MODEL_ID}_$(hostname)_$(date -u '+%Y%m%dT%H%M%SZ').out"
 ln -sfn "$(basename "$LOG")" "$LOG_DIR/launcher_${MODEL_ID}_$(hostname)_current.out"
@@ -35,8 +38,7 @@ fi
 # shellcheck disable=SC1091
 source "$ROOT/experiments/cluster/cluster_env.sh"
 
-QUEUE="$CLUSTER_RUNS_ROOT/cluster_queue/wave1_14b"
-WORKER_GPU=0
+QUEUE="$CLUSTER_USER_QUEUE_ROOT/wave1_14b"
 CURRENT_COMMIT=
 printf '[INFO] time=%s stage=environment-bootstrap complete\n' "$(date -u '+%FT%TZ')"
 
@@ -48,8 +50,9 @@ on_error() {
     "$STAGE" "$code" "${BASH_LINENO[0]:-unknown}" "${BASH_COMMAND:-unknown}"
   printf '[CONTEXT] host=%s model=%s queue=%s commit=%s python=%s\n' \
     "$(hostname)" "$MODEL_ID" "$QUEUE" "$(git rev-parse --short HEAD)" "$PYTHON"
-  printf '[CONTEXT] runs=%s runtime=%s hf=%s log=%s\n' \
-    "$CLUSTER_RUNS_ROOT" "$CLUSTER_WORK_ROOT" "$HF_HOME" "$LOG"
+  printf '[CONTEXT] user=%s runs=%s runtime=%s hf=%s log=%s\n' \
+    "$CLUSTER_RUN_USER" "$FDMU_CAMPAIGN_RUNS_ROOT" \
+    "$CLUSTER_WORK_ROOT" "$HF_HOME" "$LOG"
   nvidia-smi --query-gpu=index,name,memory.used,utilization.gpu \
     --format=csv,noheader 2>&1 || true
   df -h "$CLUSTER_RUNS_ROOT" "$CLUSTER_WORK_ROOT" 2>&1 || true
@@ -87,71 +90,11 @@ assert_clean_retry_commit() {
     "$CURRENT_COMMIT"
 }
 
-assert_14b_gpu_exclusive() {
-  local process gpu
-  local -a extra_wave_workers=()
-  local -a gpu0_workers=()
-
-  if ! command -v nvidia-smi >/dev/null; then
-    echo "[ERROR] nvidia-smi not found; cannot verify the dedicated 14B GPU" >&2
-    return 2
-  fi
-
-  while IFS= read -r process; do
-    [[ -n "$process" ]] || continue
-    if [[ ! "$process" =~ --queue[[:space:]]+([^[:space:]]*/)?cluster_queue/wave1_14b([[:space:]]|$) ]]; then
-      continue
-    fi
-    if [[ "$process" =~ --gpu[[:space:]]+([0-9]+) ]]; then
-      gpu="${BASH_REMATCH[1]}"
-      if (( gpu > 0 )); then
-        extra_wave_workers+=("$process")
-      fi
-    else
-      extra_wave_workers+=("$process")
-    fi
-  done < <(pgrep -af "experiments/cluster/worker.py --queue" || true)
-  if (( ${#extra_wave_workers[@]} > 0 )); then
-    printf '[ERROR] wave1_14b must not retain GPU1-7 workers:\n' >&2
-    printf '  %s\n' "${extra_wave_workers[@]}" >&2
-    echo "[ERROR] stop those workers and let their claimed units settle before restarting" >&2
-    return 2
-  fi
-
-  while IFS= read -r process; do
-    [[ -n "$process" ]] || continue
-    if [[ "$process" =~ --gpu[[:space:]]+0([[:space:]]|$) ]]; then
-      gpu0_workers+=("$process")
-    fi
-  done < <(pgrep -af "experiments/cluster/worker.py --queue" || true)
-  if (( ${#gpu0_workers[@]} > 0 )); then
-    printf '[ERROR] GPU 0 is reserved by an existing cluster worker; launcher not started:\n' >&2
-    printf '  %s\n' "${gpu0_workers[@]}" >&2
-    return 2
-  fi
-
-  local gpu_processes
-  if ! gpu_processes="$(
-    nvidia-smi -i 0 \
-      --query-compute-apps=pid,process_name,used_gpu_memory \
-      --format=csv,noheader,nounits
-  )"; then
-    echo "[ERROR] failed to inspect GPU 0 compute processes" >&2
-    return 2
-  fi
-  if [[ -n "${gpu_processes//[[:space:]]/}" ]]; then
-    printf '[ERROR] GPU 0 already has active compute processes; launcher not started:\n%s\n' \
-      "$gpu_processes" >&2
-    return 2
-  fi
-  printf '[INFO] GPU 0 exclusive preflight passed for wave1_14b\n'
-}
-
-stage gpu-exclusive-preflight
-printf '[TOPOLOGY] launcher activates this host only; 14B uses one dedicated worker on GPU 0\n'
+printf '[TOPOLOGY] launcher activates this host only; 14B uses one worker per free local GPU\n'
+printf '[TOPOLOGY] run_user=%s queue=%s results=%s\n' \
+  "$CLUSTER_RUN_USER" "$QUEUE" "$FDMU_CAMPAIGN_RUNS_ROOT"
 printf '[TOPOLOGY] audit_monitor=%s worker_scope=%s; alpha jobs continue independently\n' \
   "$AUDIT_MATCH" "$MODEL_ID"
-assert_14b_gpu_exclusive
 
 stage retry-commit-validation
 assert_clean_retry_commit
@@ -200,12 +143,12 @@ stage model-queue-commit-reconciliation
 stage enqueue
 bash experiments/cluster/enqueue_table12.sh audit-14b
 stage worker-launch
-printf '[CONFIG] model=%s worker_gpu=%s queue=%s python=%s\n' \
-  "$MODEL_ID" "$WORKER_GPU" "$QUEUE" "$PYTHON"
-# Audit units are preferred for early LaTeX. The GPU 0 worker then continues
-# queued alpha units and exits naturally without touching other queues.
+printf '[CONFIG] model=%s workers=all-free-local-gpus queue=%s python=%s\n' \
+  "$MODEL_ID" "$QUEUE" "$PYTHON"
+# Audit units are preferred for early LaTeX. Existing workers for this same
+# queue are preserved; launch_node adds one worker on every other free GPU.
 WAIT=0 UNIT_MATCH="$MODEL_ID" UNIT_PREFER="$AUDIT_MATCH" \
-  bash experiments/cluster/launch_node.sh --dedicated-queue "$QUEUE" 1
+  bash experiments/cluster/launch_node.sh --dedicated-queue "$QUEUE"
 printf '[RESULT] worker-launch complete; active local workers:\n'
 pgrep -af "experiments/cluster/worker.py --queue" || true
 "$PYTHON" experiments/cluster/workqueue.py status --brief --queue "$QUEUE"
@@ -219,4 +162,4 @@ MODEL_ID="$MODEL_ID" \
 SCALE_LABEL=14B \
   bash experiments/channel_matrix/h100_campaign.sh aggregate
 printf '[RESULT] LaTeX generation complete: %s\n' \
-  "$CLUSTER_RUNS_ROOT/channel_matrix_14b/aggregate/table1_channel_matrix_${MODEL_ID}.tex"
+  "$FDMU_CAMPAIGN_RUNS_ROOT/channel_matrix_14b/aggregate/table1_channel_matrix_${MODEL_ID}.tex"

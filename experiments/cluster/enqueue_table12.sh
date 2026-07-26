@@ -104,7 +104,10 @@ enqueue_phase() {  # $1 = description, $2 = queue dir, $3 = config, $4.. = phase
   # lose the units after the duplicate.
   units_tmp="$(mktemp)"
   "$PYTHON" experiments/cluster/make_units.py \
-    --config "${cfg}" "${args[@]}" --out "${units_tmp}" \
+    --config "${cfg}" "${args[@]}" \
+    --run-user "$FDMU_RUN_USER" \
+    --campaign-runs-root "$FDMU_CAMPAIGN_RUNS_ROOT" \
+    --out "${units_tmp}" \
     || die "${desc}: make_units failed."
   "$PYTHON" experiments/cluster/workqueue.py enqueue \
     --queue "${queue}" --units "${units_tmp}" --skip-existing \
@@ -120,8 +123,8 @@ post_enqueue_notes() {  # $1 = queue dir
 [enqueue_table12] Units are queued in $1 — this script does NOT start workers.
   Reminders:
     - worker count and GPU selection belong to the caller-specific launcher.
-      run_tofu_7b_h100.sh uses the fleet launcher; run_tofu_14b_h100.sh runs
-      exactly one dedicated worker on GPU 0.
+      both run_tofu_7b_h100.sh and run_tofu_14b_h100.sh start one worker on
+      each free local GPU.
     - make_units-generated gate/audit units must KEEP the max_attempts that
       make_units set — do not hand-edit queue JSON to add retries (sealed
       runners refuse partial run dirs by design; see the runbook's triage).
@@ -134,7 +137,7 @@ case "${cmd}" in
 
   status)
     for q in "${STATUS_QUEUES[@]}"; do
-      root="$CLUSTER_RUNS_ROOT/cluster_queue/${q}"
+      root="$CLUSTER_USER_QUEUE_ROOT/${q}"
       echo "== ${root} =="
       if [[ -d "${root}" ]]; then
         "$PYTHON" experiments/cluster/workqueue.py status --brief --queue "${root}" \
@@ -152,7 +155,7 @@ case "${cmd}" in
     require_config "${cfg}"
     require_clean_tree
     require_frozen "$(freeze_path_of "${cfg}" objective_freeze)" "7B audit"
-    queue="$CLUSTER_RUNS_ROOT/cluster_queue/wave2"
+    queue="$CLUSTER_USER_QUEUE_ROOT/wave2"
     enqueue_phase "7B TOFU audit" "${queue}" "${cfg}" audit
     alpha_freeze="$(freeze_path_of "${cfg}" alpha_freeze)"
     if [[ -f "${alpha_freeze}" ]] && freeze_is_frozen "${alpha_freeze}"; then
@@ -170,7 +173,7 @@ case "${cmd}" in
     require_config "${cfg}"
     require_clean_tree
     require_frozen "$(freeze_path_of "${cfg}" objective_freeze)" "14B audit"
-    queue="$CLUSTER_RUNS_ROOT/cluster_queue/wave1_14b"
+    queue="$CLUSTER_USER_QUEUE_ROOT/wave1_14b"
     enqueue_phase "14B TOFU audit" "${queue}" "${cfg}" audit
     alpha_freeze="$(freeze_path_of "${cfg}" alpha_freeze)"
     if [[ -f "${alpha_freeze}" ]] && freeze_is_frozen "${alpha_freeze}"; then
@@ -187,7 +190,7 @@ case "${cmd}" in
     cfg="${CFG_DIR}/wmdp_7b.yaml"
     require_config "${cfg}"
     require_clean_tree
-    queue="$CLUSTER_RUNS_ROOT/cluster_queue/wave_wmdp"
+    queue="$CLUSTER_USER_QUEUE_ROOT/wave_wmdp"
     enqueue_phase "WMDP fidelity" "${queue}" "${cfg}" fidelity
     enqueue_phase "WMDP calibration" "${queue}" "${cfg}" calibration
     post_enqueue_notes "${queue}"
@@ -197,7 +200,7 @@ case "${cmd}" in
     cfg="${CFG_DIR}/wmdp_14b.yaml"
     require_config "${cfg}"
     require_clean_tree
-    queue="$CLUSTER_RUNS_ROOT/cluster_queue/wave_wmdp14b"
+    queue="$CLUSTER_USER_QUEUE_ROOT/wave_wmdp14b"
     enqueue_phase "WMDP-14B fidelity" "${queue}" "${cfg}" fidelity
     enqueue_phase "WMDP-14B calibration" "${queue}" "${cfg}" calibration
     post_enqueue_notes "${queue}"
@@ -211,7 +214,7 @@ case "${cmd}" in
       die "model not provisioned at ${model_path} — run: bash experiments/cluster/provision_llama.sh"
     fi
     require_clean_tree
-    queue="$CLUSTER_RUNS_ROOT/cluster_queue/wave_llama"
+    queue="$CLUSTER_USER_QUEUE_ROOT/wave_llama"
     enqueue_phase "Llama-8B fidelity" "${queue}" "${cfg}" fidelity
     enqueue_phase "Llama-8B calibration" "${queue}" "${cfg}" calibration
     post_enqueue_notes "${queue}"
@@ -221,12 +224,12 @@ case "${cmd}" in
     cfg="${CFG_DIR}/rwku_7b.yaml"
     require_config "${cfg}"
     # RWKU audit is blocked on a real (non-TOFU-wired) fidelity certificate.
-    if ! ls "$CLUSTER_RUNS_ROOT"/channel_matrix_rwku7b/fidelity/*.json >/dev/null 2>&1; then
-      die "no fidelity certificate under $CLUSTER_RUNS_ROOT/channel_matrix_rwku7b/fidelity/ — run experiments/diag/fd_fidelity.py --dataset rwku first."
+    if ! ls "$FDMU_CAMPAIGN_RUNS_ROOT"/channel_matrix_rwku7b/fidelity/*.json >/dev/null 2>&1; then
+      die "no fidelity certificate under $FDMU_CAMPAIGN_RUNS_ROOT/channel_matrix_rwku7b/fidelity/ — run experiments/diag/fd_fidelity.py --dataset rwku first."
     fi
     require_clean_tree
     require_frozen "$(freeze_path_of "${cfg}" objective_freeze)" "RWKU audit"
-    queue="$CLUSTER_RUNS_ROOT/cluster_queue/wave_rwku"
+    queue="$CLUSTER_USER_QUEUE_ROOT/wave_rwku"
     enqueue_phase "RWKU 7B audit" "${queue}" "${cfg}" audit
     post_enqueue_notes "${queue}"
     ;;

@@ -22,7 +22,10 @@ experiments/cluster/
 ## 핵심 설계
 
 - **공유 상태와 scratch를 분리.** queue/results는 checkout 위치와 무관하게
-  `/group-volume/fdmu/runs`를 사용한다. `CLUSTER_RUNS_ROOT`는
+  `/group-volume/fdmu/runs`를 사용하되 Unix 사용자별로 자동 분리한다.
+  기본 경로는 각각
+  `/group-volume/fdmu/runs/cluster_queue/users/<user>/`와
+  `/group-volume/fdmu/runs/users/<user>/`다. `CLUSTER_RUNS_ROOT`는
   외부 env나 unit payload가 변경할 수 없다. `HOME`, `TMPDIR`, Triton/CUDA,
   Hugging Face, RSUS, Torch, XDG, pip 캐시는
   `/group-volume/fdmu/runtime/<user>/<host>/`에 분리한다.
@@ -32,6 +35,13 @@ experiments/cluster/
   `.cluster_env.local.sh`에 `CLUSTER_HF_HOME`을 설정한다. Runtime, queue,
   assignment와 storage root는 override할 수 없다. Queue assignment는
   `configs/cluster/fleet.yaml`을 커밋해 변경한다.
+- **사용자별 재실험 격리.** `cluster_env.sh`가 `$USER`를 안전한
+  `FDMU_RUN_USER`로 정규화한다. `make_units.py`는 사용자명과 결과 루트를 각
+  queue unit에 고정하므로 다른 계정의 worker가 unit을 실행해도 요청자의
+  결과 디렉터리만 사용한다. 사용자명이 다르면 unit ID가 같아도 큐와 결과가
+  겹치지 않는다. `configs/cluster/legacy_run_owner.txt`의 기존 소유자는 과거
+  `/group-volume/fdmu/runs/channel_matrix_*`와 큐를 그대로 사용하므로 이미
+  학습한 결과를 이동하거나 다시 학습하지 않는다.
 - **작업 단위 = 기존 러너가 이미 지원하는 최소 샤드.** run 디렉토리가 단위 간
   절대 겹치지 않도록 자름: calibration/audit은 `--only-authors <한 명>`,
   alpha 페이즈는 `--worker --author A --seed S`. 모든 명령에 `--resume`이
@@ -73,11 +83,24 @@ cd /path/to/fdmu
 bash experiments/cluster/setup_group_volume.sh  # 최초 1회
 source /group-volume/fdmu/.venv/bin/activate
 source experiments/cluster/cluster_env.sh
+printf 'user=%s\nqueue=%s\nresults=%s\n' \
+  "$CLUSTER_RUN_USER" "$CLUSTER_USER_QUEUE_ROOT" "$FDMU_CAMPAIGN_RUNS_ROOT"
 git pull --ff-only origin main
 git status --short          # 출력이 없어야 함
 git log -1 --oneline        # 이 커밋을 실행 기록에 남김
 df -h /group-volume/fdmu
 python -m pytest -q
+```
+
+기존 소유자는 legacy 경로가 자동 선택된다. 다른 계정에서 namespace 도입 전
+공유 경로의 결과만 후처리해야 할 때에만 `FDMU_SHARED_LEGACY_RUNS=1`을
+붙인다. 새 실험에는 사용하지 않는다. 기존 소유자가 의도적으로 완전히 독립된
+재실험을 만들 때는 `FDMU_FORCE_USER_NAMESPACE=1`을 사용한다.
+
+```bash
+FDMU_SHARED_LEGACY_RUNS=1 \
+  CONFIG=configs/channel_matrix/7b_tofu.yaml MODEL_ID=qwen25_7b \
+  bash experiments/channel_matrix/h100_campaign.sh paper-v4
 ```
 
 ### 실험 전 필수 확인
@@ -135,9 +158,9 @@ cache writer는 worker별 stage에 legacy 순차 형식으로 쓴 뒤 SHA-256을
 크기와 SHA-256을 다음 load에서 검증한다. 이전 전체-model cache와 계약
 불일치는 forensics로 보존한 뒤 새 block cache를 만든다. 일반적인 일시 I/O
 오류는 숨기거나 무한 재시도하지 않고 즉시 실패시킨다.
-14B 원클릭 실행기는 fidelity 전에 GPU 0 compute process가 없는지 확인하며,
-같은 `wave1_14b`의 GPU 1-7 worker가 남아 있으면 시작을 거부한다.
-노드 launcher는 호스트 lease 아래에서 충돌 검사와 worker 생성을 수행하고,
+14B 원클릭 실행기도 7B와 동일하게 빈 GPU마다 worker 하나를 시작한다. 이미
+같은 사용자/queue의 worker가 실행 중이면 그대로 유지하고 나머지 빈 GPU만
+추가한다. 노드 launcher는 호스트 lease 아래에서 충돌 검사와 worker 생성을 수행하고,
 watcher/worker에는 lease FD를 넘기지 않는다. lease 대기는 기본 60초 후
 실패한다. 3초 안에 죽은 worker의 로그 tail을 출력한 뒤 즉시 실패한다.
 
@@ -288,29 +311,28 @@ bash experiments/cluster/run_tofu_14b_h100.sh
 
 두 명령은 `setup_group_volume.sh`의 idempotent 환경 검사를 먼저 수행하고,
 fidelity, enqueue, worker, monitor, aggregate, LaTeX까지 이어서 실행한다.
-7B 실행기는 실행한 호스트의 빈 GPU 전체에 worker를 띄운다. 14B 실행기는
-실행한 호스트에서 **GPU 0 worker 1개만 실행**한다. H100 4대 전체를 자동
-활성화하지 않는다. 두 원클릭 런처 모두
+7B와 14B 실행기는 모두 실행한 호스트의 빈 GPU 전체에 worker를 띄운다.
+H100 4장이 보이면 독립 queue unit을 최대 4개 병렬 처리한다. 두 원클릭 런처 모두
 hostname/fleet assignment에 의존하지 않으며 monitor가 failed unit의 로그를
-launcher 터미널에 표시한다. 14B unit 자체도
-`CUDA_VISIBLE_DEVICES=0`인 단일-GPU 실행이며 내부 8-GPU sharding을 사용하지
-않는다.
+launcher 터미널에 표시한다. 각 14B unit 자체는 worker가 배정한
+`CUDA_VISIBLE_DEVICES=<gpu>` 한 장을 사용하며 내부 multi-GPU sharding은
+사용하지 않는다.
 
 원클릭 launcher 로그:
 
 ```text
-/group-volume/fdmu/runs/logs/cluster/launcher_qwen25_7b_<host>_current.out
-/group-volume/fdmu/runs/logs/cluster/launcher_qwen25_14b_<host>_current.out
+/group-volume/fdmu/runs/users/<user>/logs/cluster/launcher_qwen25_7b_<host>_current.out
+/group-volume/fdmu/runs/users/<user>/logs/cluster/launcher_qwen25_14b_<host>_current.out
 ```
 
 단계별 `h100_campaign.sh` 로그는
-`/group-volume/fdmu/runs/logs/channel_matrix/`에 남는다. 7B 원클릭 런처는
+`/group-volume/fdmu/runs/users/<user>/logs/channel_matrix/`에 남는다. 7B 원클릭 런처는
 aggregate 뒤에 CPU-only PDF-v4 backfill을 실행하며, 논문에 넣을 최신 형식은
 다음 두 파일이다.
 
 ```text
-/group-volume/fdmu/runs/channel_matrix_7b/aggregate/paper_v4/table1_core_evidence_qwen25_7b.tex
-/group-volume/fdmu/runs/channel_matrix_7b/aggregate/paper_v4/table2_robustness_qwen25_7b.tex
+/group-volume/fdmu/runs/users/<user>/channel_matrix_7b/aggregate/paper_v4/table1_core_evidence_qwen25_7b.tex
+/group-volume/fdmu/runs/users/<user>/channel_matrix_7b/aggregate/paper_v4/table2_robustness_qwen25_7b.tex
 ```
 
 기존
@@ -339,9 +361,10 @@ setting-level fidelity가 없는 RQ2 셀은 오류로 중단하지 않고 `--`�
 /group-volume/fdmu/runs/paper_v4/PUBLISH_STATUS.json
 ```
 
-병합은 `.publish.lock`을 사용한다. 이후 다른 사용자가 다른 model/dataset
-setting을 publish하면 기존 setting 행은 유지되고 새 행만 추가된다. 같은
-setting/parent를 재실행한 경우에만 그 행이 갱신된다. publish 마지막에는 위
+사용자별 raw campaign과 per-setting ledger는 서로 격리되지만, 위 최종 논문
+ledger는 전역 `.publish.lock` 아래 병합한다. 이후 다른 사용자가 다른
+model/dataset setting을 publish하면 기존 setting 행은 유지되고 새 행만
+추가된다. 같은 setting/parent를 재실행한 경우에만 그 행이 갱신된다. publish 마지막에는 위
 `table1.tex`과 `table2.tex` 전체가 launcher 로그에 한 번 출력된다.
 
 - `status`: wave2 / wave1_14b / wave_wmdp / wave_llama / wave3_alpha /

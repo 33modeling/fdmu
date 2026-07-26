@@ -11,6 +11,9 @@ readonly _FDMU_GROUP_VOLUME_ROOT
 unset \
   CLUSTER_STORAGE_ROOT \
   CLUSTER_RUNS_ROOT \
+  CLUSTER_RUN_USER \
+  CLUSTER_USER_RUNS_ROOT \
+  CLUSTER_USER_QUEUE_ROOT \
   CLUSTER_RUNTIME_BASE \
   CLUSTER_WORK_ROOT \
   CLUSTER_HF_HOME \
@@ -30,6 +33,8 @@ CLUSTER_USER="${USER:-$(id -un)}"
 CLUSTER_HOST="${HOSTNAME:-$(hostname)}"
 export CLUSTER_STORAGE_ROOT="$GROUP_VOLUME_ROOT/fdmu"
 export CLUSTER_RUNS_ROOT="$CLUSTER_STORAGE_ROOT/runs"
+# shellcheck disable=SC1091
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/user_scope.sh"
 CLUSTER_RUNTIME_BASE="$CLUSTER_STORAGE_ROOT/runtime"
 export CLUSTER_WORK_ROOT="$CLUSTER_RUNTIME_BASE/$CLUSTER_USER/$CLUSTER_HOST"
 
@@ -80,6 +85,8 @@ fi
 
 for protected_path in \
   "$CLUSTER_RUNS_ROOT" \
+  "$CLUSTER_USER_RUNS_ROOT" \
+  "$CLUSTER_USER_QUEUE_ROOT" \
   "$CLUSTER_WORK_ROOT" \
   "$HF_HOME" \
   "$HF_DATASETS_CACHE" \
@@ -108,6 +115,10 @@ ensure_writable_dir() {
 }
 
 ensure_writable_dir "shared state" "$CLUSTER_RUNS_ROOT" \
+  || { return 2 2>/dev/null || exit 2; }
+ensure_writable_dir "user campaign state" "$CLUSTER_USER_RUNS_ROOT" \
+  || { return 2 2>/dev/null || exit 2; }
+ensure_writable_dir "user queue state" "$CLUSTER_USER_QUEUE_ROOT" \
   || { return 2 2>/dev/null || exit 2; }
 
 # Keep every relative `runs/...` fallback on the shared volume too. A real
@@ -157,5 +168,7 @@ for writable_path in \
     || { return 2 2>/dev/null || exit 2; }
 done
 
-printf '[cluster-env] state=%s scratch=%s home=%s tmp=%s hf_readonly=%s\n' \
-  "$CLUSTER_RUNS_ROOT" "$CLUSTER_WORK_ROOT" "$HOME" "$TMPDIR" "$HF_HOME"
+printf '[cluster-env] user=%s scope=%s state=%s queue=%s scratch=%s home=%s tmp=%s hf_readonly=%s\n' \
+  "$CLUSTER_RUN_USER" "$FDMU_RUN_SCOPE" \
+  "$CLUSTER_USER_RUNS_ROOT" "$CLUSTER_USER_QUEUE_ROOT" \
+  "$CLUSTER_WORK_ROOT" "$HOME" "$TMPDIR" "$HF_HOME"

@@ -25,7 +25,26 @@ RUNS_ROOT = Path(
 ).resolve()
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from workqueue import WorkQueue  # noqa: E402
+from workqueue import STATES, WorkQueue  # noqa: E402
+
+
+def _queue_directories(root: Path) -> list[Path]:
+    if not root.is_dir():
+        return []
+    return sorted(
+        path
+        for path in root.rglob("*")
+        if path.is_dir()
+        and all((path / state).is_dir() for state in STATES)
+    )
+
+
+def _status_directories(runs_root: Path) -> list[Path]:
+    directories = [runs_root / "cluster_status"]
+    users = runs_root / "users"
+    if users.is_dir():
+        directories.extend(sorted(users.glob("*/cluster_status")))
+    return [path for path in directories if path.is_dir()]
 
 
 def load_assignments(path: Path) -> dict[str, str]:
@@ -46,6 +65,12 @@ def queue_key(queue_path: str | Path, *, runs_root: Path = RUNS_ROOT) -> str:
                 path = path.relative_to(ROOT)
             except ValueError:
                 return str(path)
+    parts = path.parts
+    if (
+        len(parts) >= 5
+        and parts[:3] == ("runs", "cluster_queue", "users")
+    ):
+        path = Path("runs", "cluster_queue", *parts[4:])
     return str(path).rstrip("/")
 
 
@@ -66,8 +91,11 @@ def main() -> None:
     now = time.time()
 
     print("========== NODES ==========")
-    status_dir = RUNS_ROOT / "cluster_status"
-    snapshots = sorted(status_dir.glob("*.json")) if status_dir.exists() else []
+    snapshots = sorted(
+        snapshot
+        for status_dir in _status_directories(RUNS_ROOT)
+        for snapshot in status_dir.glob("*.json")
+    )
     if not snapshots:
         print("(no node snapshots yet — launch_node.sh starts the watcher)")
     for snap_path in snapshots:
@@ -92,7 +120,7 @@ def main() -> None:
     print()
     print("========== QUEUES ==========")
     queue_root = RUNS_ROOT / "cluster_queue"
-    queues = sorted(p for p in queue_root.iterdir() if p.is_dir()) if queue_root.exists() else []
+    queues = _queue_directories(queue_root)
     if not queues:
         print("(no queues)")
     for queue_path in queues:
@@ -101,7 +129,8 @@ def main() -> None:
         total = sum(counts.values())
         owner = [h for h, q in assignments.items() if queue_key(q) == queue_key(queue_path)]
         owner_txt = f"  [node: {', '.join(owner)}]" if owner else ""
-        print(f"{queue_path.name}{owner_txt}: {counts.get('done', 0)}/{total} done, "
+        queue_label = queue_path.relative_to(queue_root)
+        print(f"{queue_label}{owner_txt}: {counts.get('done', 0)}/{total} done, "
               f"{counts.get('claimed', 0)} running, {counts.get('pending', 0)} pending, "
               f"{counts.get('failed', 0)} failed")
         for row in report["claimed"]:

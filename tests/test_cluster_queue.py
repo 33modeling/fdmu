@@ -320,6 +320,20 @@ def test_worker_env_isolates_one_gpu_per_unit():
     assert cpu_env["TMPDIR"].startswith(f"{storage}/runtime/")
     assert cpu_env["RSUS_DATASETS_CACHE"].startswith(f"{storage}/runtime/")
     assert cpu_env["HOME"].startswith(f"{storage}/runtime/")
+    scoped = worker.build_env(
+        base,
+        {
+            "FDMU_RUN_USER": "alice",
+            "FDMU_CAMPAIGN_RUNS_ROOT": f"{storage}/runs/users/alice",
+        },
+        gpu=1,
+        needs_gpu=True,
+    )
+    assert scoped["FDMU_RUN_USER"] == "alice"
+    assert (
+        scoped["FDMU_CAMPAIGN_RUNS_ROOT"]
+        == f"{storage}/runs/users/alice"
+    )
 
 
 def test_worker_pins_queued_python_to_active_interpreter():
@@ -406,6 +420,27 @@ def test_worker_unit_env_cannot_redirect_shared_cluster_roots():
     assert env["CLUSTER_RUNS_ROOT"] == "/group-volume/fdmu/runs"
     assert env["CLUSTER_WORK_ROOT"] == runtime
     assert env["TMPDIR"] == f"{runtime}/tmp"
+    with pytest.raises(ValueError, match="lacks"):
+        worker.build_env(
+            {},
+            {
+                "FDMU_CAMPAIGN_RUNS_ROOT":
+                    "/group-volume/fdmu/runs/channel_matrix_14b",
+            },
+            gpu=0,
+            needs_gpu=True,
+        )
+    with pytest.raises(ValueError, match="exactly match"):
+        worker.build_env(
+            {},
+            {
+                "FDMU_RUN_USER": "alice",
+                "FDMU_CAMPAIGN_RUNS_ROOT":
+                    "/group-volume/fdmu/runs/users/bob",
+            },
+            gpu=0,
+            needs_gpu=True,
+        )
 
 
 def test_worker_ignores_user_volume_storage():
@@ -439,11 +474,12 @@ def test_model_launchers_pin_queues_without_force_override():
     assert 'export FDMU_WORKER_PYTHON="$PYTHON"' in launch
     assert 'nohup "$PYTHON" -u experiments/cluster/worker.py' in launch
     assert "nohup python -u experiments/cluster/worker.py" not in launch
-    assert 'QUEUE="$CLUSTER_RUNS_ROOT/cluster_queue/wave2"' in seven
-    assert 'QUEUE="$CLUSTER_RUNS_ROOT/cluster_queue/wave1_14b"' in fourteen
+    assert 'QUEUE="$CLUSTER_USER_QUEUE_ROOT/wave2"' in seven
+    assert 'QUEUE="$CLUSTER_USER_QUEUE_ROOT/wave1_14b"' in fourteen
     assert 'launch_node.sh --dedicated-queue "$QUEUE"' in seven
-    assert "WORKER_GPU=0" in fourteen
-    assert 'launch_node.sh --dedicated-queue "$QUEUE" 1' in fourteen
+    assert "WORKER_GPU=0" not in fourteen
+    assert 'launch_node.sh --dedicated-queue "$QUEUE" 1' not in fourteen
+    assert 'launch_node.sh --dedicated-queue "$QUEUE"' in fourteen
     assert "experiments/cluster/monitor_queue.py" in fourteen
     assert "setup_group_volume.sh" in seven
     assert "setup_group_volume.sh" in fourteen
@@ -453,7 +489,7 @@ def test_model_launchers_pin_queues_without_force_override():
     assert "stage aggregate-latex" in fourteen
     assert "h100_campaign.sh aggregate" in seven
     assert "h100_campaign.sh aggregate" in fourteen
-    assert "one dedicated worker on GPU 0" in fourteen
+    assert "one worker per free local GPU" in fourteen
     assert seven.count("--unit aud__qwen25_7b__") == 3
     assert 'RETRY_ARGS+=(--unit "$unit_id")' in fourteen
     assert 'WAIT=0 UNIT_MATCH="$MODEL_ID" UNIT_PREFER="$AUDIT_MATCH"' in seven
@@ -486,7 +522,7 @@ def test_model_launchers_pin_queues_without_force_override():
     )
     assert "require_passed_fidelity" not in enqueue
     assert "each 8-GPU node starts 8 workers" not in enqueue
-    assert "exactly one dedicated worker on GPU 0" in enqueue
+    assert "each free local GPU" in enqueue
     setup = (ROOT / "experiments/cluster/setup_group_volume.sh").read_text(
         encoding="utf-8"
     )
@@ -800,6 +836,45 @@ def test_make_units_calibration_shards_by_author_and_objective():
         assert "--only-objectives" not in u.cmd
 
 
+def test_make_units_pin_requesting_user_result_namespace():
+    cfg = yaml.safe_load(
+        (ROOT / "configs/channel_matrix/7b_tofu.yaml").read_text(encoding="utf-8")
+    )
+    root = "/group-volume/fdmu/runs/users/alice"
+    units = make_units.build_units(
+        cfg,
+        "configs/channel_matrix/7b_tofu.yaml",
+        "audit",
+        ["qwen25_7b"],
+        2,
+        unit_env={
+            "FDMU_RUN_USER": "alice",
+            "FDMU_CAMPAIGN_RUNS_ROOT": root,
+        },
+    )
+
+    assert units
+    assert all(unit.env["FDMU_RUN_USER"] == "alice" for unit in units)
+    assert all(
+        unit.env["FDMU_CAMPAIGN_RUNS_ROOT"] == root for unit in units
+    )
+
+
+def test_channel_runtime_path_prefers_pinned_user_namespace(
+    tmp_path, monkeypatch
+):
+    shared = tmp_path / "shared"
+    user = tmp_path / "users" / "alice"
+    monkeypatch.setenv("CLUSTER_RUNS_ROOT", str(shared))
+    monkeypatch.setenv("FDMU_CAMPAIGN_RUNS_ROOT", str(user))
+
+    resolved = quarantine_failed_audit._runtime_path(
+        "runs/channel_matrix_7b"
+    )
+
+    assert resolved == (user / "channel_matrix_7b").resolve()
+
+
 def test_cancel_moves_pending_and_claimed_units_to_failed(tmp_path):
     q = WorkQueue(tmp_path / "q")
     q.enqueue([_unit("a"), _unit("b")])
@@ -921,11 +996,20 @@ def test_fleet_assignment_mismatch_detection(tmp_path):
     assert not fs.assignment_mismatch(assignments, "node-a", "runs/cluster_queue/wave1")
     assert not fs.assignment_mismatch(
         assignments, "node-a", fs.RUNS_ROOT / "cluster_queue/wave1")
+    assert not fs.assignment_mismatch(
+        assignments,
+        "node-a",
+        fs.RUNS_ROOT / "cluster_queue/users/alice/wave1",
+    )
     # node grabbing another campaign's queue: flagged
     assert fs.assignment_mismatch(assignments, "node-b", "runs/cluster_queue/wave1")
     # unknown host: never flagged
     assert not fs.assignment_mismatch(assignments, "node-c", "runs/cluster_queue/wave1")
     assert fs.load_assignments(tmp_path / "missing.yaml") == {}
+
+    namespaced = tmp_path / "cluster_queue/users/alice/wave1"
+    WorkQueue(namespaced).init()
+    assert fs._queue_directories(tmp_path / "cluster_queue") == [namespaced]
 
 
 def test_node_watch_snapshot_and_worker_parsing(tmp_path):

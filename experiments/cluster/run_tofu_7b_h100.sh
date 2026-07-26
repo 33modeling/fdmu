@@ -9,8 +9,11 @@ AUDIT_MATCH="aud__${MODEL_ID}"
 STORAGE_ROOT=/group-volume/fdmu
 VENV="$STORAGE_ROOT/.venv"
 PYTHON="$VENV/bin/python"
-QUEUE="$STORAGE_ROOT/runs/cluster_queue/wave2"
-LOG_DIR="$STORAGE_ROOT/runs/logs/cluster"
+CLUSTER_RUNS_ROOT="$STORAGE_ROOT/runs"
+# shellcheck disable=SC1091
+source "$ROOT/experiments/cluster/user_scope.sh"
+QUEUE="$CLUSTER_USER_QUEUE_ROOT/wave2"
+LOG_DIR="$CLUSTER_USER_RUNS_ROOT/logs/cluster"
 mkdir -p "$LOG_DIR"
 LOG="$LOG_DIR/launcher_${MODEL_ID}_$(hostname)_$(date -u '+%Y%m%dT%H%M%SZ').out"
 ln -sfn "$(basename "$LOG")" "$LOG_DIR/launcher_${MODEL_ID}_$(hostname)_current.out"
@@ -35,7 +38,7 @@ fi
 # shellcheck disable=SC1091
 source "$ROOT/experiments/cluster/cluster_env.sh"
 
-QUEUE="$CLUSTER_RUNS_ROOT/cluster_queue/wave2"
+QUEUE="$CLUSTER_USER_QUEUE_ROOT/wave2"
 CURRENT_COMMIT=
 printf '[INFO] time=%s stage=environment-bootstrap complete\n' "$(date -u '+%FT%TZ')"
 
@@ -46,8 +49,9 @@ print_context() {
   workers="$(pgrep -af "experiments/cluster/worker.py --queue" || true)"
   printf '[CONTEXT] host=%s model=%s queue=%s commit=%s python=%s\n' \
     "$(hostname)" "$MODEL_ID" "$QUEUE" "$(git rev-parse --short HEAD)" "$PYTHON"
-  printf '[CONTEXT] runs=%s runtime=%s hf=%s log=%s\n' \
-    "$CLUSTER_RUNS_ROOT" "$CLUSTER_WORK_ROOT" "$HF_HOME" "$LOG"
+  printf '[CONTEXT] user=%s runs=%s runtime=%s hf=%s log=%s\n' \
+    "$CLUSTER_RUN_USER" "$FDMU_CAMPAIGN_RUNS_ROOT" \
+    "$CLUSTER_WORK_ROOT" "$HF_HOME" "$LOG"
   if [[ -n "$(git status --porcelain --untracked-files=all)" ]]; then
     printf '[CONTEXT] worktree=dirty\n'
     git status --short --untracked-files=all
@@ -109,6 +113,8 @@ assert_clean_retry_commit() {
 
 print_context
 printf '[TOPOLOGY] launcher activates this host only; 7B uses one worker per free local GPU\n'
+printf '[TOPOLOGY] run_user=%s queue=%s results=%s\n' \
+  "$CLUSTER_RUN_USER" "$QUEUE" "$FDMU_CAMPAIGN_RUNS_ROOT"
 printf '[TOPOLOGY] audit_monitor=%s worker_scope=%s; alpha jobs continue independently\n' \
   "$AUDIT_MATCH" "$MODEL_ID"
 
@@ -155,8 +161,8 @@ MODEL_ID="$MODEL_ID" \
 SCALE_LABEL=7B \
   bash experiments/channel_matrix/h100_campaign.sh aggregate
 printf '[RESULT] LaTeX generation complete: %s\n' \
-  "$CLUSTER_RUNS_ROOT/channel_matrix_7b/aggregate/paper_v4/table1_core_evidence_${MODEL_ID}.tex"
+  "$FDMU_CAMPAIGN_RUNS_ROOT/channel_matrix_7b/aggregate/paper_v4/table1_core_evidence_${MODEL_ID}.tex"
 printf '[RESULT] Table 2 LaTeX: %s\n' \
-  "$CLUSTER_RUNS_ROOT/channel_matrix_7b/aggregate/paper_v4/table2_robustness_${MODEL_ID}.tex"
+  "$FDMU_CAMPAIGN_RUNS_ROOT/channel_matrix_7b/aggregate/paper_v4/table2_robustness_${MODEL_ID}.tex"
 printf '[RESULT] Legacy channel matrix (diagnostic only): %s\n' \
-  "$CLUSTER_RUNS_ROOT/channel_matrix_7b/aggregate/table1_channel_matrix_${MODEL_ID}.tex"
+  "$FDMU_CAMPAIGN_RUNS_ROOT/channel_matrix_7b/aggregate/table1_channel_matrix_${MODEL_ID}.tex"

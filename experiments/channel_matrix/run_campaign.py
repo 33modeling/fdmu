@@ -57,7 +57,9 @@ def _runtime_path(raw: str | Path) -> Path:
     path = Path(raw)
     if path.is_absolute():
         return path
-    runs_root = os.environ.get("CLUSTER_RUNS_ROOT")
+    runs_root = os.environ.get(
+        "FDMU_CAMPAIGN_RUNS_ROOT"
+    ) or os.environ.get("CLUSTER_RUNS_ROOT")
     if runs_root and path.parts and path.parts[0] == "runs":
         return (Path(runs_root) / Path(*path.parts[1:])).resolve()
     return (ROOT / path).resolve()
@@ -598,7 +600,10 @@ def _preserve_fidelity_artifacts(
     *,
     reason: str,
 ) -> Path:
-    runs_root = Path(os.environ.get("CLUSTER_RUNS_ROOT", ROOT / "runs"))
+    runs_root = Path(
+        os.environ.get("FDMU_CAMPAIGN_RUNS_ROOT")
+        or os.environ.get("CLUSTER_RUNS_ROOT", ROOT / "runs")
+    )
     stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S.%fZ")
     destination = (
         runs_root
@@ -800,7 +805,10 @@ def _has_artifacts(out: Path) -> bool:
 
 def _quarantine_partial_audit(out: Path) -> Path:
     """Preserve an interrupted sealed audit before an explicit resume retry."""
-    runs_root = Path(os.environ.get("CLUSTER_RUNS_ROOT", ROOT / "runs"))
+    runs_root = Path(
+        os.environ.get("FDMU_CAMPAIGN_RUNS_ROOT")
+        or os.environ.get("CLUSTER_RUNS_ROOT", ROOT / "runs")
+    )
     forensics = runs_root / "forensics" / "audit-partials"
     stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S.%fZ")
     identity = "__".join(out.parts[-4:])

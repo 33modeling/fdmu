@@ -252,8 +252,11 @@ campaign 산출물이다. 최신 PDF-v4의 최종 Table 1/2 evidence와 동일�
 experiments/channel_matrix/h100_campaign.sh paper-v4`만 실행한다. 후처리는
 완료된 evidence cell을 유지하고 누락 block만 placeholder로 남긴다.
 
-Per-setting ledger는 `<MODEL_ROOT>/aggregate/paper_v4/`에 보존된다. 여러
-실험의 공용 ledger와 최종 표는 `/group-volume/fdmu/runs/paper_v4/`에 있으며,
+Per-setting ledger는 `<MODEL_ROOT>/aggregate/paper_v4/`에 보존된다. 기본
+`MODEL_ROOT`는
+`/group-volume/fdmu/runs/users/<user>/channel_matrix_<scale>`다. 여러
+실험의 사용자별 raw 결과는 서로 격리된다. 전 사용자의 최종 논문 ledger와
+표는 `/group-volume/fdmu/runs/paper_v4/`에 있으며,
 `publish_evidence.py`가 lock 아래 `(setting,parent)` 단위로 병합한다. 다른
 setting 결과를 추가해도 기존 행을 지우지 않는다. terminal에 마지막으로
 출력되는 `===== PAPER TABLE 1/2 =====` 블록이 저장된 공용 최종 LaTeX와
@@ -311,8 +314,8 @@ Queue JSON, log, `.partial.jsonl`, forensics artifact는 실행 상태와 원인
 공통 worker/unit 로그:
 
 ```text
-/group-volume/fdmu/runs/logs/cluster/worker_<host>_gpu<gpu>.out
-/group-volume/fdmu/runs/logs/cluster/<unit>__<host>_gpu<gpu>__try<n>.out
+/group-volume/fdmu/runs/users/<user>/logs/cluster/worker_<host>_gpu<gpu>.out
+/group-volume/fdmu/runs/users/<user>/logs/cluster/<unit>__<host>_gpu<gpu>__try<n>.out
 ```
 
 Claim owner와 heartbeat:

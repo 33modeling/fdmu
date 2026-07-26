@@ -29,6 +29,13 @@ RUNS_ROOT = Path(
         "/group-volume/fdmu/runs",
     )
 ).resolve()
+RUN_USER = os.environ.get("FDMU_RUN_USER") or os.environ.get("USER", "unknown")
+USER_QUEUE_ROOT = Path(
+    os.environ.get(
+        "CLUSTER_USER_QUEUE_ROOT",
+        RUNS_ROOT / "cluster_queue" / "users" / RUN_USER,
+    )
+).resolve()
 
 # setting label -> (campaign config, queue root, first-wave phases)
 CAMPAIGNS = {
@@ -83,7 +90,13 @@ def freeze_state(root: Path, config: dict, key: str) -> tuple[str, str | None]:
 
 def queue_counts(root: Path, queue: str) -> dict[str, int] | None:
     queue_path = Path(queue)
-    if queue_path.parts and queue_path.parts[0] == "runs":
+    if (
+        len(queue_path.parts) >= 3
+        and queue_path.parts[:2] == ("runs", "cluster_queue")
+        and queue_path.parts[2] != "users"
+    ):
+        queue_dir = USER_QUEUE_ROOT / Path(*queue_path.parts[2:])
+    elif queue_path.parts and queue_path.parts[0] == "runs":
         queue_dir = RUNS_ROOT / Path(*queue_path.parts[1:])
     else:
         queue_dir = root / queue_path

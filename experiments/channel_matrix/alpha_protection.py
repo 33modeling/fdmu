@@ -39,7 +39,9 @@ sys.path.insert(0, str(ROOT / "src"))
 
 def _runtime_output_root(cfg: dict) -> Path:
     root = Path(cfg["output_root"])
-    runs_root = os.environ.get("CLUSTER_RUNS_ROOT")
+    runs_root = os.environ.get(
+        "FDMU_CAMPAIGN_RUNS_ROOT"
+    ) or os.environ.get("CLUSTER_RUNS_ROOT")
     if root.is_absolute():
         return root
     if runs_root and root.parts and root.parts[0] == "runs":
@@ -506,7 +508,10 @@ def _output_dir(cfg: dict, phase: str, model_id: str, author: int, seed: int) ->
 
 def _quarantine_partial_alpha(out: Path) -> Path:
     """Preserve an alpha run that cannot resume under the current contract."""
-    runs_root = Path(os.environ.get("CLUSTER_RUNS_ROOT", ROOT / "runs"))
+    runs_root = Path(
+        os.environ.get("FDMU_CAMPAIGN_RUNS_ROOT")
+        or os.environ.get("CLUSTER_RUNS_ROOT", ROOT / "runs")
+    )
     forensics = runs_root / "forensics" / "alpha-partials"
     stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S.%fZ")
     identity = "__".join(out.parts[-5:])

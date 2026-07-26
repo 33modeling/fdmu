@@ -53,12 +53,20 @@ data = yaml.safe_load(cfg.read_text(encoding="utf-8")) if cfg.exists() else {}
 print((data.get("assignments") or {}).get("${HOST}", ""))
 PY
 )"
-if [[ "${ASSIGNED}" == runs/* ]]; then
+if [[ "${ASSIGNED}" == runs/cluster_queue/users/* ]]; then
+  ASSIGNED="$CLUSTER_RUNS_ROOT/${ASSIGNED#runs/}"
+elif [[ "${ASSIGNED}" == runs/cluster_queue/* ]]; then
+  ASSIGNED="$CLUSTER_USER_QUEUE_ROOT/${ASSIGNED#runs/cluster_queue/}"
+elif [[ "${ASSIGNED}" == runs/* ]]; then
   ASSIGNED="$CLUSTER_RUNS_ROOT/${ASSIGNED#runs/}"
 fi
 
 QUEUE="${1:-}"
-if [[ "${QUEUE}" == runs/* ]]; then
+if [[ "${QUEUE}" == runs/cluster_queue/users/* ]]; then
+  QUEUE="$CLUSTER_RUNS_ROOT/${QUEUE#runs/}"
+elif [[ "${QUEUE}" == runs/cluster_queue/* ]]; then
+  QUEUE="$CLUSTER_USER_QUEUE_ROOT/${QUEUE#runs/cluster_queue/}"
+elif [[ "${QUEUE}" == runs/* ]]; then
   QUEUE="$CLUSTER_RUNS_ROOT/${QUEUE#runs/}"
 fi
 if (( DEDICATED_QUEUE == 1 )); then
@@ -67,13 +75,13 @@ if (( DEDICATED_QUEUE == 1 )); then
     exit 2
   fi
   case "${QUEUE%/}/" in
-    "${CLUSTER_RUNS_ROOT%/}/cluster_queue/"*) ;;
+    "${CLUSTER_USER_QUEUE_ROOT%/}/"*) ;;
     *)
-      echo "dedicated queue must be under ${CLUSTER_RUNS_ROOT}/cluster_queue: ${QUEUE}" >&2
+      echo "dedicated queue must be under ${CLUSTER_USER_QUEUE_ROOT}: ${QUEUE}" >&2
       exit 2
       ;;
   esac
-  echo "node=${HOST} mode=dedicated queue=${QUEUE}; fleet hostname assignment not required"
+  echo "node=${HOST} user=${CLUSTER_RUN_USER} mode=dedicated queue=${QUEUE}; fleet hostname assignment not required"
 else
   if [[ -z "${ASSIGNED}" ]]; then
     echo "node ${HOST} has no assignment in configs/cluster/fleet.yaml" >&2
@@ -132,12 +140,12 @@ if (( ${#CONFLICTS[@]} > 0 )); then
   exit 2
 fi
 
-LOGDIR="$CLUSTER_RUNS_ROOT/logs/cluster"
+LOGDIR="$CLUSTER_USER_RUNS_ROOT/logs/cluster"
 mkdir -p "${LOGDIR}"
 "$PYTHON" experiments/cluster/workqueue.py init --queue "${QUEUE}"
 
 nohup "$PYTHON" -u experiments/cluster/node_watch.py --replace \
-  --status-dir "$CLUSTER_RUNS_ROOT/cluster_status" \
+  --status-dir "$CLUSTER_USER_RUNS_ROOT/cluster_status" \
   8>&- >> "${LOGDIR}/watch_${HOST}.out" 2>&1 &
 echo "node=${HOST} queue=${QUEUE} gpus=${NGPU}/${DETECTED} wait=${WAIT} unit_match=${UNIT_MATCH:-all} unit_prefer=${UNIT_PREFER:-none} watcher_pid=$!"
 

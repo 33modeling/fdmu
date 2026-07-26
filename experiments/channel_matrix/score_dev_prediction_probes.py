@@ -42,7 +42,9 @@ SCHEMA = "dev-prediction-probe-v1"
 
 def _output_root(cfg: dict) -> Path:
     root = Path(cfg["output_root"])
-    runs_root = os.environ.get("CLUSTER_RUNS_ROOT")
+    runs_root = os.environ.get(
+        "FDMU_CAMPAIGN_RUNS_ROOT"
+    ) or os.environ.get("CLUSTER_RUNS_ROOT")
     if root.is_absolute():
         return root
     if runs_root and root.parts and root.parts[0] == "runs":
