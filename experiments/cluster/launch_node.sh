@@ -7,6 +7,8 @@ set -Eeuo pipefail
 #
 #   bash experiments/cluster/launch_node.sh              # queue from configs/cluster/fleet.yaml
 #   bash experiments/cluster/launch_node.sh <queue-dir>  # explicit (must match assignment)
+#   bash experiments/cluster/launch_node.sh --dedicated-queue <queue-dir>
+#                                      # model launcher pins a dedicated host
 #   WAIT=0 ...                                           # workers exit when queue drains
 #
 # Stop this node's workers:  pkill -f "experiments/cluster/worker.py --queue"
@@ -15,6 +17,11 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 VENV="/group-volume/fdmu/.venv"
 WAIT="${WAIT:-1}"
 HOST="$(hostname)"
+DEDICATED_QUEUE=0
+if [[ "${1:-}" == "--dedicated-queue" ]]; then
+  DEDICATED_QUEUE=1
+  shift
+fi
 
 if [[ ! -f "${VENV}/bin/activate" ]]; then
   echo "missing official environment: ${VENV}/bin/activate" >&2
@@ -40,20 +47,35 @@ if [[ "${ASSIGNED}" == runs/* ]]; then
 fi
 
 QUEUE="${1:-}"
-if [[ -z "${ASSIGNED}" ]]; then
-  echo "node ${HOST} has no assignment in configs/cluster/fleet.yaml" >&2
-  echo "Add and commit the exact queue assignment before launching this node." >&2
-  exit 2
-fi
-if [[ -z "${QUEUE}" ]]; then
-  QUEUE="${ASSIGNED}"
-elif [[ "${QUEUE%/}" != "${ASSIGNED%/}" ]]; then
-  echo "refusing: ${HOST} is assigned to ${ASSIGNED}, not ${QUEUE}." >&2
-  echo "Fix and commit configs/cluster/fleet.yaml before launching this node." >&2
-  exit 2
-fi
 if [[ "${QUEUE}" == runs/* ]]; then
   QUEUE="$CLUSTER_RUNS_ROOT/${QUEUE#runs/}"
+fi
+if (( DEDICATED_QUEUE == 1 )); then
+  if [[ -z "${QUEUE}" ]]; then
+    echo "--dedicated-queue requires an explicit queue directory" >&2
+    exit 2
+  fi
+  case "${QUEUE%/}/" in
+    "${CLUSTER_RUNS_ROOT%/}/cluster_queue/"*) ;;
+    *)
+      echo "dedicated queue must be under ${CLUSTER_RUNS_ROOT}/cluster_queue: ${QUEUE}" >&2
+      exit 2
+      ;;
+  esac
+  echo "node=${HOST} mode=dedicated queue=${QUEUE}; fleet hostname assignment not required"
+else
+  if [[ -z "${ASSIGNED}" ]]; then
+    echo "node ${HOST} has no assignment in configs/cluster/fleet.yaml" >&2
+    echo "Add and commit the exact queue assignment before launching this node." >&2
+    exit 2
+  fi
+  if [[ -z "${QUEUE}" ]]; then
+    QUEUE="${ASSIGNED}"
+  elif [[ "${QUEUE%/}" != "${ASSIGNED%/}" ]]; then
+    echo "refusing: ${HOST} is assigned to ${ASSIGNED}, not ${QUEUE}." >&2
+    echo "Fix and commit configs/cluster/fleet.yaml before launching this node." >&2
+    exit 2
+  fi
 fi
 
 if ! command -v nvidia-smi >/dev/null; then

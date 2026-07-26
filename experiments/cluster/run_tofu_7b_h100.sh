@@ -98,7 +98,7 @@ stage fidelity-contract-validation
 stage enqueue
 bash experiments/cluster/enqueue_table12.sh audit-7b
 stage worker-launch
-bash experiments/cluster/launch_node.sh "$QUEUE"
+bash experiments/cluster/launch_node.sh --dedicated-queue "$QUEUE"
 printf '[RESULT] worker-launch complete; active local workers:\n'
 pgrep -af "experiments/cluster/worker.py --queue" || true
 "$PYTHON" experiments/cluster/workqueue.py status --brief --queue "$QUEUE"

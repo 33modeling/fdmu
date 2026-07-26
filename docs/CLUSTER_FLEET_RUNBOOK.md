@@ -206,6 +206,9 @@ bash experiments/cluster/enqueue_table12.sh rwku-audit   # RWKU audit → wave_r
 각 실행기는 GPU 0에서 fidelity certificate를 먼저 생성·검증한 뒤 audit을
 적재하며, certificate 누락으로 실패했던 해당 모델 audit unit만 재대기시킨다.
 중복 unit id는 다시 적재되지 않으며 빈 GPU마다 워커 하나가 시작된다.
+7B 원클릭 런처는 `wave2`를 코드에서 고정한 dedicated mode이므로 실행 머신의
+hostname을 `fleet.yaml`에 다시 등록할 필요가 없다. 다른 큐 worker가 같은
+머신에서 실행 중이면 GPU 이중 사용을 막기 위해 계속 중단한다.
 
 ```bash
 bash experiments/cluster/run_tofu_7b_h100.sh
