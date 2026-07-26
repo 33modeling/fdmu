@@ -38,6 +38,9 @@ requeue하지 않는다.
 | calibration 로그 | `<RUN_ROOT>/parent_calibration/launcher_logs/current.log` |
 | sweep 로그 | `<RUN_ROOT>/joint_sweep/launcher_logs/current.log` |
 | sweep 이벤트 | `<RUN_ROOT>/joint_sweep/events.jsonl` |
+| 실시간 중간 요약 | `<RUN_ROOT>/joint_sweep/live/LIVE_STATUS.md` |
+| 기계 판독 중간 요약 | `<RUN_ROOT>/joint_sweep/live/LIVE_STATUS.json` |
+| 중간 요약 변경 이력 | `<RUN_ROOT>/joint_sweep/live/history.jsonl` |
 | 완료 trial 비교 | `<RUN_ROOT>/joint_sweep/trials/*/joint_comparison.json` |
 | unit 실행 로그 | `<RUN_ROOT>/joint_sweep/trials/*/logs/units/*/attempt-*.log` |
 | unit 종료 상태 | `<RUN_ROOT>/joint_sweep/trials/*/logs/units/*/attempt-*.json` |
@@ -47,6 +50,17 @@ requeue하지 않는다.
 | fidelity 로그 | `<RUN_ROOT>/fidelity/launcher_logs/current.log` |
 | finalize 로그 | `<RUN_ROOT>/final/launcher_logs/current.log` |
 | 최종 LaTeX | `<RUN_ROOT>/final/table1.tex` |
+
+현재 GPU 실행을 재시작하지 않고 read-only watcher만 붙일 때:
+
+```bash
+nohup bash local_run/watch_tofu_1p5b_intermediate.sh \
+  >> /rdata/minsoo3.kim/results/paper/tofu_qwen25_1p5b/joint_sweep/live/watcher.log 2>&1 &
+```
+
+watcher는 기존 artifact를 읽고 `joint_sweep/live/`만 갱신한다. Partial cell
+결과는 `descriptive_only`이며 incomplete roster로 trial을 선택하지 않는다.
+다음 원클릭 sweep부터 watcher는 자동으로 시작된다.
 
 ## H100: 7B와 14B
 

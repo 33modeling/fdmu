@@ -88,6 +88,7 @@ on_error() {
   print_context
   "$PYTHON" experiments/cluster/workqueue.py status --brief --queue "$QUEUE" 2>&1 || true
   printf '[ERROR] launcher log retained at %s\n' "$LOG"
+  printf '[GUIDE] %s/docs/LLM_RUN_DIAGNOSTICS.md\n' "$ROOT"
   exit "$code"
 }
 trap on_error ERR

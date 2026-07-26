@@ -56,6 +56,7 @@ on_error() {
   df -h "$CLUSTER_RUNS_ROOT" "$CLUSTER_WORK_ROOT" 2>&1 || true
   "$PYTHON" experiments/cluster/workqueue.py status --brief --queue "$QUEUE" 2>&1 || true
   printf '[ERROR] full launcher log: %s\n' "$LOG"
+  printf '[GUIDE] %s/docs/LLM_RUN_DIAGNOSTICS.md\n' "$ROOT"
   exit "$code"
 }
 trap on_error ERR

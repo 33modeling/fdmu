@@ -45,6 +45,7 @@ on_error() {
       --format=csv,noheader 2>&1 || true
   fi
   printf '[ERROR] unified pipeline log retained at %s\n' "$PIPELINE_LOG"
+  printf '[GUIDE] %s/docs/LLM_RUN_DIAGNOSTICS.md\n' "$ROOT"
   exit "$code"
 }
 trap on_error ERR

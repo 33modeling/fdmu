@@ -106,6 +106,16 @@ tail -f /rdata/minsoo3.kim/results/paper/tofu_qwen25_1p5b/joint_sweep/events.jso
 tail -f /rdata/minsoo3.kim/results/paper/tofu_qwen25_1p5b/fidelity/launcher_logs/current.log
 ```
 
+진행 중 sweep의 중간 결과는 자동으로 아래 두 파일에 갱신된다.
+
+```text
+<RUN_ROOT>/joint_sweep/live/LIVE_STATUS.md
+<RUN_ROOT>/joint_sweep/live/LIVE_STATUS.json
+```
+
+현재 실행을 재시작하지 않고 watcher만 붙이는 방법과 로그별 원인 분석 순서는
+[`docs/LLM_RUN_DIAGNOSTICS.md`](../docs/LLM_RUN_DIAGNOSTICS.md)를 따른다.
+
 `PARENT_CALIBRATION_UNRESOLVED`나 `NO_JOINT_DOMINANCE`는 숨길 오류가 아니라
 유효한 종료 결과다. Freeze 파일을 손으로 채우거나 target 결과를 보고 sweep을
 확장하지 않는다.

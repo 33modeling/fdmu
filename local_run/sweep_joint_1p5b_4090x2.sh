@@ -109,6 +109,21 @@ if command -v nvidia-smi >/dev/null; then
   fi
 fi
 
+if [[ "${INTERMEDIATE_WATCHER:-1}" == "1" ]]; then
+  WATCHER_LOG="$RESULTS_ROOT/live/watcher.log"
+  mkdir -p "$(dirname "$WATCHER_LOG")"
+  nohup env \
+    RUN_ROOT="$RUN_ROOT" \
+    JOINT_ROOT="$RESULTS_ROOT" \
+    SPEC="$SPEC" \
+    PYTHON="$PYTHON" \
+    INTERMEDIATE_INTERVAL_SECONDS="${INTERMEDIATE_INTERVAL_SECONDS:-30}" \
+    bash local_run/watch_tofu_1p5b_intermediate.sh --parent-pid "$$" \
+    >> "$WATCHER_LOG" 2>&1 &
+  printf '[live] watcher_pid=%s markdown=%s/live/LIVE_STATUS.md json=%s/live/LIVE_STATUS.json\n' \
+    "$!" "$RESULTS_ROOT" "$RESULTS_ROOT"
+fi
+
 exec "$PYTHON" -u experiments/paper/run_joint_dev_sweep.py \
   --spec "$SPEC" \
   --gpus "$GPU_IDS" \
