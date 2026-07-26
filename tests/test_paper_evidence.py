@@ -41,12 +41,18 @@ def _config(tmp_path: Path):
             "alpha": 0.05,
             "minimum_support_units": 2,
             "rq1_iut": {
-                "effects": ["joint_rho", "joint_minus_s0", "joint_minus_s1", "tail_lift"],
+                "effects": [
+                    "joint_rho",
+                    "joint_minus_s0",
+                    "joint_minus_s1",
+                    "g_ctl",
+                    "tail_lift",
+                ],
                 "favorable_sign": "positive",
                 "minimum_tail_coverage": 0.80,
             },
             "rq2_iut": {
-                "effects": ["f_rho_minus_0p80", "f_k_minus_0p70", "g_h", "g_ctl"],
+                "effects": ["f_rho_minus_0p80", "f_k_minus_0p70"],
                 "favorable_sign": "positive",
             },
             "rq3_iut": {

@@ -99,6 +99,160 @@ def _parent_order(contract: EvidenceContract, parents: Sequence[str]) -> list[tu
     return grouped
 
 
+def _parent_rows(
+    lines: list[str],
+    contract: EvidenceContract,
+    parents: Sequence[str],
+    columns: int,
+    cell_fn,
+) -> None:
+    for group_index, (group_id, members) in enumerate(
+        _parent_order(contract, parents)
+    ):
+        if group_index:
+            lines.append(r"\addlinespace[2pt]")
+        heading = READOUT_HEADINGS.get(group_id)
+        if heading:
+            lines.append(rf"\multicolumn{{{columns}}}{{@{{}}l}}{{{heading}}} \\")
+        for parent in members:
+            label = PARENT_LABELS.get(parent, parent)
+            lines.append(f"{label} & " + " & ".join(cell_fn(parent)) + r" \\")
+
+
+def _sub_ep(decision: Mapping[str, Any] | None, field: str) -> str:
+    if decision is None:
+        return PLACEHOLDER
+    eligible = bool(decision.get("eligible"))
+    condition = decision.get(field)
+    if not eligible or condition is None:
+        return f"{'y' if eligible else 'n'}/--"
+    return f"y/{'y' if condition else 'n'}"
+
+
+def _alpha_cell(row: EvidenceRow) -> str:
+    selection = row.prediction_selection
+    if selection.alpha is None:
+        return PLACEHOLDER
+    dagger = r"^\dagger" if selection.fallback else ""
+    return rf"${selection.alpha:.2f}{dagger}$"
+
+
+def _derived_endpoint_rho(row: EvidenceRow, endpoint: str) -> str:
+    gain = row.rq1.joint_minus_s0 if endpoint == "s0" else row.rq1.joint_minus_s1
+    if row.rq1.joint_rho.estimate is None or gain.estimate is None:
+        return PLACEHOLDER
+    return _fmt(row.rq1.joint_rho.estimate - gain.estimate)
+
+
+def _swap_cell(row: EvidenceRow) -> str:
+    effect = row.rq1.swap_delta
+    if (
+        effect.estimate is None
+        or effect.lower_bound is None
+        or effect.upper_bound is None
+    ):
+        return PLACEHOLDER
+    return (
+        f"{_fmt(effect.estimate, sign=True)} "
+        f"[{_fmt(effect.lower_bound, sign=True)}, "
+        f"{_fmt(effect.upper_bound, sign=True)}]"
+    )
+
+
+def _recall_cell(value: float | None) -> str:
+    return PLACEHOLDER if value is None else f"{value:.2f}"
+
+
+def _fidelity_margin_cell(
+    summary: Mapping[str, Any] | None,
+    value_key: str,
+    bound_key: str,
+    tau: float,
+) -> str:
+    if not summary or summary.get(value_key) is None:
+        return PLACEHOLDER
+    value = float(summary[value_key])
+    bound = summary.get(bound_key)
+    if bound is None:
+        return f"{value:.2f} [{PLACEHOLDER}]"
+    return f"{value:.2f} [{float(bound) - tau:+.2f}]"
+
+
+def _cost_entries(
+    summary: Mapping[str, Any] | None,
+) -> dict[str, Mapping[str, Any]]:
+    entries: dict[str, Mapping[str, Any]] = {}
+    if not summary:
+        return entries
+    for entry in summary.get("cost", ()) or ():
+        if not isinstance(entry, Mapping):
+            continue
+        profiler = str(entry.get("profiler", ""))
+        current = entries.get(profiler)
+        if current is None or int(entry.get("R", 0)) > int(current.get("R", 0)):
+            entries[profiler] = entry
+    return entries
+
+
+def _cost_number(
+    entry: Mapping[str, Any] | None, key: str, *, digits: int = 1
+) -> str:
+    if not entry or entry.get(key) is None:
+        return PLACEHOLDER
+    return f"{float(entry[key]):.{digits}f}"
+
+
+def _fidelity_ep(
+    contract: EvidenceContract,
+    setting_id: str,
+    summary: Mapping[str, Any] | None,
+) -> str:
+    if setting_id not in contract.fidelity_inputs:
+        return r"\textit{n.a.}"
+    if not summary or type(summary.get("certificate_passed")) is not bool:
+        return "n/--"
+    return "y/y" if summary["certificate_passed"] else "y/n"
+
+
+def _fidelity_count(
+    contract: EvidenceContract,
+    setting_id: str,
+    setting_report: Mapping[str, Any],
+) -> str:
+    if setting_id not in contract.fidelity_inputs:
+        rq2 = setting_report["rq2"]
+        if rq2.get("planned", 0) > 0:
+            return f"{rq2['eligible']}/{rq2['passed']}"
+        return r"\textit{n.a.}"
+    rq2 = setting_report["rq2"]
+    return f"{rq2['eligible']}/{rq2['passed']}"
+
+
+def _arm_absolute_cell(row: EvidenceRow, comparator: str) -> str:
+    if comparator == "no_repair":
+        return _absolute_cell(row, comparator)
+    joint = {
+        "mean": row.rq3.profile_mean,
+        "cvar95": row.rq3.profile_cvar95,
+    }
+    effects = row.rq3.comparisons.get(comparator, {})
+    values: list[float] = []
+    for outcome in PROTECTION_OUTCOMES:
+        effect = effects.get(outcome)
+        if joint[outcome] is None or effect is None or effect.estimate is None:
+            return PLACEHOLDER
+        values.append(float(joint[outcome]) - effect.estimate)
+    return f"{_fmt(values[0])}; {_fmt(values[1])}"
+
+
+def _feasible_arms_cell(row: EvidenceRow) -> str:
+    return "5/5" if row.rq3.all_five_arms_feasible else f"{PLACEHOLDER}/5"
+
+
+def _slack_value(value: float | None) -> str:
+    return PLACEHOLDER if value is None else _fmt(value, digits=2, sign=True)
+
+
 def _fidelity_cell(
     row: EvidenceRow | None,
     fidelity: Mapping[str, Any] | None,
@@ -208,7 +362,10 @@ def _updates_cell(row: EvidenceRow) -> str:
     rolled = row.rq3.repair_rollbacks
     if accepted is None or rolled is None:
         return PLACEHOLDER
-    return f"{accepted:.0f}/{rolled:.0f}"
+    def compact(value: float) -> str:
+        return f"{value:.2f}".rstrip("0").rstrip(".")
+
+    return f"{compact(accepted)}/{compact(rolled)}"
 
 
 def render_core_evidence_table(
@@ -218,7 +375,7 @@ def render_core_evidence_table(
     *,
     fidelity: Mapping[str, Mapping[str, Any]] | None = None,
 ) -> str:
-    """Render ``tab:core-evidence`` (per-parent panels A and B)."""
+    """Render the five claim-bearing tables in the current paper contract."""
     table = contract.tables.get("main_core_evidence")
     if table is None:
         raise EvidenceValidationError("contract does not register main_core_evidence")
@@ -227,114 +384,262 @@ def render_core_evidence_table(
     lines = [
         "% Generated by experiments/paper/build_evidence.py; do not edit by hand.",
         "% Incomplete evidence remains an explicit \\tblph placeholder.",
-        r"\begin{table*}[!t]",
-        r"\caption{\textbf{Claim-bearing evidence by parent.}",
-        r"RQ1 requires positive joint prediction, positive gains over both components,",
-        r"and above-chance tail lift with at least 80\% coverage. RQ2 requires the",
-        r"predeclared exact-energy fidelity floors, positive added value beyond",
-        r"proximity, and a positive gain over the strongest simple control. RQ3 requires eight",
-        r"$\Delta$NLL superiority bounds, four native-metric non-inferiority bounds, and",
-        r"all-arm feasibility. \texttt{E/P} denotes eligible/pass.}",
-        r"\label{tab:core-evidence}",
-        r"\centering",
-        r"\scriptsize",
-        r"\setlength{\tabcolsep}{2.6pt}",
     ]
+
+    def decision(setting_id: str, parent: str, claim: str):
+        record = decisions.get((setting_id, parent))
+        return record.get(claim) if record else None
+
+    # Table I: prospective prediction and the RQ1 rank condition.
     for setting_id in table.settings:
         setting = contract.settings[setting_id]
-        setting_fidelity = fidelity.get(setting_id)
-        grouped = _parent_order(contract, setting.parents)
-
+        lines += [
+            r"\begin{table*}[!t]",
+            r"\caption{\textbf{Prospective damage prediction (RQ1, rank condition):",
+            r"the sealed mixture against its own ingredients.} Scores are sealed",
+            r"before parent runs. Point correlations for both endpoints, the sealed",
+            r"mixture with its one-sided 95\% lower bound, and paired gains over",
+            r"both endpoints and the frozen simple control are shown.",
+            r"\texttt{E/P} denotes eligible/pass.}",
+            r"\label{tab:pred-value}",
+            r"\centering",
+            r"\small",
+            r"\setlength{\tabcolsep}{5pt}",
+        ]
         lines.append(r"\resizebox{\textwidth}{!}{%")
-        lines.append(r"\begin{tabular}{@{}lccccccc@{}}")
+        lines.append(r"\begin{tabular}{@{}lcccccccc@{}}")
         lines.append(r"\toprule")
         lines.append(
-            r"\multicolumn{8}{@{}l}{\textbf{A. Prospective prediction and "
+            r"\multicolumn{9}{@{}l}{\textbf{Prospective prediction "
             rf"loss-shake validation ({setting.dataset}, {setting.model})}}}} \\"
         )
         lines.append(
-            r"Parent & Joint $\rho$ [LB] & $\min(g_G,g_H)$ [min LB] &"
-            r" $f_\rho/f_K$ [margin LB] & $g_{\rm ctl}$ [LB] &"
-            r" $L_{\rm tail}$ [LB]; eligible $n/N$ & RQ1 E/P & RQ2 E/P \\"
+            r"Parent & $\widehat\alpha_{\mathrm{pred}}$ & $S_0$ & $S_1$ (prox.) &"
+            r" $S_{\widehat\alpha_{\mathrm{pred}}}$ (ours) [LB] &"
+            r" $g_G$ [LB] & $g_H$ [LB] & $g_{\rm ctl}$ [LB] & Rank E/P \\"
         )
         lines.append(r"\midrule")
-        for group_index, (group_id, members) in enumerate(grouped):
-            if group_index:
-                lines.append(r"\addlinespace")
-            heading = READOUT_HEADINGS.get(group_id)
-            if heading:
-                lines.append(rf"\multicolumn{{8}}{{@{{}}l}}{{{heading}}} \\")
-            for parent in members:
-                key = (setting_id, parent)
-                row = ledger.rows.get(key)
-                decision = decisions.get(key)
-                rq1_decision = decision["rq1"] if decision else None
-                rq2_decision = decision["rq2"] if decision else None
-                label = PARENT_LABELS.get(parent, parent)
-                if row is None:
-                    cells = [PLACEHOLDER] * 5 + [
-                        _ep(rq1_decision),
-                        _ep(rq2_decision),
-                    ]
-                    lines.append(f"{label} & " + " & ".join(cells) + r" \\")
-                    continue
-                cells = [
-                    _joint_cell(row),
-                    _min_gain_cell(row),
-                    _fidelity_cell(row, setting_fidelity),
-                    _fmt_effect(row.rq2.g_ctl, bound="lower"),
-                    _tail_cell(row),
-                    _ep(rq1_decision),
-                    _ep(rq2_decision),
-                ]
-                lines.append(f"{label} & " + " & ".join(cells) + r" \\")
+
+        def prediction_cells(parent: str) -> list[str]:
+            row = ledger.rows.get((setting_id, parent))
+            rq1 = decision(setting_id, parent, "rq1")
+            if row is None:
+                return [PLACEHOLDER] * 7 + [_sub_ep(rq1, "rank_pass")]
+            return [
+                _alpha_cell(row),
+                _derived_endpoint_rho(row, "s0"),
+                _derived_endpoint_rho(row, "s1"),
+                _joint_cell(row),
+                _fmt_effect(row.rq1.joint_minus_s0, bound="lower", sign=True),
+                _fmt_effect(row.rq1.joint_minus_s1, bound="lower", sign=True),
+                _fmt_effect(row.rq2.g_ctl, bound="lower", sign=True),
+                _sub_ep(rq1, "rank_pass"),
+            ]
+
+        _parent_rows(lines, contract, setting.parents, 9, prediction_cells)
         lines.append(r"\bottomrule")
         lines.append(r"\end{tabular}}")
+        lines.append(r"\end{table*}")
 
-        lines.append("")
-        lines.append(r"\vspace{3pt}")
+        # Table II: setting-level RQ2 certificate and no-refit swap diagnostic.
+        setting_fidelity = fidelity.get(setting_id)
+        costs = _cost_entries(setting_fidelity)
+        exact = costs.get("exact_energy")
+        shake = costs.get("loss_shake")
+        lines += [
+            "",
+            r"\begin{table*}[t]",
+            r"\caption{\textbf{Loss Susceptibility estimation fidelity against",
+            r"its exact target (RQ2).} Panel A reports the registered setting-level",
+            r"certificate. Panel B substitutes exact gradient energy inside the",
+            r"frozen profile without refitting and is diagnostic only.}",
+            r"\label{tab:loss-susceptibility-fidelity}",
+            r"\centering",
+            r"\footnotesize",
+            r"\setlength{\tabcolsep}{5pt}",
+        ]
         lines.append(r"\resizebox{\textwidth}{!}{%")
-        lines.append(r"\begin{tabular}{@{}lccccccc@{}}")
+        lines.append(r"\begin{tabular}{@{}llccccccc@{}}")
         lines.append(r"\toprule")
         lines.append(
-            r"\multicolumn{8}{@{}l}{\textbf{B. Constraint-matched fixed-budget "
-            rf"protection ({setting.dataset}, {setting.model})}}}} \\"
+            r"\multicolumn{9}{@{}l}{\textbf{A. Estimator versus direct-gradient "
+            r"reference on declared setting-level fidelity support}} \\"
         )
         lines.append(
-            r"Parent & Profile mean; CVaR & No-repair mean; CVaR &"
-            r" $\max_{a,k}\Delta_{a,k}$ [UCB] & $\min_a h_a$ [LB] &"
-            r" min F/U slack & updates/rollback & RQ3 E/P \\"
+            r"Estimator & Access & $f_\rho$ [LB$-\tau_\rho$] &"
+            r" $f_K$ [LB$-\tau_K$] & Split-bank $\rho$ & Survival &"
+            r" Time (s) & Mem (GB) & RQ2 E/P \\"
         )
         lines.append(r"\midrule")
-        for group_index, (group_id, members) in enumerate(grouped):
-            if group_index:
-                lines.append(r"\addlinespace")
-            heading = READOUT_HEADINGS.get(group_id)
-            if heading:
-                lines.append(rf"\multicolumn{{8}}{{@{{}}l}}{{{heading}}} \\")
-            for parent in members:
-                key = (setting_id, parent)
-                row = ledger.rows.get(key)
-                decision = decisions.get(key)
-                rq3_decision = decision["rq3"] if decision else None
-                label = PARENT_LABELS.get(parent, parent)
-                if row is None:
-                    cells = [PLACEHOLDER] * 6 + [_ep(rq3_decision)]
-                    lines.append(f"{label} & " + " & ".join(cells) + r" \\")
-                    continue
-                cells = [
-                    _absolute_cell(row, "joint"),
-                    _absolute_cell(row, "no_repair"),
-                    _max_delta_cell(row),
-                    _min_native_cell(row),
-                    _slack_cell(row),
-                    _updates_cell(row),
-                    _ep(rq3_decision),
-                ]
-                lines.append(f"{label} & " + " & ".join(cells) + r" \\")
+        lines.append(
+            r"Direct-gradient reference & reverse, per-cand. & 1.00 [--] &"
+            rf" 1.00 [--] & -- & -- & {_cost_number(exact, 'time_seconds_median', digits=2)} &"
+            rf" {_cost_number(exact, 'peak_memory_gb_median')} & -- \\"
+        )
+        split = (
+            f"{float(setting_fidelity['split_half_rho']):.2f}"
+            if setting_fidelity and setting_fidelity.get("split_half_rho") is not None
+            else _cost_number(shake, "split_half_rho_median", digits=2)
+        )
+        survival = (
+            f"{float(setting_fidelity['perturbation_survival']):.2f}"
+            if setting_fidelity
+            and setting_fidelity.get("perturbation_survival") is not None
+            else _cost_number(shake, "survival_median", digits=2)
+        )
+        lines.append(
+            r"Loss Susceptibility, $2R$ forward sweeps (\textbf{ours}) & forward-only &"
+            rf" {_fidelity_margin_cell(setting_fidelity, 'f_rho', 'f_rho_lb', FIDELITY_TAU_RHO)} &"
+            rf" {_fidelity_margin_cell(setting_fidelity, 'f_k', 'f_k_lb', FIDELITY_TAU_K)} &"
+            rf" {split} & {survival} &"
+            rf" {_cost_number(shake, 'time_seconds_median', digits=2)} &"
+            rf" {_cost_number(shake, 'peak_memory_gb_median')} &"
+            rf" {_fidelity_ep(contract, setting_id, setting_fidelity)} \\"
+        )
         lines.append(r"\bottomrule")
         lines.append(r"\end{tabular}}")
-    lines.append(r"\end{table*}")
+        lines += [
+            "",
+            r"\vspace{6pt}",
+            r"\begin{tabular}{@{}lcc@{}}",
+            r"\toprule",
+            r"\multicolumn{3}{@{}l}{\textbf{B. $q_G^\star$-substituted mixture",
+            r"inside the frozen profile (diagnostic only)}} \\",
+            r"\midrule",
+            r"Parent & $\Delta\rho_{\mathrm{swap}}$ [95\% CI] &"
+            r" $g_H$ [LB] (Tab.~\ref{tab:pred-value}) \\",
+            r"\midrule",
+        ]
+
+        def swap_cells(parent: str) -> list[str]:
+            row = ledger.rows.get((setting_id, parent))
+            if row is None:
+                return [PLACEHOLDER, PLACEHOLDER]
+            return [
+                _swap_cell(row),
+                _fmt_effect(row.rq1.joint_minus_s1, bound="lower", sign=True),
+            ]
+
+        _parent_rows(lines, contract, setting.parents, 3, swap_cells)
+        lines += [r"\bottomrule", r"\end{tabular}", r"\end{table*}"]
+
+        # Table III: RQ1 harmful-tail condition.
+        lines += [
+            "",
+            r"\begin{table*}[t]",
+            r"\caption{\textbf{Harmful-tail recovery (RQ1, tail condition).}",
+            r"The harmful tail contains the largest positive realized damages.",
+            r"Endpoint and sealed-mixture recall are compared with exact finite-sample",
+            r"chance; lift carries its one-sided 95\% lower bound.}",
+            r"\label{tab:tail-recovery}",
+            r"\centering",
+            r"\small",
+            r"\setlength{\tabcolsep}{5pt}",
+            r"\begin{tabular}{@{}lccccccc@{}}",
+            r"\toprule",
+            r"Parent & Tail-eligible $n/N$ & Chance $q_{\mathrm{tail}}^{\mathrm{eff}}$ &"
+            r" $S_0$ & $S_1$ (prox.) & $S_{\widehat\alpha_{\mathrm{pred}}}$ (ours) &"
+            r" $L_{\mathrm{tail}}$ [LB] & RQ1 E/P \\",
+            r"\midrule",
+        ]
+
+        def tail_cells(parent: str) -> list[str]:
+            row = ledger.rows.get((setting_id, parent))
+            rq1 = decision(setting_id, parent, "rq1")
+            if row is None:
+                return [PLACEHOLDER] * 6 + [_ep(rq1)]
+            tail = row.rq1.tail_lift
+            lift = (
+                f"{_fmt(tail.estimate, sign=True)} "
+                f"[{_fmt(tail.lower_bound, sign=True)}]"
+                if tail.complete_for_gain()
+                else PLACEHOLDER
+            )
+            return [
+                f"{row.rq1.tail_eligible_units}/{row.rq1.reached_valid_units}",
+                _recall_cell(row.rq1.chance_q),
+                _recall_cell(row.rq1.tail_recall_s0),
+                _recall_cell(row.rq1.tail_recall_s1),
+                _recall_cell(row.rq1.tail_recall_joint),
+                lift,
+                _ep(rq1),
+            ]
+
+        _parent_rows(lines, contract, setting.parents, 8, tail_cells)
+        lines += [r"\bottomrule", r"\end{tabular}", r"\end{table*}"]
+
+        # Table IV: RQ3 effect condition.
+        lines += [
+            "",
+            r"\begin{table*}[t]",
+            r"\caption{\textbf{Fixed-budget protection (RQ3, effect condition):",
+            r"allocation is the only free variable.} Damage cells report",
+            r"mean;\,$\mathrm{CVaR}_{.95}$ on common held-out support.}",
+            r"\label{tab:prot-effect}",
+            r"\centering",
+            r"\small",
+            r"\setlength{\tabcolsep}{5pt}",
+            r"\begin{tabular}{@{}lccccccc@{}}",
+            r"\toprule",
+            r"Parent & No repair & Random & $S_0$ & $S_1$ (prox.) &"
+            r" $S_{\widehat\alpha_{\mathrm{pred}}}$ (ours) &"
+            r" $\max\widehat\Delta_{a,k}$ / $\max U^{95}_{a,k}$ & Effect E/P \\",
+            r"\midrule",
+        ]
+
+        def effect_cells(parent: str) -> list[str]:
+            row = ledger.rows.get((setting_id, parent))
+            rq3 = decision(setting_id, parent, "rq3")
+            if row is None:
+                return [PLACEHOLDER] * 6 + [_sub_ep(rq3, "effect_pass")]
+            return [
+                _absolute_cell(row, "no_repair"),
+                _arm_absolute_cell(row, "repeated_random"),
+                _arm_absolute_cell(row, "s0"),
+                _arm_absolute_cell(row, "s1"),
+                _absolute_cell(row, "joint"),
+                _max_delta_cell(row).replace(" [", "/").replace("]", ""),
+                _sub_ep(rq3, "effect_pass"),
+            ]
+
+        _parent_rows(lines, contract, setting.parents, 8, effect_cells)
+        lines += [r"\bottomrule", r"\end{tabular}", r"\end{table*}"]
+
+        # Table V: RQ3 common-support and feasibility contract.
+        lines += [
+            "",
+            r"\begin{table*}[t]",
+            r"\caption{\textbf{Fixed-budget protection (RQ3, contract condition):",
+            r"the comparison is constraint-matched.} Native non-inferiority,",
+            r"forgetting and utility slack, common-support feasibility, and guarded",
+            r"repair updates are reported separately from the damage effect.}",
+            r"\label{tab:prot-contract}",
+            r"\centering",
+            r"\small",
+            r"\setlength{\tabcolsep}{5pt}",
+            r"\begin{tabular}{@{}lcccccc@{}}",
+            r"\toprule",
+            r"Parent & $\min\widehat h_a$ / $\min L^{95}_a$ & Forget slack &"
+            r" Utility slack & Feasible arms & Updates/rollback & RQ3 E/P \\",
+            r"\midrule",
+        ]
+
+        def contract_cells(parent: str) -> list[str]:
+            row = ledger.rows.get((setting_id, parent))
+            rq3 = decision(setting_id, parent, "rq3")
+            if row is None:
+                return [PLACEHOLDER] * 5 + [_ep(rq3)]
+            return [
+                _min_native_cell(row).replace(" [", "/").replace("]", ""),
+                _slack_value(row.rq3.min_forget_margin),
+                _slack_value(row.rq3.min_utility_margin),
+                _feasible_arms_cell(row),
+                _updates_cell(row),
+                _ep(rq3),
+            ]
+
+        _parent_rows(lines, contract, setting.parents, 7, contract_cells)
+        lines += [r"\bottomrule", r"\end{tabular}", r"\end{table*}"]
     return "\n".join(lines) + "\n"
 
 
@@ -410,10 +715,11 @@ def render_robustness_table(
         r"\caption{\textbf{Breadth of the claim across predeclared settings.}",
         r"Each row is one setting on a declared breadth axis; its seven parents",
         r"are fixed in advance and \emph{Plan/done} keeps unfinished rows in the",
-        r"denominator. Each RQ column counts eligible/passing parents of seven.",
-        r"\emph{Chain} is the licensing rule: at least one output-readout and",
-        r"one representation-readout parent eligible and passing RQ1--RQ3 after",
-        r"the predeclared within-readout correction. Stress settings cannot",
+        r"denominator. RQ1 and RQ3 count eligible/passing parents; RQ2 reports",
+        r"the setting's single registered fidelity certificate.",
+        r"\emph{Chain} requires a passing RQ2 certificate plus at least one",
+        r"output-readout and one representation-readout parent passing RQ1 and",
+        r"RQ3 after the predeclared correction. Stress settings cannot",
         r"rescue a primary failure; failure diagnosis lives in",
         r"Table~\ref{tab:robustness-funnel}.}",
         r"\label{tab:robustness}",
@@ -423,7 +729,7 @@ def render_robustness_table(
         r"\resizebox{0.85\textwidth}{!}{%",
         r"\begin{tabular}{@{}llccccc@{}}",
         r"\toprule",
-        r"Axis & Setting & Plan/done & RQ1 E/P & RQ2 E/P & RQ3 E/P & Chain \\",
+        r"Axis & Setting & Plan/done & RQ1 parents & RQ2 cert. & RQ3 parents & Chain \\",
         r"\midrule",
     ]
     claim_lines: list[str] = []
@@ -440,7 +746,6 @@ def render_robustness_table(
         completed = summary["denominators"]["completed_rows"]
 
         rq1 = summary["rq1"]
-        rq2 = summary["rq2"]
         rq3 = summary["rq3"]
 
         profiles_planned = _sum_funnel(rows, "profiles_planned")
@@ -471,18 +776,16 @@ def render_robustness_table(
             )
             if bound is not None
         ]
-        rq2_bounds = [
-            bound
-            for row in rows
-            if row is not None
-            for bound in (
-                row.rq2.f_rho_minus_0p80.lower_bound,
-                row.rq2.f_k_minus_0p70.lower_bound,
-                row.rq2.g_h.lower_bound,
-                row.rq2.g_ctl.lower_bound,
+        setting_fidelity = fidelity.get(setting_id) or {}
+        rq2_bounds = []
+        if setting_fidelity.get("f_rho_lb") is not None:
+            rq2_bounds.append(
+                float(setting_fidelity["f_rho_lb"]) - FIDELITY_TAU_RHO
             )
-            if bound is not None
-        ]
+        if setting_fidelity.get("f_k_lb") is not None:
+            rq2_bounds.append(
+                float(setting_fidelity["f_k_lb"]) - FIDELITY_TAU_K
+            )
         protection_bounds = [
             effect.upper_bound
             for row in rows
@@ -514,7 +817,7 @@ def render_robustness_table(
             setting_cell,
             f"{planned}/{completed}",
             f"{rq1['eligible']}/{rq1['passed']}",
-            f"{rq2['eligible']}/{rq2['passed']}",
+            _fidelity_count(contract, setting_id, summary),
             f"{rq3['eligible']}/{rq3['passed']}",
             chain_cell,
         ]

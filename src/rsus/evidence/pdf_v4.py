@@ -23,6 +23,10 @@ class V4Decision:
     claim_pass: bool
     p_iut: float | None
     reasons: tuple[str, ...]
+    rank_pass: bool | None = None
+    tail_pass: bool | None = None
+    effect_pass: bool | None = None
+    contract_pass: bool | None = None
 
 
 def _gain_complete(effect: Effect) -> bool:
@@ -49,16 +53,19 @@ def _gain_iut(effects: list[Effect], alpha: float) -> tuple[float | None, bool]:
 def decide_rq1(
     evidence: RQ1Evidence,
     *,
+    control_gain: Effect | None = None,
     alpha: float = 0.05,
     minimum_support: int = 2,
     minimum_tail_coverage: float = 0.80,
 ) -> V4Decision:
-    effects = [
+    rank_effects = [
         evidence.joint_rho,
         evidence.joint_minus_s0,
         evidence.joint_minus_s1,
-        evidence.tail_lift,
     ]
+    if control_gain is not None:
+        rank_effects.append(control_gain)
+    effects = [*rank_effects, evidence.tail_lift]
     data_complete = evidence.paired and all(_gain_complete(effect) for effect in effects)
     coverage = (
         evidence.tail_eligible_units / evidence.reached_valid_units
@@ -84,7 +91,11 @@ def decide_rq1(
         (data_complete, evidence.selection_valid, evidence.profile_valid, support_ok,
          coverage >= minimum_tail_coverage)
     )
+    _rank_p, rank_pass = _gain_iut(rank_effects, alpha)
+    _tail_p, tail_pass = _gain_iut([evidence.tail_lift], alpha)
+    tail_pass = tail_pass and coverage >= minimum_tail_coverage
     p_iut, statistical_pass = _gain_iut(effects, alpha)
+    statistical_pass = statistical_pass and tail_pass
     if data_complete and not statistical_pass:
         reasons.append("RQ1 four-way one-sided IUT failed")
     return V4Decision(
@@ -94,6 +105,8 @@ def decide_rq1(
         eligible and statistical_pass,
         p_iut,
         tuple(reasons),
+        rank_pass=rank_pass,
+        tail_pass=tail_pass,
     )
 
 
@@ -203,6 +216,8 @@ def decide_rq3(
     )
 
     p_iut = statistical_pass = None
+    effect_pass: bool | None = None
+    contract_pass: bool | None = None
     if data_complete:
         all_p = [
             effect.p_one_sided
@@ -210,17 +225,15 @@ def decide_rq3(
             if effect.p_one_sided is not None
         ]
         p_iut = intersection_union_p(all_p)
-        statistical_pass = (
-            all(
-                effect.upper_bound is not None and effect.upper_bound < 0.0
-                for effect in damage_effects
-            )
-            and all(
-                effect.lower_bound is not None and effect.lower_bound > 0.0
-                for effect in native_effects
-            )
-            and p_iut <= alpha
+        effect_pass = all(
+            effect.upper_bound is not None and effect.upper_bound < 0.0
+            for effect in damage_effects
         )
+        contract_pass = all(
+            effect.lower_bound is not None and effect.lower_bound > 0.0
+            for effect in native_effects
+        )
+        statistical_pass = effect_pass and contract_pass and p_iut <= alpha
         if not statistical_pass:
             reasons.append("RQ3 twelve-way one-sided IUT failed")
     else:
@@ -232,4 +245,6 @@ def decide_rq3(
         eligible and statistical_pass,
         p_iut,
         tuple(reasons),
+        effect_pass=effect_pass,
+        contract_pass=contract_pass,
     )

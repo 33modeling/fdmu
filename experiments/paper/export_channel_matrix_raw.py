@@ -43,6 +43,7 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "src"))
 
 from rsus.analysis.mixture import channel_mixture_scores, empirical_midrank01  # noqa: E402
+from rsus.analysis.prediction import spearman  # noqa: E402
 from rsus.evidence.schemas import EvidenceValidationError  # noqa: E402
 from rsus import sealing  # noqa: E402
 
@@ -78,8 +79,10 @@ def _load_json(path: Path) -> dict[str, Any]:
     return value
 
 
-def _profile_scores(path: Path) -> tuple[dict[str, float], set[str], dict[str, str]]:
-    """Return (discovery_scores, audit_ids, group_by_id) from a plain artifact.
+def _profile_scores(
+    path: Path,
+) -> tuple[dict[str, float], set[str], dict[str, str], dict[str, Any]]:
+    """Return discovery scores, audit IDs, groups, and the plain artifact.
 
     Audit-fold values are intentionally absent from the plain artifact (they
     live behind the seal ledger); only identities and folds are read here.
@@ -104,7 +107,130 @@ def _profile_scores(path: Path) -> tuple[dict[str, float], set[str], dict[str, s
             )
     if not discovery or not audit_ids:
         raise EvidenceValidationError(f"{path} lacks a two-fold candidate split")
-    return discovery, audit_ids, groups
+    return discovery, audit_ids, groups, payload
+
+
+def _loss_shake_profile_valid(
+    profile: Mapping[str, Any],
+    certificate: Mapping[str, Any],
+    discovery_scores: Mapping[str, float],
+) -> bool:
+    """Validate target-profile integrity without using target outcomes."""
+    if certificate.get("passed") is not True or len(discovery_scores) < 2:
+        return False
+    artifacts = profile.get("artifacts")
+    probe = profile.get("probe")
+    if not isinstance(artifacts, Mapping) or not isinstance(probe, Mapping):
+        return False
+    responses = artifacts.get("direction_responses")
+    direction_count = probe.get("direction_count")
+    if (
+        artifacts.get("schema") != "loss-shake-responses-v1"
+        or not isinstance(responses, list)
+        or isinstance(direction_count, bool)
+        or not isinstance(direction_count, int)
+        or direction_count < 2
+        or direction_count % 2
+        or len(responses) != direction_count
+        or certificate.get("R") != direction_count
+    ):
+        return False
+    try:
+        protocol_matches = (
+            math.isclose(
+                float(probe.get("norm_eta", probe.get("eta"))),
+                float(certificate.get("eta")),
+                rel_tol=0.0,
+                abs_tol=1e-15,
+            )
+            and certificate.get("probe_seed") == probe.get("direction_seed")
+        )
+    except (TypeError, ValueError):
+        return False
+    if not protocol_matches:
+        return False
+
+    discovery_ids = set(discovery_scores)
+    parsed: list[dict[str, float]] = []
+    for response in responses:
+        if not isinstance(response, Mapping) or set(response) != discovery_ids:
+            return False
+        try:
+            values = {
+                candidate_id: float(response[candidate_id])
+                for candidate_id in discovery_ids
+            }
+        except (TypeError, ValueError):
+            return False
+        if not all(math.isfinite(value) for value in values.values()):
+            return False
+        parsed.append(values)
+    dimension = artifacts.get("block_dimension")
+    if isinstance(dimension, bool) or not isinstance(dimension, int) or dimension < 1:
+        return False
+
+    def aggregate(rows: list[dict[str, float]]) -> dict[str, float]:
+        return {
+            candidate_id: dimension
+            * sum(row[candidate_id] ** 2 for row in rows)
+            / len(rows)
+            for candidate_id in discovery_ids
+        }
+
+    midpoint = direction_count // 2
+    full = aggregate(parsed)
+    first = aggregate(parsed[:midpoint])
+    second = aggregate(parsed[midpoint:])
+    if any(
+        not math.isclose(
+            full[candidate_id],
+            float(discovery_scores[candidate_id]),
+            rel_tol=1e-6,
+            abs_tol=1e-10,
+        )
+        for candidate_id in discovery_ids
+    ):
+        return False
+    ordered = sorted(discovery_ids)
+    split_half = spearman(
+        [first[candidate_id] for candidate_id in ordered],
+        [second[candidate_id] for candidate_id in ordered],
+    )
+    thresholds = certificate.get("thresholds") or {}
+    metrics = certificate.get("metrics") or {}
+    try:
+        split_threshold = float(
+            thresholds.get("split_half_rho", thresholds.get("rho_AB"))
+        )
+        survival_threshold = float(
+            thresholds.get(
+                "perturbation_survival",
+                max(
+                    float(thresholds.get("eff_over_eta")),
+                    float(thresholds.get("frac_changed")),
+                ),
+            )
+        )
+    except (TypeError, ValueError):
+        return False
+    survival = metrics.get("perturbation_survival")
+    if survival is None:
+        realized = (metrics.get("eff_over_eta"), metrics.get("frac_changed"))
+        if any(value is None for value in realized):
+            return False
+        survival = min(float(value) for value in realized)
+    try:
+        survival = float(survival)
+    except (TypeError, ValueError):
+        return False
+    return (
+        math.isfinite(split_half)
+        and math.isfinite(survival)
+        and math.isclose(split_threshold, 0.70, abs_tol=1e-12)
+        and math.isclose(survival_threshold, 0.90, abs_tol=1e-12)
+        and split_half >= split_threshold
+        and survival >= survival_threshold
+    )
 
 
 def _sealed_audit_scores(
@@ -156,6 +282,7 @@ def export_prediction(
     ]
     gradient_probe = args.gradient_predictor
     proximity_probe = args.proximity_predictor
+    exact_probe = args.exact_predictor
 
     records: list[dict[str, Any]] = []
     cells = 0
@@ -176,16 +303,16 @@ def export_prediction(
                 seed = match.group(1)
 
                 profile_dir = seed_dir / "profile_artifacts"
-                grad_disc, declared_audit_ids, groups = _profile_scores(
+                grad_disc, declared_audit_ids, groups, grad_profile = _profile_scores(
                     profile_dir / f"{gradient_probe}.json"
                 )
-                prox_disc, prox_audit_ids, prox_groups = _profile_scores(
+                prox_disc, prox_audit_ids, prox_groups, _ = _profile_scores(
                     profile_dir / f"{proximity_probe}.json"
                 )
                 groups.update(prox_groups)
                 control_disc: dict[str, float] | None = None
                 if args.control_predictor:
-                    control_disc, control_ids, _ = _profile_scores(
+                    control_disc, control_ids, _, _ = _profile_scores(
                         profile_dir / f"{args.control_predictor}.json"
                     )
                     if control_ids != declared_audit_ids:
@@ -250,6 +377,24 @@ def export_prediction(
                         f"{seed_dir}: gradient/proximity sealed folds differ"
                     )
 
+                exact_disc: dict[str, float] | None = None
+                exact_audit: dict[str, float] | None = None
+                if exact_probe:
+                    exact_path = profile_dir / f"{exact_probe}.json"
+                    if exact_path.is_file():
+                        exact_disc, exact_ids, _, _ = _profile_scores(exact_path)
+                        exact_audit = _sealed_audit_scores(
+                            seed_dir, request_id, exact_probe, done_markers
+                        )
+                        if (
+                            exact_ids != declared_audit_ids
+                            or set(exact_audit) != declared_audit_ids
+                        ):
+                            raise EvidenceValidationError(
+                                f"{seed_dir}: exact-energy predictor fold differs "
+                                "from the declared audit fold"
+                            )
+
                 cert_map = audit_cfg.get("fidelity_certificates", {})
                 model_id = manifest.get("model_id") or model_dir.name
                 cert_path = cert_map.get(model_id)
@@ -262,7 +407,10 @@ def export_prediction(
                     raise EvidenceValidationError(
                         f"{seed_dir}: fidelity certificate missing: {cert_path}"
                     )
-                certificate = _load_json(ROOT / cert_path).get("passed") is True
+                certificate = _load_json(ROOT / cert_path)
+                profile_valid = _loss_shake_profile_valid(
+                    grad_profile, certificate, grad_disc
+                )
 
                 for parent in parents:
                     traj = traj_dirs[parent]
@@ -287,6 +435,15 @@ def export_prediction(
                     )
                     s0 = empirical_midrank01(grad_disc, grad_audit)
                     s1 = empirical_midrank01(prox_disc, prox_audit)
+                    joint_exact = None
+                    if exact_disc is not None and exact_audit is not None:
+                        joint_exact = channel_mixture_scores(
+                            {**exact_disc, **exact_audit},
+                            {**prox_disc, **prox_audit},
+                            alpha_pred,
+                            candidate_ids=audit_ids,
+                            normalization_ids=sorted(exact_disc),
+                        )
                     control_scores: dict[str, float] | None = None
                     if control_audit is not None and control_disc is not None:
                         control_scores = empirical_midrank01(
@@ -327,7 +484,7 @@ def export_prediction(
                             "joint": joint[candidate_id],
                             "damage": float(snapshot["nll"][candidate_id])
                             - float(nll0[candidate_id]),
-                            "profile_valid": bool(certificate),
+                            "profile_valid": profile_valid,
                             "reached": reached,
                             "trajectory_completed": (traj / "DONE").is_file(),
                         }
@@ -348,6 +505,8 @@ def export_prediction(
                                 "parent_checkpoint_first_reaching": reached,
                             }
                         )
+                        if joint_exact is not None:
+                            record["joint_exact"] = joint_exact[candidate_id]
                         records.append(record)
     if not records:
         raise EvidenceValidationError(
@@ -553,6 +712,13 @@ def export_fidelity_summary(args, cfg: Mapping[str, Any], out_path: Path) -> Non
     cert_path = ROOT / args.fidelity_certificate
     cert = _load_json(cert_path)
     metrics = cert.get("metrics") or {}
+    thresholds = cert.get("thresholds") or {}
+    integrity = cert.get("integrity") or {}
+    survival = metrics.get("perturbation_survival")
+    if survival is None:
+        realized = (metrics.get("eff_over_eta"), metrics.get("frac_changed"))
+        if all(value is not None for value in realized):
+            survival = min(float(value) for value in realized)
     summary: dict[str, Any] = {
         "setting": args.setting_id,
         "source_certificate": str(args.fidelity_certificate),
@@ -561,8 +727,40 @@ def export_fidelity_summary(args, cfg: Mapping[str, Any], out_path: Path) -> Non
         "f_k": metrics.get("ov_AC"),
         "f_rho_lb": None,
         "f_k_lb": None,
+        "f_rho_p_one_sided": None,
+        "f_k_p_one_sided": None,
         "tau_rho": 0.80,
         "tau_k": 0.70,
+        "split_half_rho": metrics.get("split_half_rho"),
+        "split_half_threshold": thresholds.get(
+            "split_half_rho", thresholds.get("rho_AB", 0.70)
+        ),
+        "perturbation_survival": survival,
+        "perturbation_survival_threshold": thresholds.get(
+            "perturbation_survival",
+            max(
+                float(thresholds.get("eff_over_eta", 0.90)),
+                float(thresholds.get("frac_changed", 0.90)),
+            ),
+        ),
+        "integrity_valid_n": integrity.get("valid_n"),
+        "integrity_total_n": integrity.get("total_n"),
+        "integrity_coverage_threshold": 1.0,
+        "protocol": {
+            key: cert.get(key)
+            for key in (
+                "model",
+                "dtype",
+                "dataset",
+                "block_last_n",
+                "R",
+                "eta",
+                "probe_seed",
+                "k",
+                "n_candidates",
+                "candidate_seed",
+            )
+        },
     }
     scores = cert.get("scores") or {}
     scores_a = scores.get("A")
@@ -611,6 +809,12 @@ def export_fidelity_summary(args, cfg: Mapping[str, Any], out_path: Path) -> Non
             overlaps.append(overlap(sample_a, sample_c))
         summary["f_rho_lb"] = percentile(rhos, 0.05)
         summary["f_k_lb"] = percentile(overlaps, 0.05)
+        summary["f_rho_p_one_sided"] = (
+            1 + sum(value <= 0.80 for value in rhos)
+        ) / (len(rhos) + 1)
+        summary["f_k_p_one_sided"] = (
+            1 + sum(value <= 0.70 for value in overlaps)
+        ) / (len(overlaps) + 1)
     out_path.parent.mkdir(parents=True, exist_ok=True)
     out_path.write_text(
         json.dumps(summary, indent=2, sort_keys=True) + "\n", encoding="utf-8"
@@ -641,6 +845,14 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--gradient-predictor", default="fd_norm")
     parser.add_argument("--proximity-predictor", default="knn_feature")
+    parser.add_argument(
+        "--exact-predictor",
+        default="grad_norm",
+        help=(
+            "optional sealed exact-energy predictor used only for the "
+            "no-refit swap diagnostic"
+        ),
+    )
     parser.add_argument(
         "--control-predictor",
         default=None,

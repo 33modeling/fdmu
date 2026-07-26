@@ -38,9 +38,8 @@ from rsus.evidence.schemas import (  # noqa: E402
 def _load_fidelity_inputs(contract) -> dict[str, dict]:
     """Load per-setting fidelity summaries named by the frozen contract.
 
-    A missing or malformed file keeps its setting's fidelity cells as
-    placeholders rather than failing the whole render; the RQ2 composition in
-    the table module cannot pass without the bounds anyway.
+    Missing files keep RQ2 incomplete. Failed certificates are retained so
+    readiness distinguishes measured failure from absent evidence.
     """
     import json
 
@@ -64,9 +63,6 @@ def _load_fidelity_inputs(contract) -> dict[str, dict]:
                 f"fidelity_inputs.{setting_id} carries setting "
                 f"{payload.get('setting')!r}; refusing a mismatched summary"
             )
-        if payload.get("certificate_passed") is not True:
-            # A failed or unverified certificate cannot fill fidelity cells.
-            continue
         result[setting_id] = payload
     return result
 
@@ -129,7 +125,8 @@ def main(argv: list[str] | None = None) -> int:
         ledger_path = _resolve_repo_path(args.ledger or contract.ledger_path).resolve()
         ledger = EvidenceLedger.read(ledger_path) if ledger_path.is_file() else EvidenceLedger.empty()
         validate_artifact_files(ledger, repository_root=ROOT)
-        report = evaluate_evidence(contract, ledger)
+        fidelity = _load_fidelity_inputs(contract)
+        report = evaluate_evidence(contract, ledger, fidelity=fidelity)
         report["sources"] = {
             "config": str(config_path),
             "ledger": str(ledger_path),
@@ -149,7 +146,7 @@ def main(argv: list[str] | None = None) -> int:
                 ledger,
                 report,
                 paper_root,
-                fidelity=_load_fidelity_inputs(contract),
+                fidelity=fidelity,
             )
             for table_path in table_paths:
                 print(f"wrote paper table: {table_path}")

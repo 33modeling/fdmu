@@ -28,7 +28,7 @@ from .schemas import (
     EvidenceValidationError,
     Selection,
 )
-from .statistics import summarize_bootstrap_effect
+from .statistics import percentile, summarize_bootstrap_effect
 
 
 CLAIM_ARMS = ("joint", "no_repair", "repeated_random", "s0", "s1")
@@ -365,6 +365,7 @@ class PredictionCandidate:
     joint: float
     simple_control: float
     damage: float
+    joint_exact: float | None = None
 
 
 @dataclass(frozen=True)
@@ -510,8 +511,19 @@ def _parse_prediction_records(
                 joint=_number(raw, "joint", where=where),
                 simple_control=_number(raw, "simple_control", where=where),
                 damage=_number(raw, "damage", where=where),
+                joint_exact=(
+                    _number(raw, "joint_exact", where=where)
+                    if raw.get("joint_exact") is not None
+                    else None
+                ),
             )
         )
+    for key, candidates in grouped.items():
+        exact_count = sum(item.joint_exact is not None for item in candidates)
+        if exact_count not in (0, len(candidates)):
+            raise EvidenceValidationError(
+                f"prediction unit {key!r} has a partial joint_exact column"
+            )
     return {
         key: PredictionUnitData(
             key=key,
@@ -883,7 +895,11 @@ def _top_q_recall(
 
 
 def _prediction_metrics(
-    candidates: Sequence[PredictionCandidate], *, top_q: float, tail_m: int
+    candidates: Sequence[PredictionCandidate],
+    *,
+    top_q: float,
+    tail_m: int,
+    include_swap: bool = False,
 ) -> dict[str, float] | None:
     if len(candidates) < 2:
         return None
@@ -913,6 +929,16 @@ def _prediction_metrics(
         "gain_s1": rho_joint - rho_s1,
         "gain_control": rho_joint - rho_control,
     }
+    if include_swap:
+        if any(candidate.joint_exact is None for candidate in candidates):
+            return None
+        rho_exact = _spearman(
+            [float(candidate.joint_exact) for candidate in candidates],
+            damage,
+        )
+        if rho_exact is None:
+            return None
+        result["swap_delta"] = rho_exact - rho_joint
     positive = [
         index for index, candidate in enumerate(candidates) if candidate.damage > 0.0
     ]
@@ -938,8 +964,32 @@ def _prediction_metrics(
             )[:tail_m]
         )
         recall_m = len(harmful & predicted) / tail_m
+        predicted_s0 = set(
+            sorted(
+                range(len(candidates)),
+                key=lambda index: (
+                    -candidates[index].s0,
+                    candidates[index].candidate_id,
+                    index,
+                ),
+            )[:tail_m]
+        )
+        predicted_s1 = set(
+            sorted(
+                range(len(candidates)),
+                key=lambda index: (
+                    -candidates[index].s1,
+                    candidates[index].candidate_id,
+                    index,
+                ),
+            )[:tail_m]
+        )
         q = tail_m / len(candidates)
         result["tail_lift"] = recall_m / q - 1.0
+        result["chance_q"] = q
+        result["tail_recall_joint"] = recall_m
+        result["tail_recall_s0"] = len(harmful & predicted_s0) / tail_m
+        result["tail_recall_s1"] = len(harmful & predicted_s1) / tail_m
     return result
 
 
@@ -979,21 +1029,30 @@ def _rq2_metrics(
 
 
 def _prediction_core_metrics(
-    candidates: Sequence[PredictionCandidate], *, top_q: float, tail_m: int
+    candidates: Sequence[PredictionCandidate],
+    *,
+    top_q: float,
+    tail_m: int,
+    include_swap: bool = False,
 ) -> dict[str, float] | None:
-    metrics = _prediction_metrics(candidates, top_q=top_q, tail_m=tail_m)
+    metrics = _prediction_metrics(
+        candidates,
+        top_q=top_q,
+        tail_m=tail_m,
+        include_swap=include_swap,
+    )
     if metrics is None:
         return None
-    return {
-        key: metrics[key]
-        for key in (
-            "joint_rho",
-            "top_q_recall",
-            "gain_s0",
-            "gain_s1",
-            "gain_control",
-        )
-    }
+    keys = [
+        "joint_rho",
+        "top_q_recall",
+        "gain_s0",
+        "gain_s1",
+        "gain_control",
+    ]
+    if include_swap:
+        keys.append("swap_delta")
+    return {key: metrics[key] for key in keys}
 
 
 def _prediction_tail_metrics(
@@ -1002,7 +1061,16 @@ def _prediction_tail_metrics(
     metrics = _prediction_metrics(candidates, top_q=top_q, tail_m=tail_m)
     if metrics is None or "tail_lift" not in metrics:
         return None
-    return {"tail_lift": metrics["tail_lift"]}
+    return {
+        key: metrics[key]
+        for key in (
+            "tail_lift",
+            "chance_q",
+            "tail_recall_joint",
+            "tail_recall_s0",
+            "tail_recall_s1",
+        )
+    }
 
 
 def _tail_mean(values: Sequence[float], *, cvar_q: float) -> float:
@@ -1193,6 +1261,11 @@ def _empty_rq1(*, selection_valid: bool = False) -> dict[str, object]:
         "joint_minus_s0": {},
         "joint_minus_s1": {},
         "tail_lift": {},
+        "chance_q": None,
+        "tail_recall_joint": None,
+        "tail_recall_s0": None,
+        "tail_recall_s1": None,
+        "swap_delta": {},
     }
 
 
@@ -1285,12 +1358,24 @@ def aggregate_raw_evidence(
         prediction_points: list[tuple[str, str, Mapping[str, float]]] = []
         tail_common_data: list[PredictionUnitData] = []
         tail_points: list[tuple[str, str, Mapping[str, float]]] = []
+        row_has_swap = bool(row_units) and all(
+            unit.key in prediction
+            and bool(prediction[unit.key].candidates)
+            and all(
+                candidate.joint_exact is not None
+                for candidate in prediction[unit.key].candidates
+            )
+            for unit in row_units
+        )
         for unit in row_units:
             data = prediction.get(unit.key)
             if data is None or unit.key not in reached_valid:
                 continue
             metrics = _prediction_core_metrics(
-                data.candidates, top_q=plan.top_q, tail_m=unit.tail_m
+                data.candidates,
+                top_q=plan.top_q,
+                tail_m=unit.tail_m,
+                include_swap=row_has_swap,
             )
             if metrics is not None:
                 prediction_common_data.append(data)
@@ -1349,6 +1434,7 @@ def aggregate_raw_evidence(
                     _resample_groups_prediction(data.candidates, rng),
                     top_q=plan.top_q,
                     tail_m=plan.units[data.key].tail_m,
+                    include_swap=row_has_swap,
                 ),
             )
             tail_effect: dict[str, float] = {}
@@ -1372,6 +1458,27 @@ def aggregate_raw_evidence(
                     beneficial="positive",
                     alpha=plan.alpha,
                 )
+                tail_details = {
+                    key: tail_point[key]
+                    for key in (
+                        "chance_q",
+                        "tail_recall_joint",
+                        "tail_recall_s0",
+                        "tail_recall_s1",
+                    )
+                }
+            else:
+                tail_details = {}
+            swap_effect = {}
+            if row_has_swap and bootstrap:
+                swap_values = [draw["swap_delta"] for draw in bootstrap]
+                swap_effect = {
+                    "estimate": point["swap_delta"],
+                    "lower_bound": percentile(swap_values, plan.alpha / 2.0),
+                    "upper_bound": percentile(
+                        swap_values, 1.0 - plan.alpha / 2.0
+                    ),
+                }
             prediction_evidence = {
                 "paired": True,
                 "selection_valid": prediction_selection.valid
@@ -1399,6 +1506,8 @@ def aggregate_raw_evidence(
                     alpha=plan.alpha,
                 ),
                 "tail_lift": tail_effect,
+                **tail_details,
+                "swap_delta": swap_effect,
             }
 
         rq2_evidence = _empty_rq2()

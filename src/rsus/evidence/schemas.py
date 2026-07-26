@@ -206,6 +206,11 @@ class RQ1Evidence:
     joint_minus_s0: Effect = field(default_factory=Effect)
     joint_minus_s1: Effect = field(default_factory=Effect)
     tail_lift: Effect = field(default_factory=Effect)
+    chance_q: float | None = None
+    tail_recall_joint: float | None = None
+    tail_recall_s0: float | None = None
+    tail_recall_s1: float | None = None
+    swap_delta: Effect = field(default_factory=Effect)
 
     @classmethod
     def from_mapping(
@@ -214,7 +219,7 @@ class RQ1Evidence:
         data = raw or {}
         if not isinstance(data, Mapping):
             raise EvidenceValidationError(f"{name} must be a mapping")
-        return cls(
+        result = cls(
             paired=_as_bool(data.get("paired", False), field_name=f"{name}.paired"),
             selection_valid=_as_bool(
                 data.get("selection_valid", False),
@@ -248,7 +253,38 @@ class RQ1Evidence:
             tail_lift=Effect.from_mapping(
                 data.get("tail_lift"), name=f"{name}.tail_lift"
             ),
+            chance_q=_optional_number(
+                data.get("chance_q"), field_name=f"{name}.chance_q"
+            ),
+            tail_recall_joint=_optional_number(
+                data.get("tail_recall_joint"),
+                field_name=f"{name}.tail_recall_joint",
+            ),
+            tail_recall_s0=_optional_number(
+                data.get("tail_recall_s0"),
+                field_name=f"{name}.tail_recall_s0",
+            ),
+            tail_recall_s1=_optional_number(
+                data.get("tail_recall_s1"),
+                field_name=f"{name}.tail_recall_s1",
+            ),
+            swap_delta=Effect.from_mapping(
+                data.get("swap_delta"), name=f"{name}.swap_delta"
+            ),
         )
+        if result.chance_q is not None and not 0.0 < result.chance_q <= 1.0:
+            raise EvidenceValidationError(f"{name}.chance_q must be in (0, 1]")
+        for field_name in (
+            "tail_recall_joint",
+            "tail_recall_s0",
+            "tail_recall_s1",
+        ):
+            value = getattr(result, field_name)
+            if value is not None and not 0.0 <= value <= 1.0:
+                raise EvidenceValidationError(
+                    f"{name}.{field_name} must be in [0, 1]"
+                )
+        return result
 
 
 @dataclass(frozen=True)

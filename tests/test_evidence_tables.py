@@ -1,4 +1,4 @@
-"""CPU-only tests for the generated tab:core-evidence / tab:robustness bodies."""
+"""CPU-only tests for the generated core and robustness table bodies."""
 from __future__ import annotations
 
 from pathlib import Path
@@ -31,7 +31,11 @@ def test_empty_ledger_renders_placeholders_only(tmp_path):
     core = render_core_evidence_table(contract, ledger, report)
     robustness = render_robustness_table(contract, ledger, report)
     assert r"\tblph" in core
-    assert r"\label{tab:core-evidence}" in core
+    assert r"\label{tab:pred-value}" in core
+    assert r"\label{tab:loss-susceptibility-fidelity}" in core
+    assert r"\label{tab:tail-recovery}" in core
+    assert r"\label{tab:prot-effect}" in core
+    assert r"\label{tab:prot-contract}" in core
     assert r"\label{tab:robustness}" in robustness
     assert r"\label{tab:robustness-funnel}" in robustness
     # No numeric prediction cell may appear without ledger evidence.
@@ -51,7 +55,7 @@ def test_passing_row_renders_bounds_and_yes_flags(tmp_path):
     assert "$f_\\rho/f_K$" in core
     robustness = render_robustness_table(contract, ledger, report)
     assert "1/1" in robustness
-    assert "RQ3 E/P & Chain" in robustness
+    assert "RQ3 parents & Chain" in robustness
     assert "Profiles valid & Gate reached & Common $n$" in robustness
     assert "held-out D0 requests & 1/1 & 1/1 & 1/1 & 1/1 & y" in robustness
     assert "held-out D0 requests & 2/2 & 2/2 & 2 & 2 & 2/2" in robustness
@@ -61,10 +65,22 @@ def test_validated_rq2_evidence_fills_fidelity_cells(tmp_path):
     contract = _config(tmp_path)
     ledger = _ledger([_row("primary")])
     report = _report(contract, ledger)
-    core = render_core_evidence_table(contract, ledger, report)
-    assert "1.00/0.90" in core
-    assert "[+0.05/+0.05]" in core
-    assert core.count("y/y") >= 2
+    core = render_core_evidence_table(
+        contract,
+        ledger,
+        report,
+        fidelity={
+            "primary": {
+                "certificate_passed": True,
+                "f_rho": 1.00,
+                "f_k": 0.90,
+                "f_rho_lb": 0.85,
+                "f_k_lb": 0.75,
+            }
+        },
+    )
+    assert "1.00 [+0.05]" in core
+    assert "0.90 [+0.05]" in core
 
 
 def test_failing_native_bound_blocks_rq3_pass(tmp_path):

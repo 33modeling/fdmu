@@ -355,12 +355,18 @@ def load_contract(path: str | Path) -> EvidenceContract:
             "decision.minimum_support_units must be a positive integer"
         )
     expected_rq1 = {
-        "effects": ["joint_rho", "joint_minus_s0", "joint_minus_s1", "tail_lift"],
+        "effects": [
+            "joint_rho",
+            "joint_minus_s0",
+            "joint_minus_s1",
+            "g_ctl",
+            "tail_lift",
+        ],
         "favorable_sign": "positive",
         "minimum_tail_coverage": 0.80,
     }
     expected_rq2 = {
-        "effects": ["f_rho_minus_0p80", "f_k_minus_0p70", "g_h", "g_ctl"],
+        "effects": ["f_rho_minus_0p80", "f_k_minus_0p70"],
         "favorable_sign": "positive",
     }
     expected_rq3 = {

@@ -36,6 +36,7 @@ import shlex
 import shutil
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 import yaml
@@ -379,10 +380,30 @@ def _load_fidelity_certificates(config_path: Path, cfg: dict, models: list[dict]
         if model["id"] not in declared:
             raise ValueError(f"no fidelity certificate declared for model {model['id']}")
         path = _runtime_path(declared[model["id"]])
+        wait_seconds = int(
+            os.environ.get(
+                "FDMU_FIDELITY_WAIT_SECONDS",
+                "21600" if os.environ.get("CLUSTER_RUNS_ROOT") else "0",
+            )
+        )
+        deadline = time.monotonic() + wait_seconds
+        next_notice = 0.0
+        while not path.exists() and time.monotonic() < deadline:
+            now = time.monotonic()
+            if now >= next_notice:
+                remaining = max(0, int(deadline - now))
+                print(
+                    f"WAIT fidelity certificate model={model['id']} "
+                    f"path={path} remaining_s={remaining}",
+                    flush=True,
+                )
+                next_notice = now + 60.0
+            time.sleep(min(15.0, max(0.0, deadline - time.monotonic())))
         if not path.exists():
             raise FileNotFoundError(
                 f"missing fidelity certificate for {model['id']}: {path}; run the "
-                "development-only frozen-cell fidelity command before audit"
+                "development-only frozen-cell fidelity command before audit "
+                f"(waited {wait_seconds}s)"
             )
         cert = json.loads(path.read_text(encoding="utf-8"))
         expected = {
@@ -593,6 +614,24 @@ def main() -> None:
                 if payload.get("passed"):
                     print(f"SKIP passed fidelity certificate: {certificate}")
                     continue
+            if a.resume and csv_path.exists() != certificate.exists():
+                runs_root = Path(
+                    os.environ.get("CLUSTER_RUNS_ROOT", ROOT / "runs")
+                )
+                stamp = datetime.now(timezone.utc).strftime(
+                    "%Y%m%dT%H%M%S.%fZ"
+                )
+                forensics = runs_root / "forensics" / "fidelity-orphans" / stamp
+                for artifact in (csv_path, certificate):
+                    if artifact.exists():
+                        forensics.mkdir(parents=True, exist_ok=True)
+                        destination = forensics / artifact.name
+                        shutil.move(str(artifact), str(destination))
+                        print(
+                            f"QUARANTINED orphan fidelity artifact: "
+                            f"source={artifact} destination={destination}",
+                            flush=True,
+                        )
             if not a.dry_run and (csv_path.exists() or certificate.exists()):
                 raise RuntimeError(
                     f"pre-existing fidelity artifact for {csv_path.stem}; preserve it and "
