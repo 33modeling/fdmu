@@ -220,7 +220,7 @@ def test_requeue_stale_by_heartbeat_age(tmp_path):
     counts = q.status()["counts"]
     assert counts["pending"] == 1 and counts["claimed"] == 1
     payload = json.loads((q.root / "pending" / "a.json").read_text(encoding="utf-8"))
-    assert payload["attempts"] == 1
+    assert payload["attempts"] == 0
 
 
 def test_monitor_heartbeat_age_tolerates_claim_state_transition(tmp_path):

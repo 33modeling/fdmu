@@ -291,7 +291,7 @@ class WorkQueue:
                 self._write_json(
                     self._entry("pending", unit_id),
                     {"unit": payload["unit"],
-                     "attempts": int(payload.get("attempts", 0)) + 1,
+                     "attempts": 0,
                      "last_failure": {"reason": f"stale heartbeat > {max_age_s}s"}},
                 )
                 self._clear_claim(unit_id)
