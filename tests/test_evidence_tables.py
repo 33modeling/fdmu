@@ -56,10 +56,12 @@ def test_passing_row_renders_bounds_and_yes_flags(tmp_path):
     assert "$f_K$ [LB$-\\tau_K$]" in core
     robustness = render_robustness_table(contract, ledger, report)
     assert "1/1" in robustness
+    assert "Eligible/passing counts" in robustness
+    assert "Survival down the sealed pipeline" in robustness
     assert "RQ3 parents & Chain" in robustness
     assert "Profiles valid & Gate reached & Common $n$" in robustness
-    assert "held-out D0 requests & 1/1 & 1/1 & 1/1 & 1/1 & y" in robustness
-    assert "held-out D0 requests & 2/2 & 2/2 & 2 & 2 & 2/2" in robustness
+    assert "held-out D0 requests (M0) & 1/1 & 1/1 & 1/1 & 1/1 & y" in robustness
+    assert "held-out D0 requests (M0) & 2/2 & 2/2 & 2 & 2 & 2/2" in robustness
 
 
 def test_validated_rq2_evidence_fills_fidelity_cells(tmp_path):
@@ -149,6 +151,9 @@ def test_repository_contract_renders_all_nine_settings():
         assert parent_label in core
     assert "Output-readout parents" in core
     assert "Representation-readout parents" in core
+    assert "Prospective rank corr." in core
+    assert "Control selectors, same budget" in core
+    assert "Survival down the sealed pipeline" in robustness
 
 
 def test_rq1_pass_requires_positive_joint_bound(tmp_path):
