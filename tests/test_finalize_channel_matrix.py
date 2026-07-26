@@ -10,7 +10,7 @@ from experiments.paper.export_channel_matrix_raw import (
 from experiments.paper.finalize_channel_matrix import (
     _build_plan,
     _load_yaml,
-    _link_final_latex,
+    _materialize_final_latex,
     _prediction_parents,
     _protection_selections,
     _remove_obsolete_latex,
@@ -207,7 +207,7 @@ def test_finalizer_removes_pre_unified_latex_duplicates(tmp_path):
     assert keep.is_file()
 
 
-def test_finalizer_links_shared_tables_into_per_run_directory(tmp_path):
+def test_finalizer_materializes_shared_tables_in_per_run_directory(tmp_path):
     shared = tmp_path / "shared"
     per_run = tmp_path / "run" / "aggregate" / "paper_v4"
     shared.mkdir()
@@ -217,12 +217,14 @@ def test_finalizer_links_shared_tables_into_per_run_directory(tmp_path):
     core.write_text("core", encoding="utf-8")
     robustness.write_text("robustness", encoding="utf-8")
 
-    links = _link_final_latex(
+    outputs = _materialize_final_latex(
         per_run,
         {"table1": str(core), "table2": str(robustness)},
     )
 
-    assert Path(links["table1"]).is_symlink()
-    assert Path(links["table2"]).is_symlink()
-    assert Path(links["table1"]).read_text(encoding="utf-8") == "core"
-    assert Path(links["table2"]).read_text(encoding="utf-8") == "robustness"
+    assert Path(outputs["table1"]).is_file()
+    assert Path(outputs["table2"]).is_file()
+    assert not Path(outputs["table1"]).is_symlink()
+    assert not Path(outputs["table2"]).is_symlink()
+    assert Path(outputs["table1"]).read_text(encoding="utf-8") == "core"
+    assert Path(outputs["table2"]).read_text(encoding="utf-8") == "robustness"

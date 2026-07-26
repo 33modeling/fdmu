@@ -151,9 +151,9 @@ bash experiments/cluster/render_tofu_7b_h100.sh
   model/dataset setting을 항상 모두 출력한다.
 - 완료된 evidence는 숫자로 채우고, 미완료·비적격 evidence는 행을 없애지 않고
   `\tblph` 또는 `n/--`로 표시한다. 값을 임의로 만들지 않는다.
-- 모델별 `aggregate/paper_v4/`에는 ledger, readiness, status와 공용 최종
-  LaTeX를 가리키는 같은 이름의 링크 두 개를 둔다. 결과 내용은 한 벌만
-  존재하며 구형 중복 LaTeX는 재렌더 시 삭제한다.
+- 모델별 `aggregate/paper_v4/`에는 ledger, readiness, status와 실제 일반
+  파일인 `table_core_evidence.tex`, `table_robustness.tex`을 둔다. 구형 이름의
+  중복 LaTeX는 재렌더 시 삭제한다.
 - channel-matrix 진단값은 `aggregate/pooled_channel_report.csv`와
   `pooled_channel_report.json`에서 확인한다. 별도 진단 `.tex`는 만들지 않는다.
 

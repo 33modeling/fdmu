@@ -11,6 +11,7 @@ import argparse
 import json
 import os
 from pathlib import Path
+import shutil
 import sys
 from types import SimpleNamespace
 from typing import Any, Mapping
@@ -88,21 +89,23 @@ def _remove_obsolete_latex(output: Path, model_id: str) -> list[str]:
     return removed
 
 
-def _link_final_latex(
+def _materialize_final_latex(
     output: Path, combined_outputs: Mapping[str, str]
 ) -> dict[str, str]:
-    """Expose shared final tables in the per-run result directory."""
-    links = {}
+    """Materialize shared final tables in the per-run result directory."""
+    outputs = {}
     for key in ("table1", "table2"):
         target = Path(combined_outputs[key]).resolve()
-        link = output / target.name
-        temporary = link.with_name(f".{link.name}.{os.getpid()}.tmp")
+        destination = output / target.name
+        temporary = destination.with_name(
+            f".{destination.name}.{os.getpid()}.tmp"
+        )
         if temporary.exists() or temporary.is_symlink():
             temporary.unlink()
-        temporary.symlink_to(target)
-        os.replace(temporary, link)
-        links[key] = str(link)
-    return links
+        shutil.copyfile(target, temporary)
+        os.replace(temporary, destination)
+        outputs[key] = str(destination)
+    return outputs
 
 
 def _request_id(dataset: str, author: int) -> str:
@@ -418,7 +421,7 @@ def finalize(args: argparse.Namespace) -> dict[str, Any]:
         fidelity_input=fidelity_path,
     )
     status["combined_outputs"] = combined_outputs
-    status["outputs"].update(_link_final_latex(output, combined_outputs))
+    status["outputs"].update(_materialize_final_latex(output, combined_outputs))
     _atomic_json(output / "FINALIZATION_STATUS.json", status)
     return status
 
