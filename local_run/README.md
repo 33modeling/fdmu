@@ -53,6 +53,8 @@ GPU_IDS=0,1 bash local_run/finalize_joint_sweep_to_latex.sh
 `joint_sweep/launcher_logs/current.log`,
 `fidelity/launcher_logs/current.log`,
 `final/launcher_logs/current.log`에 남는다.
+Joint 로그는 `CURRENT_BEST`에 판정 상태와 closest trial을, `PROGRESS`에
+현재 trial, 전체 완료 수, 실행 시간과 `eta_seconds`를 주기적으로 출력한다.
 
 현재 Parent calibration은 resolved proposal을 생성하면 exit `0`으로
 종료하고 자동 freeze 검증 단계로 진행한다. 이전 checkout에서 생성된

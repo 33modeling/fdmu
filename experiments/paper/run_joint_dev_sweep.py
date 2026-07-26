@@ -926,6 +926,9 @@ def _run_lanes(
     trial_dir: Path,
     events: _EventLog,
     progress_interval: float,
+    progress_label: str = "",
+    completed_offset: int = 0,
+    total_units: int | None = None,
 ) -> None:
     if not units:
         _status("UNITS all manifest units already validated; nothing to execute")
@@ -938,6 +941,7 @@ def _run_lanes(
     completed = 0
     failures: list[str] = []
     started = time.monotonic()
+    total = total_units if total_units is not None else len(units)
     cache_locks = {
         (str(unit["request"]), str(unit["seed"])): threading.Lock()
         for unit in units
@@ -952,9 +956,19 @@ def _run_lanes(
                 ) or "none"
                 done = completed
                 failed = len(failures)
+            elapsed = time.monotonic() - started
+            remaining = len(units) - done
+            eta = (elapsed / done * remaining) if done else None
+            prefix = f"{progress_label} " if progress_label else ""
             _status(
-                f"PROGRESS completed={done}/{len(units)} failed={failed} "
-                f"elapsed={time.monotonic() - started:.1f}s running=[{active}]"
+                f"PROGRESS {prefix}completed={completed_offset + done}/{total} "
+                f"failed={failed} elapsed={elapsed:.1f}s "
+                f"eta_seconds={eta:.0f} running=[{active}]"
+                if eta is not None
+                else
+                f"PROGRESS {prefix}completed={completed_offset + done}/{total} "
+                f"failed={failed} elapsed={elapsed:.1f}s "
+                f"eta_seconds=pending running=[{active}]"
             )
 
     def worker(gpu: int, lane: Sequence[Mapping[str, Any]]) -> None:
@@ -1007,9 +1021,12 @@ def _run_lanes(
         active = ", ".join(
             f"gpu{gpu}={identity}" for gpu, identity in sorted(running.items())
         ) or "none"
+        elapsed = time.monotonic() - started
+        prefix = f"{progress_label} " if progress_label else ""
         _status(
-            f"PROGRESS completed={completed}/{len(units)} failed={len(failures)} "
-            f"elapsed={time.monotonic() - started:.1f}s running=[{active}]"
+            f"PROGRESS {prefix}completed={completed_offset + completed}/{total} "
+            f"failed={len(failures)} elapsed={elapsed:.1f}s "
+            f"eta_seconds=0 running=[{active}]"
         )
     if failures:
         raise SweepError(f"unit execution failed; inspect logs for {failures}")
@@ -1419,6 +1436,12 @@ def run(args: argparse.Namespace) -> int:
             f"valid={len(manifest['units']) - len(pending)} "
             f"pending={len(pending)}"
         )
+        _status(
+            f"CURRENT_BEST status=pending trial={index}/{len(spec['trials'])} "
+            f"id={trial['id']} completed={len(manifest['units']) - len(pending)}/"
+            f"{len(manifest['units'])} decision_at={len(manifest['units'])}/"
+            f"{len(manifest['units'])}"
+        )
         if args.dry_run:
             continue
         _run_lanes(
@@ -1427,6 +1450,11 @@ def run(args: argparse.Namespace) -> int:
             trial_dir=trial_dir,
             events=events,
             progress_interval=args.progress_interval,
+            progress_label=(
+                f"trial={index}/{len(spec['trials'])} id={trial['id']} BEST=pending"
+            ),
+            completed_offset=len(manifest["units"]) - len(pending),
+            total_units=len(manifest["units"]),
         )
         manifest_path = trial_dir / "manifest.yaml"
         _seal_trial(
@@ -1492,6 +1520,11 @@ def run(args: argparse.Namespace) -> int:
             }
         )
         if result["passed"]:
+            _status(
+                f"CURRENT_BEST status=selected trial={index}/"
+                f"{len(spec['trials'])} id={trial['id']} "
+                f"comparison={trial_dir / 'joint_comparison.json'}"
+            )
             recommendation = {
                 "schema_version": 1,
                 "contract": CONTRACT,
@@ -1532,6 +1565,26 @@ def run(args: argparse.Namespace) -> int:
             print(f"JOINT_BEST_DEVELOPMENT: {trial_dir}")
             print("target evaluation was not run; automatic freeze validation is next")
             return 0
+        closest = min(
+            (candidate_score(candidate) for candidate in evaluated_results),
+            key=lambda item: (
+                -int(item["groups_passed"]),
+                -int(item["parents_passed"]),
+                -int(item["cells_passed"]),
+                -int(item["joint_feasible_cells"]),
+                -int(item["metric_wins"]),
+                float(item["total_shortfall"]),
+                str(item["trial_id"]),
+            ),
+        )
+        _status(
+            f"CURRENT_BEST status=not_found closest={closest['trial_id']} "
+            f"evaluated={len(evaluated_results)}/{len(spec['trials'])} "
+            f"groups={closest['groups_passed']}/{closest['groups_required']} "
+            f"parents={closest['parents_passed']}/{closest['parents_required']} "
+            f"cells={closest['cells_passed']}/{closest['cells_required']} "
+            f"shortfall={closest['total_shortfall']:.8g}"
+        )
 
     if args.dry_run:
         print(f"dry run complete: {output_root}")
