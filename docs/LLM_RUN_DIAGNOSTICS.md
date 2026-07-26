@@ -223,6 +223,16 @@ Audit cell 완료 조건은 다음을 모두 만족하는 것이다.
 <MODEL_ROOT>/aggregate/table1_stress_<model>.tex
 ```
 
+7B aggregate는 이어서 최신 PDF-v4 후처리를 수행한다.
+
+```text
+<MODEL_ROOT>/aggregate/paper_v4/table1_core_evidence_qwen25_7b.tex
+<MODEL_ROOT>/aggregate/paper_v4/table2_robustness_qwen25_7b.tex
+<MODEL_ROOT>/aggregate/paper_v4/evidence_ledger.json
+<MODEL_ROOT>/aggregate/paper_v4/evidence_readiness.json
+<MODEL_ROOT>/aggregate/paper_v4/FINALIZATION_STATUS.json
+```
+
 분석의 기준은 `pooled_channel_report.json`과 CSV다. JSON에서 `n_runs == 6`,
 `requests`, `seeds`, `predictors`, `objectives`, `stress_objectives`,
 `objective_status`, `roster_interaction`을 먼저 검사한다. CSV는
@@ -235,6 +245,19 @@ campaign 산출물이다. 최신 PDF-v4의 최종 Table 1/2 evidence와 동일�
 간주하지 않는다. 최신 paper evidence의 의미와 metric은
 `docs/TABLE12_METRICS.md`, `docs/PREDICTOR_METRICS.md`,
 `docs/PAPER_EVIDENCE_PIPELINE.md`를 함께 읽어 구분한다.
+
+최종 논문형 표는 반드시 `aggregate/paper_v4/` 아래 파일을 사용한다. 이미
+완료된 7B run에는 GPU나 channel-matrix bootstrap 재실행이 필요 없으며
+`CONFIG=configs/channel_matrix/7b_tofu.yaml MODEL_ID=qwen25_7b bash
+experiments/channel_matrix/h100_campaign.sh paper-v4`만 실행한다. 후처리는
+완료된 evidence cell을 유지하고 누락 block만 placeholder로 남긴다.
+
+Per-setting ledger는 `<MODEL_ROOT>/aggregate/paper_v4/`에 보존된다. 여러
+실험의 공용 ledger와 최종 표는 `/group-volume/fdmu/runs/paper_v4/`에 있으며,
+`publish_evidence.py`가 lock 아래 `(setting,parent)` 단위로 병합한다. 다른
+setting 결과를 추가해도 기존 행을 지우지 않는다. terminal에 마지막으로
+출력되는 `===== PAPER TABLE 1/2 =====` 블록이 저장된 공용 최종 LaTeX와
+동일하다.
 
 #### Alpha protection
 

@@ -120,15 +120,47 @@ def _required(row: EvidenceRow, setting: str, parent: str) -> None:
 def _panel_a_row(
     row: EvidenceRow,
     decisions: Mapping[str, Mapping[str, object]],
+    fidelity_summary: Mapping[str, object] | None = None,
 ) -> str:
     gains = (row.rq1.joint_minus_s0, row.rq1.joint_minus_s1)
-    min_gain = min(float(effect.estimate) for effect in gains)
-    min_gain_lb = min(float(effect.lower_bound) for effect in gains)
-    fidelity = (
-        _effect(row.rq2.f_rho_minus_0p80, bound="lower", offset=0.80)
-        + " / "
-        + _effect(row.rq2.f_k_minus_0p70, bound="lower", offset=0.70)
-    )
+    if all(
+        effect.estimate is not None and effect.lower_bound is not None
+        for effect in gains
+    ):
+        min_gain = min(float(effect.estimate) for effect in gains)
+        min_gain_lb = min(float(effect.lower_bound) for effect in gains)
+        gain_cell = f"{min_gain:.3f} [{min_gain_lb:.3f}]"
+    else:
+        gain_cell = "--"
+    if (
+        row.rq2.f_rho_minus_0p80.estimate is not None
+        or row.rq2.f_k_minus_0p70.estimate is not None
+    ):
+        fidelity = (
+            _effect(row.rq2.f_rho_minus_0p80, bound="lower", offset=0.80)
+            + " / "
+            + _effect(row.rq2.f_k_minus_0p70, bound="lower", offset=0.70)
+        )
+    elif fidelity_summary:
+        f_rho = fidelity_summary.get("f_rho")
+        f_k = fidelity_summary.get("f_k")
+        f_rho_lb = fidelity_summary.get("f_rho_lb")
+        f_k_lb = fidelity_summary.get("f_k_lb")
+
+        def summary_value(value: object, lower: object) -> str:
+            if value is None:
+                return "--"
+            if lower is None:
+                return f"{float(value):.3f} [--]"
+            return f"{float(value):.3f} [{float(lower):.3f}]"
+
+        fidelity = (
+            summary_value(f_rho, f_rho_lb)
+            + " / "
+            + summary_value(f_k, f_k_lb)
+        )
+    else:
+        fidelity = "-- / --"
     eligible = (
         f"{row.rq1.tail_eligible_units}/{row.rq1.reached_valid_units}"
     )
@@ -136,7 +168,7 @@ def _panel_a_row(
         (
             PARENT_LABELS.get(row.parent, row.parent),
             _effect(row.rq1.joint_rho, bound="lower"),
-            f"{min_gain:.3f} [{min_gain_lb:.3f}]",
+            gain_cell,
             fidelity,
             _effect(row.rq2.g_ctl, bound="lower"),
             f"{_effect(row.rq1.tail_lift, bound='lower')}; {eligible}",
@@ -155,13 +187,31 @@ def _panel_b_row(
         for outcomes in row.rq3.comparisons.values()
         for effect in outcomes.values()
     ]
-    worst = max(
-        comparisons,
-        key=lambda effect: float(effect.upper_bound),
+    complete_comparisons = [
+        effect
+        for effect in comparisons
+        if effect.estimate is not None and effect.upper_bound is not None
+    ]
+    worst = (
+        max(
+            complete_comparisons,
+            key=lambda effect: float(effect.upper_bound),
+        )
+        if len(complete_comparisons) == 8
+        else Effect()
     )
-    native = min(
-        row.rq3.native_noninferiority.values(),
-        key=lambda effect: float(effect.lower_bound),
+    native_effects = [
+        effect
+        for effect in row.rq3.native_noninferiority.values()
+        if effect.estimate is not None and effect.lower_bound is not None
+    ]
+    native = (
+        min(
+            native_effects,
+            key=lambda effect: float(effect.lower_bound),
+        )
+        if len(native_effects) == 4
+        else Effect()
     )
     return " & ".join(
         (
@@ -192,6 +242,7 @@ def render_table1(
     *,
     setting: str,
     allow_incomplete: bool = False,
+    fidelity_summary: Mapping[str, object] | None = None,
 ) -> str:
     """Return a two-panel LaTeX table for one predeclared setting."""
     report_rows = report.get("rows")
@@ -236,7 +287,7 @@ def render_table1(
         lines.append(rf"\multicolumn{{8}}{{l}}{{\textit{{{group_label}}}}} \\")
         for parent in parents:
             row = rows[parent]
-            if row is None or not _panel_a_complete(row):
+            if row is None:
                 lines.append(
                     f"{PARENT_LABELS[parent]} & "
                     + " & ".join(["--"] * 7)
@@ -244,7 +295,11 @@ def render_table1(
                 )
             else:
                 lines.append(
-                    _panel_a_row(row, decision_by_parent.get(parent, {}))
+                    _panel_a_row(
+                        row,
+                        decision_by_parent.get(parent, {}),
+                        fidelity_summary,
+                    )
                 )
     lines.extend(
         (
@@ -266,7 +321,7 @@ def render_table1(
         lines.append(rf"\multicolumn{{8}}{{l}}{{\textit{{{group_label}}}}} \\")
         for parent in parents:
             row = rows[parent]
-            if row is None or not _panel_b_complete(row):
+            if row is None:
                 lines.append(
                     f"{PARENT_LABELS[parent]} & "
                     + " & ".join(["--"] * 7)
@@ -287,6 +342,7 @@ def write_table1(
     *,
     setting: str,
     allow_incomplete: bool = False,
+    fidelity_summary: Mapping[str, object] | None = None,
 ) -> Path:
     destination = Path(path)
     destination.parent.mkdir(parents=True, exist_ok=True)
@@ -297,6 +353,7 @@ def write_table1(
             report,
             setting=setting,
             allow_incomplete=allow_incomplete,
+            fidelity_summary=fidelity_summary,
         ),
         encoding="utf-8",
     )

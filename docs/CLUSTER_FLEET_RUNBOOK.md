@@ -304,16 +304,45 @@ launcher 터미널에 표시한다. 14B unit 자체도
 ```
 
 단계별 `h100_campaign.sh` 로그는
-`/group-volume/fdmu/runs/logs/channel_matrix/`에 남는다. 최종 channel-matrix
-LaTeX는 각각 다음 위치다.
+`/group-volume/fdmu/runs/logs/channel_matrix/`에 남는다. 7B 원클릭 런처는
+aggregate 뒤에 CPU-only PDF-v4 backfill을 실행하며, 논문에 넣을 최신 형식은
+다음 두 파일이다.
 
 ```text
-/group-volume/fdmu/runs/channel_matrix_7b/aggregate/table1_channel_matrix_qwen25_7b.tex
-/group-volume/fdmu/runs/channel_matrix_14b/aggregate/table1_channel_matrix_qwen25_14b.tex
+/group-volume/fdmu/runs/channel_matrix_7b/aggregate/paper_v4/table1_core_evidence_qwen25_7b.tex
+/group-volume/fdmu/runs/channel_matrix_7b/aggregate/paper_v4/table2_robustness_qwen25_7b.tex
 ```
 
-이 두 표는 현재 H100 channel-matrix 계약의 표이며, 아직 roster가 완성되지
-않은 최신 PDF-v4 전체 Table 1/2를 완료된 것으로 표시하지 않는다.
+기존
+`aggregate/table1_channel_matrix_qwen25_7b.tex`와 14B의 동명 파일은 진단용
+구형 channel matrix다. 논문 최종 Table 1로 사용하지 않는다. 7B channel
+matrix가 이미 생성됐다면 GPU 실험이나 기존 aggregate를 다시 돌리지 말고 다음
+CPU-only 후처리만 실행한다.
+
+```bash
+CONFIG=configs/channel_matrix/7b_tofu.yaml MODEL_ID=qwen25_7b \
+  bash experiments/channel_matrix/h100_campaign.sh paper-v4
+```
+
+완료된 RQ1 값은 최신 Table 1에 보존된다. 아직 alpha-audit 결과가 없는 RQ3와
+setting-level fidelity가 없는 RQ2 셀은 오류로 중단하지 않고 `--`로 표시된다.
+`aggregate/paper_v4/FINALIZATION_STATUS.json`에 사용한 parent 수, raw record 수,
+보호 결과 완성 여부와 최종 파일 경로가 기록된다.
+
+각 setting의 ledger는 해당 campaign 아래에 그대로 보존되고, 공용 결과는 다음
+위치에 setting/parent 키로 병합된다.
+
+```text
+/group-volume/fdmu/runs/paper_v4/evidence_ledger.json
+/group-volume/fdmu/runs/paper_v4/table1.tex
+/group-volume/fdmu/runs/paper_v4/table2.tex
+/group-volume/fdmu/runs/paper_v4/PUBLISH_STATUS.json
+```
+
+병합은 `.publish.lock`을 사용한다. 이후 다른 사용자가 다른 model/dataset
+setting을 publish하면 기존 setting 행은 유지되고 새 행만 추가된다. 같은
+setting/parent를 재실행한 경우에만 그 행이 갱신된다. publish 마지막에는 위
+`table1.tex`과 `table2.tex` 전체가 launcher 로그에 한 번 출력된다.
 
 - `status`: wave2 / wave1_14b / wave_wmdp / wave_llama / wave3_alpha /
   wave4_alpha 큐별 `workqueue.py status --brief` 요약 + `fleet_status.py` 안내.

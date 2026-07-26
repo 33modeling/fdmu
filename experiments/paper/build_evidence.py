@@ -208,6 +208,7 @@ def main(argv: list[str] | None = None) -> int:
                 _resolve_repo_path(args.table1_out),
                 setting=args.table1_setting,
                 allow_incomplete=args.allow_incomplete_table1,
+                fidelity_summary=fidelity.get(args.table1_setting),
             )
             print(f"wrote Table 1: {table_path}")
         denominators = report["denominators"]

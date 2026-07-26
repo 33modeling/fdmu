@@ -757,6 +757,24 @@ def _validate_existing_freeze(
     return True
 
 
+def _publish_combined(args: argparse.Namespace) -> None:
+    ledger = args.output_root / args.setting / "evidence_ledger.json"
+    if not ledger.is_file():
+        raise FinalizationError(f"cannot publish missing evidence ledger: {ledger}")
+    _run(
+        [
+            str(args.python),
+            "experiments/paper/publish_evidence.py",
+            "--ledger",
+            str(ledger),
+            "--combined-root",
+            str(args.combined_root),
+            "--fidelity-input",
+            str(args.fidelity_input),
+        ]
+    )
+
+
 def run(args: argparse.Namespace) -> None:
     complete, reason = finalization_completion(
         joint_root=args.joint_root,
@@ -770,6 +788,7 @@ def run(args: argparse.Namespace) -> None:
             f"[FINALIZATION SKIPPED] already_complete=true rerun=0 reason={reason}",
             flush=True,
         )
+        _publish_combined(args)
         return
     print(
         f"[FINALIZATION RESUME] already_complete=false reason={reason}",
@@ -991,6 +1010,7 @@ def run(args: argparse.Namespace) -> None:
             "stage_total": 7,
         },
     )
+    _publish_combined(args)
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -1010,6 +1030,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         default=Path("/rdata/minsoo3.kim/results/paper/tofu_qwen25_1p5b/final"),
     )
     parser.add_argument("--table-out", type=Path, default=None)
+    parser.add_argument("--combined-root", type=Path, default=None)
     parser.add_argument("--fidelity-input", type=Path, required=True)
     parser.add_argument("--gpus", default="0,1")
     parser.add_argument("--progress-interval", type=float, default=15.0)
@@ -1041,6 +1062,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         if args.table_out is not None
         else args.output_root / "table1.tex"
     )
+    args.combined_root = (
+        args.combined_root.resolve()
+        if args.combined_root is not None
+        else args.output_root.parent.parent / "paper_v4"
+    )
     return args
 
 
@@ -1060,6 +1086,8 @@ def main(argv: list[str] | None = None) -> int:
                 f"reason={reason}",
                 flush=True,
             )
+            if complete:
+                _publish_combined(args)
             return 0 if complete else 1
         run(args)
         return 0

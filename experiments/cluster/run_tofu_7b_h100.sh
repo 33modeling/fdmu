@@ -155,4 +155,8 @@ MODEL_ID="$MODEL_ID" \
 SCALE_LABEL=7B \
   bash experiments/channel_matrix/h100_campaign.sh aggregate
 printf '[RESULT] LaTeX generation complete: %s\n' \
+  "$CLUSTER_RUNS_ROOT/channel_matrix_7b/aggregate/paper_v4/table1_core_evidence_${MODEL_ID}.tex"
+printf '[RESULT] Table 2 LaTeX: %s\n' \
+  "$CLUSTER_RUNS_ROOT/channel_matrix_7b/aggregate/paper_v4/table2_robustness_${MODEL_ID}.tex"
+printf '[RESULT] Legacy channel matrix (diagnostic only): %s\n' \
   "$CLUSTER_RUNS_ROOT/channel_matrix_7b/aggregate/table1_channel_matrix_${MODEL_ID}.tex"

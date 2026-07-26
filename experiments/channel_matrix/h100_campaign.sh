@@ -28,7 +28,7 @@ AUTHORS="${AUTHORS:-}"
 ACTION="${1:-}"
 
 if [[ -z "${ACTION}" ]]; then
-  echo "usage: GPU=<index> MODEL_ID=<alias|all> $0 {preflight|prefetch|dry-calibration|fidelity|calibration|select-freeze|audit|aggregate|dry-alpha-development|alpha-development|select-alpha-freeze|dry-alpha-audit|alpha-audit|legacy-alpha-diagnostic}" >&2
+  echo "usage: GPU=<index> MODEL_ID=<alias|all> $0 {preflight|prefetch|dry-calibration|fidelity|calibration|select-freeze|audit|aggregate|paper-v4|dry-alpha-development|alpha-development|select-alpha-freeze|dry-alpha-audit|alpha-audit|legacy-alpha-diagnostic}" >&2
   exit 2
 fi
 
@@ -164,6 +164,32 @@ print(tag)
 PY
 }
 
+paper_v4() {
+  local campaign_root model_tag aggregate_root
+  mapfile -t campaign_values < <(campaign_paths)
+  if (( ${#campaign_values[@]} != 2 )); then
+    echo "failed to resolve campaign output root and model tag" >&2
+    return 2
+  fi
+  campaign_root="${campaign_values[0]}"
+  model_tag="${campaign_values[1]}"
+  aggregate_root="$campaign_root/aggregate"
+  if [[ "$MODEL_ID" != "qwen25_7b" ]]; then
+    echo "paper-v4 backfill currently requires MODEL_ID=qwen25_7b, found $MODEL_ID" >&2
+    return 2
+  fi
+  echo "[paper-v4] exporting completed 7B cells; no GPU training is launched"
+  "$PYTHON" -u experiments/paper/finalize_channel_matrix.py \
+    --campaign-config "$CONFIG" \
+    --campaign-root "$campaign_root" \
+    --setting-id tofu_qwen25_7b \
+    --model-id "$MODEL_ID" \
+    --prediction-alpha-freeze configs/channel_matrix/prediction_alpha_freeze_7b.yaml \
+    --out-dir "$aggregate_root/paper_v4"
+  echo "[RESULT] paper Table 1=$aggregate_root/paper_v4/table1_core_evidence_${model_tag}.tex"
+  echo "[RESULT] paper Table 2=$aggregate_root/paper_v4/table2_robustness_${model_tag}.tex"
+}
+
 run_phase() {
   local phase="$1"
   local phase_author_args=()
@@ -255,8 +281,16 @@ case "${ACTION}" in
       --scale-label "$SCALE_LABEL" \
       --table-label "tab:channel-matrix-${MODEL_TAG}" \
       --stress-label "tab:channel-stress-${MODEL_TAG}"
-    echo "[RESULT] aggregate=$AGGREGATE_ROOT"
-    echo "[RESULT] latex=$AGGREGATE_ROOT/table1_channel_matrix_${MODEL_TAG}.tex"
+    echo "[RESULT] diagnostic aggregate=$AGGREGATE_ROOT"
+    echo "[RESULT] diagnostic channel matrix=$AGGREGATE_ROOT/table1_channel_matrix_${MODEL_TAG}.tex"
+    if [[ "$MODEL_ID" == "qwen25_7b" ]]; then
+      paper_v4
+    else
+      echo "[paper-v4] model=$MODEL_ID has no committed prediction-alpha freeze; diagnostic only"
+    fi
+    ;;
+  paper-v4)
+    paper_v4
     ;;
   dry-alpha-development)
     CUDA_VISIBLE_DEVICES="${GPU}" "$PYTHON" experiments/channel_matrix/alpha_protection.py \

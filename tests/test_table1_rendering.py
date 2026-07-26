@@ -160,7 +160,7 @@ def test_table1_fails_closed_on_missing_panel_b_summary():
         render_table1(ledger, _report(), setting="tofu")
 
 
-def test_table1_can_render_explicit_dashes_for_incomplete_rows():
+def test_table1_keeps_completed_cells_when_one_metric_is_incomplete():
     raw = _row("graddiff")
     raw["rq1"]["joint_rho"] = {
         "estimate": None,
@@ -173,4 +173,9 @@ def test_table1_can_render_explicit_dashes_for_incomplete_rows():
     rendered = render_table1(
         ledger, _report(), setting="tofu", allow_incomplete=True
     )
-    assert "GradDiff & -- & -- & -- & -- & -- & -- & --" in rendered
+    row = next(
+        line for line in rendered.splitlines() if line.startswith("GradDiff &")
+    )
+    assert row.startswith("GradDiff & -- & 0.200 [0.100]")
+    assert "1.000 [0.900] / 0.900 [0.800]" in row
+    assert row.endswith("Y/Y & Y/Y \\\\")
