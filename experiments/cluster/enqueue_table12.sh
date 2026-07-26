@@ -81,6 +81,43 @@ require_frozen() {  # $1 = freeze yaml path, $2 = what for
     || die "$2 requires $1 to have 'status: frozen' (currently draft). Drain calibration, run the selector, commit the freeze, then re-run."
 }
 
+require_passed_fidelity() {  # $1 = config path, $2 = model id
+  local cfg="$1" model_id="$2"
+  python - "$cfg" "$model_id" "$CLUSTER_RUNS_ROOT" <<'PY' \
+    || die "${model_id} audit requires a passed fidelity certificate; run the model's h100_campaign.sh fidelity phase first."
+import json
+import sys
+from pathlib import Path
+
+import yaml
+
+config_path = Path(sys.argv[1])
+model_id = sys.argv[2]
+runs_root = Path(sys.argv[3])
+config = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+declared = (config.get("audit") or {}).get("fidelity_certificates") or {}
+raw = declared.get(model_id)
+if not raw:
+    raise SystemExit(f"no fidelity certificate declared for {model_id}")
+path = Path(raw)
+if not path.is_absolute() and path.parts and path.parts[0] == "runs":
+    path = runs_root.joinpath(*path.parts[1:])
+elif not path.is_absolute():
+    path = config_path.resolve().parents[1] / path
+if not path.is_file():
+    raise SystemExit(f"missing fidelity certificate for {model_id}: {path}")
+try:
+    payload = json.loads(path.read_text(encoding="utf-8"))
+except (OSError, json.JSONDecodeError) as exc:
+    raise SystemExit(f"invalid fidelity certificate for {model_id}: {path}: {exc}")
+if payload.get("schema") != "fd-fidelity-certificate-v1":
+    raise SystemExit(f"wrong fidelity certificate schema for {model_id}: {path}")
+if payload.get("passed") is not True:
+    raise SystemExit(f"fidelity certificate did not pass for {model_id}: {path}")
+print(f"[enqueue_table12] verified passed fidelity certificate: {path}")
+PY
+}
+
 freeze_path_of() {  # $1 = config path, $2 = yaml key (objective_freeze|alpha_freeze)
   local name
   name="$(grep -m1 -E "^[[:space:]]*$2:" "$1" | awk '{print $2}')"
@@ -147,6 +184,7 @@ case "${cmd}" in
     require_config "${cfg}"
     require_clean_tree
     require_frozen "$(freeze_path_of "${cfg}" objective_freeze)" "7B audit"
+    require_passed_fidelity "${cfg}" qwen25_7b
     queue="$CLUSTER_RUNS_ROOT/cluster_queue/wave2"
     enqueue_phase "7B TOFU audit" "${queue}" "${cfg}" audit
     alpha_freeze="$(freeze_path_of "${cfg}" alpha_freeze)"
@@ -165,6 +203,7 @@ case "${cmd}" in
     require_config "${cfg}"
     require_clean_tree
     require_frozen "$(freeze_path_of "${cfg}" objective_freeze)" "14B audit"
+    require_passed_fidelity "${cfg}" qwen25_14b
     queue="$CLUSTER_RUNS_ROOT/cluster_queue/wave1_14b"
     enqueue_phase "14B TOFU audit" "${queue}" "${cfg}" audit
     alpha_freeze="$(freeze_path_of "${cfg}" alpha_freeze)"

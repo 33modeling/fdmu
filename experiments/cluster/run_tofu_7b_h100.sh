@@ -12,6 +12,7 @@ VENV="/group-volume/fdmu/.venv"
 PYTHON="$VENV/bin/python"
 MODEL_ID=qwen25_7b
 LOG_DIR="$CLUSTER_RUNS_ROOT/logs/cluster"
+FIDELITY_CERT="$CLUSTER_RUNS_ROOT/channel_matrix_7b/fidelity/${MODEL_ID}.json"
 mkdir -p "$LOG_DIR"
 LOG="$LOG_DIR/launcher_${MODEL_ID}_$(hostname)_$(date -u '+%Y%m%dT%H%M%SZ').out"
 ln -sfn "$(basename "$LOG")" "$LOG_DIR/launcher_${MODEL_ID}_$(hostname)_current.out"
@@ -71,7 +72,42 @@ stage() {
   printf '[INFO] time=%s stage=%s start\n' "$(date -u '+%FT%TZ')" "$STAGE"
 }
 
+stop_uncertified_local_audit() {
+  local worker_pattern="experiments/cluster/worker.py --queue ${QUEUE}"
+  local audit_pattern="run_campaign.py.*7b_tofu.yaml.*--phase audit"
+  local attempt
+
+  if [[ -s "$FIDELITY_CERT" ]]; then
+    printf '[INFO] fidelity certificate present: %s\n' "$FIDELITY_CERT"
+    return
+  fi
+  if ! pgrep -f "$worker_pattern|$audit_pattern" >/dev/null; then
+    return
+  fi
+
+  printf '[RECOVERY] fidelity certificate missing; stopping local uncertified '\
+'7B audit before fidelity: %s\n' "$FIDELITY_CERT"
+  # Tell the worker to exit after its child, then terminate the invalid audit
+  # child so it records a retryable failed unit and releases GPU 0.
+  pkill -TERM -f "$worker_pattern" 2>/dev/null || true
+  pkill -TERM -f "$audit_pattern" 2>/dev/null || true
+  for attempt in {1..60}; do
+    if ! pgrep -f "$worker_pattern|$audit_pattern" >/dev/null; then
+      printf '[RECOVERY] local uncertified 7B audit stopped\n'
+      return
+    fi
+    sleep 1
+  done
+  printf '[ERROR] local 7B audit did not stop within 60 seconds; '\
+'refusing to double-book fidelity GPU\n' >&2
+  pgrep -af "$worker_pattern|$audit_pattern" >&2 || true
+  return 1
+}
+
 print_context
+
+stage uncertified-audit-recovery
+stop_uncertified_local_audit
 
 stage fidelity
 GPU="${FIDELITY_GPU:-0}" \

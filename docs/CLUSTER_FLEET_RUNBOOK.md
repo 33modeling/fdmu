@@ -69,8 +69,74 @@ cd /path/to/fdmu
 bash experiments/cluster/setup_group_volume.sh  # 최초 1회
 source /group-volume/fdmu/.venv/bin/activate
 source experiments/cluster/cluster_env.sh
-git pull && python -m pytest -q
+git pull --ff-only origin main
+git status --short          # 출력이 없어야 함
+git log -1 --oneline        # 이 커밋을 실행 기록에 남김
+df -h /group-volume/fdmu
+python -m pytest -q
 ```
+
+### 실험 전 필수 확인
+
+7B와 14B audit은 다음 순서를 지켜야 한다.
+
+1. `/group-volume/fdmu/.venv`를 활성화하고 `yaml`, `torch`, `datasets`,
+   `transformers` import 및 GPU 인식을 preflight로 확인한다.
+2. 해당 모델의 frozen fidelity cell을 실행한다.
+3. CSV와 통과한 fidelity certificate JSON이 모두 생성됐는지 확인한다.
+4. 그 뒤에만 audit unit을 enqueue한다.
+
+```bash
+# 7B
+GPU=0 CONFIG=configs/channel_matrix/7b_tofu.yaml MODEL_ID=qwen25_7b \
+  bash experiments/channel_matrix/h100_campaign.sh fidelity
+test -s /group-volume/fdmu/runs/channel_matrix_7b/fidelity/qwen25_7b.csv
+test -s /group-volume/fdmu/runs/channel_matrix_7b/fidelity/qwen25_7b.json
+
+# 14B
+GPU=0 CONFIG=configs/channel_matrix/14b_tofu.yaml MODEL_ID=qwen25_14b \
+  bash experiments/channel_matrix/h100_campaign.sh fidelity
+test -s /group-volume/fdmu/runs/channel_matrix_14b/fidelity/qwen25_14b.csv
+test -s /group-volume/fdmu/runs/channel_matrix_14b/fidelity/qwen25_14b.json
+```
+
+`run_tofu_7b_h100.sh`와 `run_tofu_14b_h100.sh`는 이 순서를 자동으로 수행한다.
+수동 audit에서 certificate 검사를 끄거나 누락을 무시하면 그 결과는 Table
+1/2 evidence로 사용할 수 없다. 7B 원클릭 실행기는 certificate가 없는 상태에서
+같은 머신의 이전 `wave2` audit worker가 남아 있으면 해당 worker와 audit
+자식만 먼저 종료한다. 따라서 GPU 0를 비운 상태에서 fidelity를 생성하고,
+certificate 생성 후 그 실패 unit만 자동으로 재대기시킨다.
+
+실행 중 `RuntimeError`가 발생하면 해당 unit은 완료된 것이 아니다. 특히
+`inline_container.cc:659 unexpected pos`는 Python 659줄이 아니라 PyTorch
+ZIP checkpoint writer 내부의 저장 실패 위치다. 경고로 무시하거나 실패한
+run 디렉토리를 정상 결과로 취급하지 않는다.
+
+코드를 수정한 뒤에도 이미 실행 중인 Python 프로세스는 이전 코드를 계속
+사용한다. 완료된 unit과 정상 SFT cache는 보존하고, 영향받은 모델 프로세스만
+종료한 뒤 failed unit만 재시도한다.
+
+```bash
+# 현재 상태와 실패 로그 확인
+python experiments/cluster/workqueue.py status --brief \
+  --queue /group-volume/fdmu/runs/cluster_queue/wave1_14b
+
+# 14B 저장 오류를 내던 이전 run_campaign 프로세스만 종료
+pkill -TERM -f 'run_campaign.py.*14b_tofu.yaml' || true
+
+# worker가 unit을 failed로 기록한 뒤 해당 큐의 실패분만 재시도
+python experiments/cluster/workqueue.py retry-failed \
+  --queue /group-volume/fdmu/runs/cluster_queue/wave1_14b
+bash experiments/cluster/launch_node.sh \
+  --dedicated-queue /group-volume/fdmu/runs/cluster_queue/wave1_14b 1
+```
+
+7B도 같은 원칙을 적용하되 큐는
+`/group-volume/fdmu/runs/cluster_queue/wave2`다. `done` 디렉토리, 정상
+결과, 정상 SFT cache를 삭제하거나 큐 전체를 초기화하지 않는다. 현재 SFT
+cache writer는 공유 cache를 잠그고 worker별 임시 파일에 쓴 뒤 원자적으로
+교체하며, 과거 실행의 고정 이름 `*.pt.tmp`는 다음 쓰기에서 격리 없이
+자동 제거한다.
 
 ### 1. 작업 enqueue (아무 노드에서 1회)
 

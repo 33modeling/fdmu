@@ -238,6 +238,9 @@ def test_model_launchers_pin_queues_without_force_override():
     enqueue = (ROOT / "experiments/cluster/enqueue_table12.sh").read_text(
         encoding="utf-8"
     )
+    assert "require_passed_fidelity" in enqueue
+    assert 'require_passed_fidelity "${cfg}" qwen25_7b' in enqueue
+    assert 'require_passed_fidelity "${cfg}" qwen25_14b' in enqueue
     assert "each 8-GPU node starts 8 workers" not in enqueue
     assert "exactly one dedicated worker on GPU 0" in enqueue
 

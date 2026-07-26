@@ -84,10 +84,44 @@ bash local_run.sh run
 현재 H100 실험에 사용하는 머신은 **총 4대**다.
 서로 다른 머신에서 각각 한 명령을 실행한다.
 
+실험 전에 각 머신에서 다음 조건을 먼저 확인한다.
+
+```bash
+git pull --ff-only origin main
+git status --short                         # 출력이 없어야 함
+git log -1 --oneline                       # 실행 커밋 기록
+bash experiments/cluster/setup_group_volume.sh
+source /group-volume/fdmu/.venv/bin/activate
+source experiments/cluster/cluster_env.sh
+df -h /group-volume/fdmu
+```
+
+Audit에는 모델별 fidelity certificate가 필수다. 인증서 누락을 무시하거나
+audit gate를 우회하지 않는다. 아래 원클릭 실행기는 시작 단계에서 해당 모델의
+preflight와 fidelity를 실행하고, 통과한 인증서를 확인한 뒤에만 audit을
+적재한다.
+
 ```bash
 bash experiments/cluster/run_tofu_7b_h100.sh
 bash experiments/cluster/run_tofu_14b_h100.sh
 ```
+
+수동 실행이 필요한 경우에는 audit보다 먼저 다음 명령으로 인증서를 생성한다.
+
+```bash
+GPU=0 CONFIG=configs/channel_matrix/7b_tofu.yaml MODEL_ID=qwen25_7b \
+  bash experiments/channel_matrix/h100_campaign.sh fidelity
+
+GPU=0 CONFIG=configs/channel_matrix/14b_tofu.yaml MODEL_ID=qwen25_14b \
+  bash experiments/channel_matrix/h100_campaign.sh fidelity
+```
+
+`RuntimeError`, 특히 `inline_container.cc:659 unexpected pos`는 무시 가능한
+경고가 아니라 PyTorch checkpoint 저장 실패다. 전체 결과를 삭제할 필요는
+없지만, 실행 중이던 이전 코드의 프로세스를 종료하고 현재 `main`에서 해당
+큐의 failed unit만 재시도해야 한다. 상세 절차는
+[클러스터 런북의 실험 전 필수 확인](docs/CLUSTER_FLEET_RUNBOOK.md#실험-전-필수-확인)을
+따른다.
 
 이 두 명령은 기존 channel-matrix campaign용이다. 최신 PDF-v4 전체 Table 1/2
 실행으로 오인하면 안 된다. 공유 큐, 로그, 복구 절차는 cluster runbook에 있다.
