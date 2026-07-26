@@ -36,7 +36,7 @@ fi
 source "$ROOT/experiments/cluster/cluster_env.sh"
 
 QUEUE="$CLUSTER_RUNS_ROOT/cluster_queue/wave1_14b"
-AUDIT_GPU_COUNT="${AUDIT_GPU_COUNT:-4}"
+WORKER_GPU=0
 FIDELITY_GPU="${FIDELITY_GPU:-0}"
 CURRENT_COMMIT=
 printf '[INFO] time=%s stage=environment-bootstrap complete\n' "$(date -u '+%FT%TZ')"
@@ -89,67 +89,71 @@ assert_clean_retry_commit() {
 }
 
 assert_14b_gpu_exclusive() {
-  local detected gpu gpu_processes process
-  local -a conflicting_workers=()
+  local process gpu
+  local -a extra_wave_workers=()
+  local -a gpu0_workers=()
 
   if [[ "$FIDELITY_GPU" != "0" ]]; then
-    echo "[ERROR] 14B fidelity is pinned to GPU 0; FIDELITY_GPU=$FIDELITY_GPU" >&2
+    echo "[ERROR] 14B fidelity and worker are pinned to GPU 0; FIDELITY_GPU=$FIDELITY_GPU" >&2
     return 2
   fi
   if ! command -v nvidia-smi >/dev/null; then
-    echo "[ERROR] nvidia-smi not found; cannot verify the allocated 14B GPUs" >&2
-    return 2
-  fi
-  if [[ ! "$AUDIT_GPU_COUNT" =~ ^[1-9][0-9]*$ ]]; then
-    echo "[ERROR] AUDIT_GPU_COUNT must be a positive integer: $AUDIT_GPU_COUNT" >&2
-    return 2
-  fi
-  detected="$(nvidia-smi -L | wc -l)"
-  if (( AUDIT_GPU_COUNT > detected )); then
-    echo "[ERROR] 14B requested $AUDIT_GPU_COUNT audit GPUs but only $detected are visible" >&2
+    echo "[ERROR] nvidia-smi not found; cannot verify the dedicated 14B GPU" >&2
     return 2
   fi
 
   while IFS= read -r process; do
     [[ -n "$process" ]] || continue
+    if [[ ! "$process" =~ --queue[[:space:]]+([^[:space:]]*/)?cluster_queue/wave1_14b([[:space:]]|$) ]]; then
+      continue
+    fi
     if [[ "$process" =~ --gpu[[:space:]]+([0-9]+) ]]; then
       gpu="${BASH_REMATCH[1]}"
-      if (( gpu < AUDIT_GPU_COUNT )); then
-        conflicting_workers+=("$process")
+      if (( gpu > 0 )); then
+        extra_wave_workers+=("$process")
       fi
     else
-      conflicting_workers+=("$process")
+      extra_wave_workers+=("$process")
     fi
   done < <(pgrep -af "experiments/cluster/worker.py --queue" || true)
-  if (( ${#conflicting_workers[@]} > 0 )); then
-    printf '[ERROR] allocated 14B GPUs already have cluster workers:\n' >&2
-    printf '  %s\n' "${conflicting_workers[@]}" >&2
-    echo "[ERROR] stop those workers and let their claims settle before restarting" >&2
+  if (( ${#extra_wave_workers[@]} > 0 )); then
+    printf '[ERROR] wave1_14b must not retain GPU1-7 workers:\n' >&2
+    printf '  %s\n' "${extra_wave_workers[@]}" >&2
+    echo "[ERROR] stop those workers and let their claimed units settle before restarting" >&2
     return 2
   fi
 
-  for (( gpu = 0; gpu < AUDIT_GPU_COUNT; gpu++ )); do
-    if ! gpu_processes="$(
-      nvidia-smi -i "$gpu" \
-        --query-compute-apps=pid,process_name,used_gpu_memory \
-        --format=csv,noheader,nounits
-    )"; then
-      echo "[ERROR] failed to inspect GPU $gpu compute processes" >&2
-      return 2
+  while IFS= read -r process; do
+    [[ -n "$process" ]] || continue
+    if [[ "$process" =~ --gpu[[:space:]]+0([[:space:]]|$) ]]; then
+      gpu0_workers+=("$process")
     fi
-    if [[ -n "${gpu_processes//[[:space:]]/}" ]]; then
-      printf '[ERROR] GPU %s already has active compute processes; 14B not started:\n%s\n' \
-        "$gpu" "$gpu_processes" >&2
-      return 2
-    fi
-  done
-  printf '[INFO] GPU 0-%s exclusive preflight passed for wave1_14b\n' \
-    "$((AUDIT_GPU_COUNT - 1))"
+  done < <(pgrep -af "experiments/cluster/worker.py --queue" || true)
+  if (( ${#gpu0_workers[@]} > 0 )); then
+    printf '[ERROR] GPU 0 is reserved by an existing cluster worker; fidelity not started:\n' >&2
+    printf '  %s\n' "${gpu0_workers[@]}" >&2
+    return 2
+  fi
+
+  local gpu_processes
+  if ! gpu_processes="$(
+    nvidia-smi -i 0 \
+      --query-compute-apps=pid,process_name,used_gpu_memory \
+      --format=csv,noheader,nounits
+  )"; then
+    echo "[ERROR] failed to inspect GPU 0 compute processes" >&2
+    return 2
+  fi
+  if [[ -n "${gpu_processes//[[:space:]]/}" ]]; then
+    printf '[ERROR] GPU 0 already has active compute processes; fidelity not started:\n%s\n' \
+      "$gpu_processes" >&2
+    return 2
+  fi
+  printf '[INFO] GPU 0 exclusive preflight passed for wave1_14b\n'
 }
 
 stage gpu-exclusive-preflight
-printf '[TOPOLOGY] launcher activates this host only; 14B fidelity uses GPU 0, audit uses %s GPUs\n' \
-  "$AUDIT_GPU_COUNT"
+printf '[TOPOLOGY] launcher activates this host only; 14B uses one dedicated worker on GPU 0\n'
 printf '[TOPOLOGY] audit_monitor=%s worker_scope=%s; alpha jobs continue independently\n' \
   "$AUDIT_MATCH" "$MODEL_ID"
 assert_14b_gpu_exclusive
@@ -207,13 +211,12 @@ stage fidelity-contract-validation
 stage enqueue
 bash experiments/cluster/enqueue_table12.sh audit-14b
 stage worker-launch
-printf '[CONFIG] model=%s audit_gpu_count=%s queue=%s python=%s\n' \
-  "$MODEL_ID" "$AUDIT_GPU_COUNT" "$QUEUE" "$PYTHON"
-# Audit units are preferred for early LaTeX. The workers then continue queued
-# alpha units and exit naturally without touching other queues.
+printf '[CONFIG] model=%s worker_gpu=%s queue=%s python=%s\n' \
+  "$MODEL_ID" "$WORKER_GPU" "$QUEUE" "$PYTHON"
+# Audit units are preferred for early LaTeX. The GPU 0 worker then continues
+# queued alpha units and exits naturally without touching other queues.
 WAIT=0 UNIT_MATCH="$MODEL_ID" UNIT_PREFER="$AUDIT_MATCH" \
-  bash experiments/cluster/launch_node.sh \
-    --dedicated-queue "$QUEUE" "$AUDIT_GPU_COUNT"
+  bash experiments/cluster/launch_node.sh --dedicated-queue "$QUEUE" 1
 printf '[RESULT] worker-launch complete; active local workers:\n'
 pgrep -af "experiments/cluster/worker.py --queue" || true
 "$PYTHON" experiments/cluster/workqueue.py status --brief --queue "$QUEUE"

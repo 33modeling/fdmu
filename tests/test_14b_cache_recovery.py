@@ -552,8 +552,7 @@ class LauncherContractTest(unittest.TestCase):
             source.index("stage gpu-exclusive-preflight"),
             source.index("stage fidelity"),
         )
-        self.assertIn('AUDIT_GPU_COUNT="${AUDIT_GPU_COUNT:-4}"', source)
-        self.assertIn("allocated 14B GPUs already have cluster workers", source)
+        self.assertIn("wave1_14b must not retain GPU1-7 workers", source)
         self.assertIn("--query-compute-apps=pid,process_name,used_gpu_memory", source)
         self.assertIn('config["audit"]["authors"]', source)
         self.assertIn('RETRY_ARGS+=(--unit "$unit_id")', source)

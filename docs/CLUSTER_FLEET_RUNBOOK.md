@@ -143,7 +143,7 @@ pkill -TERM -f 'run_campaign.py.*14b_tofu.yaml' || true
 python experiments/cluster/workqueue.py retry-failed \
   --queue /group-volume/fdmu/runs/cluster_queue/wave1_14b
 bash experiments/cluster/launch_node.sh \
-  --dedicated-queue /group-volume/fdmu/runs/cluster_queue/wave1_14b 4
+  --dedicated-queue /group-volume/fdmu/runs/cluster_queue/wave1_14b 1
 ```
 
 7B도 같은 원칙을 적용하되 큐는
@@ -161,15 +161,8 @@ cache writer는 worker별 stage에 legacy 순차 형식으로 쓴 뒤 SHA-256을
 크기와 SHA-256을 다음 load에서 검증한다. 이전 전체-model cache와 계약
 불일치는 forensics로 보존한 뒤 새 block cache를 만든다. 일반적인 일시 I/O
 오류는 숨기거나 무한 재시도하지 않고 즉시 실패시킨다.
-14B 원클릭 실행기는 fidelity 전에 기본 할당 GPU 0-3의 compute process와
-cluster worker 충돌을 확인한다. Fidelity는 GPU 0에서 직렬 실행하고, 통과 후
-audit/alpha 큐는 기본 worker 4개로 병렬 실행한다. 다른 개수는
-`AUDIT_GPU_COUNT`로 명시한다.
-
-이전 단일-worker 런처로 fidelity가 이미 시작된 경우에는 해당 프로세스를
-중단하지 않는다. `experiments/cluster/scale_tofu_14b_h100.sh`를 별도 셸에서
-실행하면 기존 launcher의 worker-launch 단계와 유효한 fidelity certificate를
-기다린 뒤 같은 큐에 GPU 1-3 worker를 추가한다.
+14B 원클릭 실행기는 fidelity 전에 GPU 0 compute process가 없는지 확인하며,
+같은 `wave1_14b`의 GPU 1-7 worker가 남아 있으면 시작을 거부한다.
 노드 launcher는 호스트 lease 아래에서 충돌 검사와 worker 생성을 수행하고,
 watcher/worker에는 lease FD를 넘기지 않는다. lease 대기는 기본 60초 후
 실패한다. 3초 안에 죽은 worker의 로그 tail을 출력한 뒤 즉시 실패한다.
