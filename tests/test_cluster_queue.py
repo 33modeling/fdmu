@@ -438,6 +438,28 @@ def test_model_launchers_pin_queues_without_force_override():
     assert '"PyYAML==6.0.2"' in setup
 
 
+def test_llm_diagnostics_maps_cluster_result_artifacts():
+    guide = (ROOT / "docs/LLM_RUN_DIAGNOSTICS.md").read_text(encoding="utf-8")
+    for artifact in (
+        "fidelity/qwen25_7b.csv",
+        "fidelity/qwen25_14b.json",
+        "sft_cache/<model>/tofu-a<author>_seed-<seed>.pt.json",
+        "$RUNS/sft_cache/<model>-<model-source-hash>/tofu/",
+        "audit/<model>/tofu-a<author>/seed-<seed>/",
+        "run_manifest.json",
+        "seal_ledger.jsonl",
+        "traj_<objective>/damage.json",
+        "channel_report.json",
+        "aggregate/pooled_channel_report.json",
+        "table1_channel_matrix_<model>.tex",
+        "alpha_protection/<development|audit>",
+    ):
+        assert artifact in guide
+    assert "n_runs == 6" in guide
+    assert "partial/descriptive only" in guide
+    assert "최신 PDF-v4의 최종 Table 1/2 evidence와 동일" in guide
+
+
 def test_quarantine_moves_only_retryable_partial_audit(tmp_path, monkeypatch):
     runs = tmp_path / "runs"
     queue = runs / "cluster_queue" / "wave2"

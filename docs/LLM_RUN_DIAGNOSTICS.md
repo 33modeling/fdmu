@@ -74,6 +74,192 @@ watcher는 기존 artifact를 읽고 `joint_sweep/live/`만 갱신한다. Partia
 | aggregate | `channel_matrix_7b/aggregate/` | `channel_matrix_14b/aggregate/` |
 | LaTeX | `channel_matrix_7b/aggregate/table1_channel_matrix_qwen25_7b.tex` | `channel_matrix_14b/aggregate/table1_channel_matrix_qwen25_14b.tex` |
 
+### 클러스터 결과 저장 구조
+
+로컬 LLM은 아래 두 root를 먼저 변수처럼 해석한다.
+
+```text
+RUNS=/group-volume/fdmu/runs
+R7=$RUNS/channel_matrix_7b
+R14=$RUNS/channel_matrix_14b
+```
+
+실제 root의 근거는 각각 `configs/channel_matrix/7b_tofu.yaml`과
+`configs/channel_matrix/14b_tofu.yaml`의 `output_root`다. `runs/...` 상대 경로는
+cluster에서 `$CLUSTER_RUNS_ROOT/...`로 변환된다. 분석할 때 저장소의 `runs/`나
+user volume에 같은 이름의 오래된 디렉터리가 있어도 혼용하지 않는다.
+
+| 단계/역할 | 7B | 14B |
+|---|---|---|
+| Fidelity 원자료 | `$R7/fidelity/qwen25_7b.csv` | `$R14/fidelity/qwen25_14b.csv` |
+| Fidelity v2 인증서 | `$R7/fidelity/qwen25_7b.json` | `$R14/fidelity/qwen25_14b.json` |
+| Campaign SFT cache | `$R7/sft_cache/qwen25_7b/` | `$R14/sft_cache/qwen25_14b/` |
+| Automatic audit SFT cache | `$RUNS/sft_cache/qwen25_7b-*/` | `$RUNS/sft_cache/qwen25_14b-*/` |
+| Audit cell root | `$R7/audit/qwen25_7b/` | `$R14/audit/qwen25_14b/` |
+| Alpha development | `$R7/alpha_protection/development/qwen25_7b/` | `$R14/alpha_protection/development/qwen25_14b/` |
+| Alpha audit | `$R7/alpha_protection/audit/qwen25_7b/` | `$R14/alpha_protection/audit/qwen25_14b/` |
+| Pooled aggregate | `$R7/aggregate/` | `$R14/aggregate/` |
+
+#### Fidelity
+
+CSV와 JSON은 하나의 artifact pair다. JSON에서 다음을 확인한 뒤에만 CSV를
+유효한 결과로 사용한다.
+
+```text
+schema == fd-fidelity-certificate-v2
+passed == true
+csv_sha256 == 실제 CSV SHA-256
+csv_rows == 실제 CSV data row 수
+code_commit == 분석 대상 run의 commit
+model_fingerprint, thresholds, metrics가 존재
+```
+
+CSV에는 finite-difference grid의 cell별 수치가 있고, JSON `metrics`에는 frozen
+cell의 판정 수치가 있다. `passed=false`인 파일은 완료된 측정 결과이지만 audit을
+허용하는 인증서는 아니다. `.lock` 파일은 결과가 아니므로 분석하거나 삭제하지
+않는다.
+
+#### SFT cache
+
+SFT cache에는 두 경로 형식이 있다. Calibration과 alpha protection이 명시적으로
+지정하는 campaign cache pair:
+
+```text
+<MODEL_ROOT>/sft_cache/<model>/tofu-a<author>_seed-<seed>.pt
+<MODEL_ROOT>/sft_cache/<model>/tofu-a<author>_seed-<seed>.pt.json
+```
+
+Audit gate의 기본 `--sft-cache auto`가 사용하는 exact-contract cache pair:
+
+```text
+$RUNS/sft_cache/<model>-<model-source-hash>/tofu/
+  tofu-a<author>__<contract-hash>.pt
+  tofu-a<author>__<contract-hash>.pt.json
+```
+
+Cluster bootstrap은 checkout의 `runs`를 `$RUNS`로 연결하므로 auto cache도 group
+volume에 저장된다. 어떤 cache가 실제 사용됐는지는 각 audit
+`run_manifest.json`의 `sft_cache.path`, `hit`, `contract_sha256`을 최종 기준으로
+판단한다. 경로 이름만 보고 cache hit를 추정하지 않는다.
+
+`.pt`는 재사용할 모델 state이고 `.pt.json`은 contract, `full_mean_nll`,
+`reached`, 크기, SHA-256을 담은 metadata다. 분석 시 metadata의 `integrity`와
+`sft_result`를 먼저 읽는다. `.guard`, `.tmp`, local staging 파일은 결과가
+아니다. SFT cache는 계산 재사용 artifact이며 Table metric으로 직접 집계하지
+않는다.
+
+#### Audit 원자료
+
+현재 frozen roster는 모델마다 author `181, 186, 191`과 seed `2025, 2026`의
+6개 cell이다.
+
+```text
+<MODEL_ROOT>/audit/<model>/tofu-a<author>/seed-<seed>/
+```
+
+각 cell의 주요 파일:
+
+| 파일 | 의미와 사용법 |
+|---|---|
+| `run_manifest.json` | model, request, seed, candidate roster, objective/predictor 목록, config/fidelity/freeze SHA, code commit을 담은 provenance 기준 |
+| `gate.log` | SFT cache hit, predictor scoring, objective 진행 및 first-reaching step을 사람이 읽는 실행 로그 |
+| `profile_artifacts/<predictor>.json` | predictor별 cost, discovery score, candidate/fold metadata. Audit score는 seal 밖 평문에 두지 않음 |
+| `seals/` + `seal_ledger.jsonl` | audit-fold predictor score와 open 이력. 임의로 수정하거나 seal 파일만 단독 해석하지 않음 |
+| `traj_<objective>/damage.json` | step별 forget recall, candidate NLL, damage trajectory |
+| `traj_<objective>/DONE` | 해당 objective trajectory가 원자적으로 완료됐다는 marker |
+| `table1.json` | 단일 request/seed의 predictor-objective 계산 결과 |
+| `channel_report.csv` | 단일 cell의 predictor x objective rho, AUROC, overlap, tail-rho |
+| `channel_report.json` | 단일 cell interaction과 bootstrap CI를 포함한 구조화 요약 |
+
+`damage.json`에서는 terminal snapshot을 임의로 고르지 않는다. Aggregate 코드는
+frozen `forget_recall_max`를 처음 만족한 snapshot의 damage를 사용한다. 로컬
+LLM도 논문 수치 재계산 시
+`experiments/channel_matrix/aggregate.py::_first_reaching_damage`와 같은 규칙을
+사용해야 한다.
+
+Audit cell 완료 조건은 다음을 모두 만족하는 것이다.
+
+1. `run_manifest.json`의 contract SHA와 code commit이 현재 campaign과 일치한다.
+2. 선언된 모든 `traj_<objective>/DONE`과 `damage.json`이 존재한다.
+3. 모든 predictor의 seal ledger 상태가 `opened`다.
+4. `channel_report.csv`와 `channel_report.json`이 존재한다.
+
+`gate.log`가 끝났거나 `table1.json`만 있다고 완료로 판단하지 않는다.
+
+#### Aggregate와 LaTeX
+
+정상 audit 6개가 모두 끝나면 아래 파일이 생성된다.
+
+```text
+<MODEL_ROOT>/aggregate/pooled_channel_report.csv
+<MODEL_ROOT>/aggregate/pooled_channel_report.json
+<MODEL_ROOT>/aggregate/model_channel_report.csv
+<MODEL_ROOT>/aggregate/table1_channel_matrix_<model>.tex
+<MODEL_ROOT>/aggregate/table1_stress_<model>.tex
+```
+
+분석의 기준은 `pooled_channel_report.json`과 CSV다. JSON에서 `n_runs == 6`,
+`requests`, `seeds`, `predictors`, `objectives`, `stress_objectives`,
+`objective_status`, `roster_interaction`을 먼저 검사한다. CSV는
+predictor-objective별 `rho`, CI, AUROC, overlap, tail-rho를 후속 plot/table
+생성에 사용한다. `model_channel_report.csv`는 모델별 축약본이다. `.tex`는 표시용
+파생 artifact이므로 원수치 분석의 입력으로 사용하지 않는다.
+
+파일명이 `table1_channel_matrix`여도 이 H100 channel-matrix 결과는 기존 진단
+campaign 산출물이다. 최신 PDF-v4의 최종 Table 1/2 evidence와 동일하다고
+간주하지 않는다. 최신 paper evidence의 의미와 metric은
+`docs/TABLE12_METRICS.md`, `docs/PREDICTOR_METRICS.md`,
+`docs/PAPER_EVIDENCE_PIPELINE.md`를 함께 읽어 구분한다.
+
+#### Alpha protection
+
+Alpha cell은 아래에 저장된다.
+
+```text
+<MODEL_ROOT>/alpha_protection/<development|audit>/<model>/tofu-a<author>/seed-<seed>/
+```
+
+주요 파일은 `run_manifest.json`, `alpha_protection.log`,
+`results.partial.jsonl`, `random_draws.partial.jsonl`, 최종 `results.json`,
+`DONE`이다. `.partial.jsonl`은 재개용 append log이며 `DONE` 없는 cell을 최종
+결과로 사용하지 않는다. Legacy diagnostic aggregate를 명시적으로 실행한 경우에만
+`alpha_protection/aggregate/alpha_protection_curve.csv`,
+`alpha_protection_contrasts.csv`, `alpha_protection_summary.json`이 생긴다.
+이 summary는 자체적으로 `paper_evidence=false`를 선언하므로 최신 paper
+evidence로 승격하지 않는다.
+
+### 로컬 LLM 분석 순서
+
+로컬 LLM은 사용자에게 경로 확인 명령을 요청하기 전에 filesystem을 직접 읽고
+다음 순서를 따른다.
+
+1. 해당 모델 launcher `current` 로그에서 마지막 stage와 실행 commit을 찾는다.
+2. queue의 `done/claimed/pending/failed`를 세어 실행 상태와 완료 결과를 구분한다.
+3. `done/<unit>.json`의 `result.log`를 따라가 unit 로그를 찾는다.
+4. Fidelity JSON/CSV pair를 검증한다.
+5. Audit의 6개 `run_manifest.json`과 completion marker를 roster와 대조한다.
+6. 전체 roster가 완성됐으면 pooled JSON/CSV를 우선 분석한다.
+7. Aggregate가 없으면 완료 cell의 `channel_report.json`만 중간 결과로 요약하고
+   반드시 `partial/descriptive only`라고 표시한다.
+8. 수치 해석에는 config, manifest, source artifact 경로를 함께 기록한다.
+
+분석 보고에는 최소한 아래를 포함한다.
+
+```text
+model / campaign commit
+fidelity passed 여부와 frozen metrics
+queue counts와 실패 unit
+완료 audit cell 수 / 기대 6개
+누락 author-seed-objective
+pooled n_runs와 interaction CI (aggregate가 있을 때)
+사용한 JSON/CSV의 절대 경로
+paper evidence인지 diagnostic artifact인지
+```
+
+Queue JSON, log, `.partial.jsonl`, forensics artifact는 실행 상태와 원인 분석에
+활용할 수 있지만 최종 metric 입력으로 자동 승격하지 않는다. 분석 목적으로
+`retry-failed`, `requeue-stale`, 파일 이동/삭제, seal open을 실행하지 않는다.
+
 공통 worker/unit 로그:
 
 ```text

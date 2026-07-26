@@ -13,7 +13,7 @@ prompt는 제거했으며, 과거 내용은 Git history에서만 확인한다.
 | 최종 결과와 LaTeX 생성 | [Final results runbook](FINAL_RESULTS_RUNBOOK.md) |
 | 새 모델 캘리브레이션 | [New model calibration](NEW_MODEL_CALIBRATION_GUIDE.md) |
 | 실행 전 fail-closed 검사 | [Paper campaign preflight](PAPER_CAMPAIGN_PREFLIGHT.md) |
-| 로컬 LLM 로그·중간 결과·원인 분석 | [Run diagnostics](LLM_RUN_DIAGNOSTICS.md) |
+| 로컬 LLM 로그·클러스터 결과·원인 분석 | [Run diagnostics](LLM_RUN_DIAGNOSTICS.md) |
 
 ## 논문 계약과 메트릭
 
