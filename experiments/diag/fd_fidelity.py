@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import hashlib
 import json
 import math
 import os
@@ -193,6 +194,8 @@ def main() -> None:
     p.add_argument("--k", type=int, default=0, help="Overlap@k; 0 -> max(5, round(0.1*n))")
     p.add_argument("--out", default="")
     p.add_argument("--certificate", default="")
+    p.add_argument("--code-commit", default="untracked-direct-run")
+    p.add_argument("--model-fingerprint", default="untracked-direct-run")
     p.add_argument("--gate-r", type=int, default=64)
     p.add_argument("--gate-eta", type=float, default=3e-3)
     p.add_argument("--gate-seed", type=int, default=0)
@@ -333,7 +336,7 @@ def main() -> None:
         and gate["frac_changed"] >= a.min_frac_changed
     )
     certificate = {
-        "schema": "fd-fidelity-certificate-v1",
+        "schema": "fd-fidelity-certificate-v2",
         "passed": passed,
         "model": a.model,
         "dtype": a.dtype,
@@ -346,6 +349,10 @@ def main() -> None:
         "R": a.gate_r,
         "eta": a.gate_eta,
         "probe_seed": a.gate_seed,
+        "code_commit": a.code_commit,
+        "model_fingerprint": a.model_fingerprint,
+        "csv_sha256": hashlib.sha256(out.read_bytes()).hexdigest(),
+        "csv_rows": len(rows),
         "metrics": gate,
         # Per-candidate exact (A) and frozen loss-shake (C) scores of the gate
         # cell, so downstream summaries can bootstrap f_rho/f_K lower bounds

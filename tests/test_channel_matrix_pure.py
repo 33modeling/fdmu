@@ -129,6 +129,34 @@ class ChannelCampaignContractTest(unittest.TestCase):
                 destination.parent, runs / "forensics" / "audit-partials"
             )
 
+    def test_current_contract_manifest_mismatch_is_not_complete(self):
+        with tempfile.TemporaryDirectory() as directory:
+            out = Path(directory)
+            (out / "run_manifest.json").write_text(
+                json.dumps(
+                    {
+                        "campaign_config_sha256": "old-config",
+                        "fidelity_certificate_sha256": "old-fidelity",
+                        "code_commit": "old-commit",
+                    }
+                ),
+                encoding="utf-8",
+            )
+            self.assertEqual(
+                campaign._manifest_mismatches(
+                    out,
+                    {
+                        "campaign_config_sha256": "new-config",
+                        "fidelity_certificate_sha256": "new-fidelity",
+                        "code_commit": "new-commit",
+                    },
+                ),
+                [
+                    "campaign_config_sha256",
+                    "code_commit",
+                    "fidelity_certificate_sha256",
+                ],
+            )
     def test_audit_dry_run_ignores_existing_runtime_artifacts(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -228,6 +256,8 @@ class ChannelCampaignContractTest(unittest.TestCase):
         all_objectives = cfg["audit"]["objectives"] + cfg["audit"]["stress_objectives"]
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
+            output_root = root / "campaign-output"
+            cfg["output_root"] = str(output_root)
             freeze = {
                 "freeze_id": "TEST-FREEZE",
                 "status": "frozen",
@@ -245,21 +275,46 @@ class ChannelCampaignContractTest(unittest.TestCase):
             (root / "freeze.yaml").write_text(
                 yaml.safe_dump(freeze), encoding="utf-8"
             )
+            thresholds = {
+                "rho_AB": float(cfg["fidelity"]["min_rho_ab"]),
+                "rho_BC": float(cfg["fidelity"]["min_rho_bc"]),
+                "rho_AC": float(cfg["fidelity"]["min_rho_ac"]),
+                "eff_over_eta": float(cfg["fidelity"]["min_eff_ratio"]),
+                "frac_changed": float(cfg["fidelity"]["min_frac_changed"]),
+            }
             certificate = {
-                "schema": "fd-fidelity-certificate-v1",
+                "schema": "fd-fidelity-certificate-v2",
                 "passed": True,
                 "model": self.models[0]["path"],
                 "dtype": cfg["common"]["dtype"],
+                "dataset": cfg.get("dataset", "tofu"),
+                "author": cfg["fidelity"]["author"],
                 "candidate_authors": sorted(campaign._expand_int_ranges(
                     cfg["common"]["candidate_author_pools"]["calibration"]
                 )),
+                "candidate_seed": cfg["fidelity"]["candidate_seed"],
                 "n_candidates": cfg["fidelity"]["n_candidates"],
                 "block_last_n": cfg["common"]["block_last_n"],
                 "R": cfg["common"]["probe_dirs"],
                 "eta": cfg["common"]["probe_norm_eta"],
                 "probe_seed": cfg["common"]["probe_seed"],
+                "code_commit": campaign._git_state()["code_commit"],
+                "model_fingerprint": campaign._model_fingerprint(
+                    self.models[0]["path"]
+                ),
+                "csv_sha256": "not-used-by-audit-command-construction",
+                "csv_rows": 1,
+                "metrics": dict(thresholds),
+                "thresholds": thresholds,
             }
-            cert_path = root / "fidelity.json"
+            csv_path = output_root / "fidelity" / "qwen25_7b.csv"
+            csv_path.parent.mkdir(parents=True)
+            csv_path.write_text("seed,R\n0,64\n", encoding="utf-8")
+            certificate["csv_sha256"] = hashlib.sha256(
+                csv_path.read_bytes()
+            ).hexdigest()
+            certificate["csv_rows"] = 1
+            cert_path = output_root / "fidelity" / "qwen25_7b.json"
             cert_path.write_text(json.dumps(certificate), encoding="utf-8")
             cfg["audit"]["objective_freeze"] = "freeze.yaml"
             cfg["audit"]["fidelity_certificates"]["qwen25_7b"] = str(cert_path)

@@ -607,7 +607,12 @@ def run_unit(args: argparse.Namespace) -> None:
         / args.setting
         / f"{args.request}__seed-{args.seed}.pt"
     )
-    cache_contract = gate_runtime._sft_cache_contract(runtime_args, request, block)
+    cache_contract = gate_runtime._sft_cache_contract(
+        runtime_args,
+        request,
+        block,
+        tuple(block.select(model0)),
+    )
     cache_contract["paper_native_utility_ids_sha256"] = _json_sha(
         [example.example_id for example in native_utility]
     )
@@ -642,10 +647,7 @@ def run_unit(args: argparse.Namespace) -> None:
             f"SFT target not reached: {sft_result['full_mean_nll']} > "
             f"{sft_result['target']}"
         )
-    state0 = {
-        name: tensor.detach().cpu().clone()
-        for name, tensor in model0.state_dict().items()
-    }
+    state0 = gate_runtime._snapshot_sft_state(model0, cache_contract)
     if not cache_path.exists():
         gate_runtime._write_sft_cache(
             cache_path, cache_contract, sft_result, state0, log
@@ -653,7 +655,7 @@ def run_unit(args: argparse.Namespace) -> None:
 
     def fresh():
         model = gate_runtime.load_model(runtime_args, tokenizer)
-        model.load_state_dict(state0)
+        gate_runtime._apply_sft_state(model, state0, cache_contract)
         return model
 
     identity = block_identity(model0, block)

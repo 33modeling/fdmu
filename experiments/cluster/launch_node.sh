@@ -91,6 +91,20 @@ if (( NGPU > DETECTED )); then
   exit 1
 fi
 
+# Serialize the conflict check and worker spawn on this host. Without this
+# short-lived lease, simultaneous 7B/14B launchers can both observe GPU 0 as
+# free and then double-book it.
+command -v flock >/dev/null 2>&1 \
+  || { echo "flock is required for host launcher coordination" >&2; exit 2; }
+HOST_LAUNCH_LOCK="$CLUSTER_WORK_ROOT/launcher.lock"
+exec 8>"$HOST_LAUNCH_LOCK"
+if ! flock -x -w "${HOST_LAUNCH_LOCK_TIMEOUT_SECONDS:-60}" 8; then
+  echo "timed out waiting for host launcher lease: $HOST_LAUNCH_LOCK" >&2
+  echo "check for another active 7B/14B launcher on this host" >&2
+  exit 2
+fi
+echo "host launcher lease acquired: $HOST_LAUNCH_LOCK"
+
 # Refuse before launching anything when this node already serves another
 # queue. Queue-specific duplicate checks alone can otherwise double-book all
 # GPUs and make every newly spawned worker fail independently.
@@ -115,7 +129,7 @@ python experiments/cluster/workqueue.py init --queue "${QUEUE}"
 
 nohup python -u experiments/cluster/node_watch.py --replace \
   --status-dir "$CLUSTER_RUNS_ROOT/cluster_status" \
-  >> "${LOGDIR}/watch_${HOST}.out" 2>&1 &
+  8>&- >> "${LOGDIR}/watch_${HOST}.out" 2>&1 &
 echo "node=${HOST} queue=${QUEUE} gpus=${NGPU}/${DETECTED} wait=${WAIT} unit_match=${UNIT_MATCH:-all} unit_prefer=${UNIT_PREFER:-none} watcher_pid=$!"
 
 wait_flag=()
@@ -131,6 +145,8 @@ if [[ -n "${UNIT_PREFER}" ]]; then
   prefer_flag=(--prefer-unit-prefix "${UNIT_PREFER}")
 fi
 
+STARTED_PIDS=()
+STARTED_LOGS=()
 for (( g = 0; g < NGPU; g++ )); do
   if pgrep -f "experiments/cluster/worker.py --queue ${QUEUE} --gpu ${g}( |$)" >/dev/null; then
     echo "  worker gpu${g}: already running, skipped"
@@ -141,7 +157,32 @@ for (( g = 0; g < NGPU; g++ )); do
     --queue "${QUEUE}" --gpu "${g}" "${wait_flag[@]}" \
     "${match_flag[@]}" "${prefer_flag[@]}" \
     --log-dir "$LOGDIR" \
-    >> "${out}" 2>&1 &
-  echo "  worker gpu${g}: started pid=$! log=${out}"
+    8>&- >> "${out}" 2>&1 &
+  pid=$!
+  STARTED_PIDS+=("$pid")
+  STARTED_LOGS+=("$out")
+  echo "  worker gpu${g}: started pid=${pid} log=${out}"
 done
+
+sleep "${WORKER_STARTUP_GRACE_SECONDS:-3}"
+STARTUP_FAILURES=0
+for index in "${!STARTED_PIDS[@]}"; do
+  pid="${STARTED_PIDS[$index]}"
+  out="${STARTED_LOGS[$index]}"
+  if kill -0 "$pid" 2>/dev/null; then
+    echo "  worker startup verified: pid=${pid} log=${out}"
+    continue
+  fi
+  if tail -n 20 "$out" 2>/dev/null | grep -q "queue drained"; then
+    echo "  worker exited cleanly after queue drain: pid=${pid} log=${out}"
+    continue
+  fi
+  echo "worker died during startup: pid=${pid} log=${out}" >&2
+  tail -n 60 "$out" >&2 || true
+  STARTUP_FAILURES=$((STARTUP_FAILURES + 1))
+done
+if (( STARTUP_FAILURES > 0 )); then
+  echo "${STARTUP_FAILURES} worker(s) failed during startup" >&2
+  exit 2
+fi
 echo "overview: bash experiments/cluster/fleet_status.sh"

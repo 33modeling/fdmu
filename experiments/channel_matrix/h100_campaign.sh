@@ -48,6 +48,7 @@ mkdir -p "$CLUSTER_RUNS_ROOT/logs"
 CAMPAIGN_LOG_DIR="$CLUSTER_RUNS_ROOT/logs/channel_matrix"
 mkdir -p "$CAMPAIGN_LOG_DIR"
 CAMPAIGN_LOG="$CAMPAIGN_LOG_DIR/${MODEL_ID}_${ACTION}_$(hostname)_$(date -u '+%Y%m%dT%H%M%SZ')_$$.log"
+export FDMU_CAMPAIGN_LOG="$CAMPAIGN_LOG"
 ln -sfn "$(basename "$CAMPAIGN_LOG")" \
   "$CAMPAIGN_LOG_DIR/${MODEL_ID}_${ACTION}_$(hostname)_current.log"
 exec > >(tee -a "$CAMPAIGN_LOG") 2>&1

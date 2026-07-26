@@ -28,14 +28,17 @@ from __future__ import annotations
 
 import argparse
 from contextlib import contextmanager
+import csv
 from datetime import datetime, timezone
 import fcntl
 import hashlib
 import itertools
 import json
+import math
 import os
 import shlex
 import shutil
+import socket
 import subprocess
 import sys
 import time
@@ -82,6 +85,28 @@ def _git_state() -> dict[str, str | bool]:
         check=True, text=True, capture_output=True,
     ).stdout.strip()
     return {"code_commit": commit, "code_dirty": bool(dirty_output)}
+
+
+def _model_fingerprint(path: str | Path) -> str:
+    root = Path(path)
+    digest = hashlib.sha256()
+    for name in (
+        "config.json",
+        "generation_config.json",
+        "tokenizer.json",
+        "tokenizer_config.json",
+        "model.safetensors.index.json",
+        "pytorch_model.bin.index.json",
+    ):
+        candidate = root / name
+        if candidate.is_file():
+            digest.update(name.encode())
+            digest.update(candidate.read_bytes())
+    for pattern in ("*.safetensors", "pytorch_model*.bin"):
+        for candidate in sorted(root.glob(pattern)):
+            digest.update(candidate.name.encode())
+            digest.update(str(candidate.stat().st_size).encode())
+    return digest.hexdigest()
 
 
 def _csv(values) -> str:
@@ -289,10 +314,17 @@ def calibration_commands(
             yield out, cmd
 
 
-def fidelity_commands(cfg: dict, models: list[dict], output_root: Path):
+def fidelity_commands(
+    cfg: dict,
+    models: list[dict],
+    output_root: Path,
+    *,
+    code_commit: str | None = None,
+):
     common = cfg["common"]
     phase = cfg["fidelity"]
     declared = cfg["audit"]["fidelity_certificates"]
+    current_commit = code_commit or str(_git_state()["code_commit"])
     for model in models:
         csv_path = output_root / "fidelity" / f"{model['id']}.csv"
         certificate = _runtime_path(declared[model["id"]])
@@ -303,7 +335,6 @@ def fidelity_commands(cfg: dict, models: list[dict], output_root: Path):
             "--model", str(model["path"]),
             "--device", str(common.get("device", "cuda")),
             "--dtype", str(common["dtype"]),
-            "--dataset", str(cfg.get("dataset", "tofu")),
             "--author", str(phase["author"]),
             "--universe-authors", str(common["universe_authors"]),
             "--candidate-authors", str(common["candidate_author_pools"]["calibration"]),
@@ -324,6 +355,8 @@ def fidelity_commands(cfg: dict, models: list[dict], output_root: Path):
             "--min-frac-changed", str(phase["min_frac_changed"]),
             "--out", str(csv_path),
             "--certificate", str(certificate),
+            "--code-commit", current_commit,
+            "--model-fingerprint", _model_fingerprint(model["path"]),
             "--enforce-gate",
         ]
         yield csv_path, certificate, cmd
@@ -336,7 +369,12 @@ def _fidelity_certificate_path(cfg: dict, model: dict) -> Path:
     return _runtime_path(declared[model["id"]])
 
 
-def validate_fidelity_certificate(cfg: dict, model: dict) -> dict:
+def validate_fidelity_certificate(
+    cfg: dict,
+    model: dict,
+    *,
+    require_passed: bool = True,
+) -> dict:
     """Load one certificate and validate the complete current frozen cell."""
     path = _fidelity_certificate_path(cfg, model)
     try:
@@ -351,14 +389,19 @@ def validate_fidelity_certificate(cfg: dict, model: dict) -> dict:
     common = cfg["common"]
     phase = cfg["fidelity"]
     expected = {
-        "schema": "fd-fidelity-certificate-v1",
-        "passed": True,
+        "schema": "fd-fidelity-certificate-v2",
         "model": str(model["path"]),
         "dtype": str(common["dtype"]),
+        "dataset": str(cfg.get("dataset", "tofu")),
+        "author": int(phase["author"]),
+        "candidate_seed": int(phase["candidate_seed"]),
+        "n_candidates": int(phase["n_candidates"]),
         "block_last_n": int(common["block_last_n"]),
         "R": int(common["probe_dirs"]),
         "eta": float(common["probe_norm_eta"]),
         "probe_seed": int(common["probe_seed"]),
+        "code_commit": str(_git_state()["code_commit"]),
+        "model_fingerprint": _model_fingerprint(model["path"]),
     }
     for key, value in expected.items():
         if cert.get(key) != value:
@@ -375,18 +418,55 @@ def validate_fidelity_certificate(cfg: dict, model: dict) -> dict:
             f"fidelity certificate for {model['id']} did not use the frozen "
             "development candidate pool"
         )
-    minimum = int(phase.get("n_candidates", 128))
-    try:
-        actual_candidates = int(cert.get("n_candidates", 0))
-    except (TypeError, ValueError) as exc:
+
+    expected_thresholds = {
+        "rho_AB": float(phase["min_rho_ab"]),
+        "rho_BC": float(phase["min_rho_bc"]),
+        "rho_AC": float(phase["min_rho_ac"]),
+        "eff_over_eta": float(phase["min_eff_ratio"]),
+        "frac_changed": float(phase["min_frac_changed"]),
+    }
+    if cert.get("thresholds") != expected_thresholds:
         raise ValueError(
-            f"fidelity certificate for {model['id']} has invalid n_candidates: "
-            f"{cert.get('n_candidates')!r}"
-        ) from exc
-    if actual_candidates < minimum:
+            f"fidelity certificate mismatch for {model['id']}/thresholds: "
+            f"expected {expected_thresholds!r}, got {cert.get('thresholds')!r}"
+        )
+
+    metrics = cert.get("metrics")
+    if not isinstance(metrics, dict):
+        raise ValueError(f"fidelity certificate for {model['id']} has no metrics")
+    metric_values = {}
+    for key in expected_thresholds:
+        try:
+            metric_values[key] = float(metrics[key])
+        except (KeyError, TypeError, ValueError) as exc:
+            raise ValueError(
+                f"fidelity certificate for {model['id']} has invalid metric "
+                f"{key}: {metrics.get(key)!r}"
+            ) from exc
+        if not math.isfinite(metric_values[key]):
+            raise ValueError(
+                f"fidelity certificate for {model['id']} has non-finite metric "
+                f"{key}: {metric_values[key]!r}"
+            )
+    calculated_pass = all(
+        metric_values[key] >= threshold
+        for key, threshold in expected_thresholds.items()
+    )
+    if cert.get("passed") is not calculated_pass:
         raise ValueError(
-            f"fidelity certificate for {model['id']} has too few candidates: "
-            f"{actual_candidates} < {minimum}"
+            f"fidelity certificate for {model['id']} has inconsistent passed flag: "
+            f"declared={cert.get('passed')!r} calculated={calculated_pass}"
+        )
+    if require_passed and not calculated_pass:
+        details = ", ".join(
+            f"{key}={metric_values[key]:.6g}<{expected_thresholds[key]:.6g}"
+            for key in expected_thresholds
+            if metric_values[key] < expected_thresholds[key]
+        )
+        raise ValueError(
+            f"fidelity certificate for {model['id']} failed frozen thresholds: "
+            f"{details}"
         )
     return {
         "path": str(path),
@@ -395,7 +475,12 @@ def validate_fidelity_certificate(cfg: dict, model: dict) -> dict:
     }
 
 
-def validate_fidelity_artifact_pair(cfg: dict, model: dict) -> dict:
+def validate_fidelity_artifact_pair(
+    cfg: dict,
+    model: dict,
+    *,
+    require_passed: bool = True,
+) -> dict:
     """Validate the non-empty CSV plus its current-contract certificate."""
     csv_path = (
         _runtime_path(cfg["output_root"])
@@ -406,8 +491,47 @@ def validate_fidelity_artifact_pair(cfg: dict, model: dict) -> dict:
         raise ValueError(
             f"missing or empty fidelity CSV for {model['id']}: {csv_path}"
         )
-    validated = validate_fidelity_certificate(cfg, model)
+    validated = validate_fidelity_certificate(
+        cfg, model, require_passed=require_passed
+    )
+    payload = validated["payload"]
+    csv_sha256 = _sha256(csv_path)
+    if payload.get("csv_sha256") != csv_sha256:
+        raise ValueError(
+            f"fidelity CSV hash mismatch for {model['id']}: "
+            f"expected {payload.get('csv_sha256')!r}, got {csv_sha256!r}"
+        )
+    try:
+        with csv_path.open(newline="", encoding="utf-8") as handle:
+            csv_rows = sum(1 for _ in csv.DictReader(handle))
+    except (OSError, csv.Error) as exc:
+        raise ValueError(
+            f"invalid fidelity CSV for {model['id']}: {csv_path}: {exc}"
+        ) from exc
+    if payload.get("csv_rows") != csv_rows or csv_rows < 1:
+        raise ValueError(
+            f"fidelity CSV row-count mismatch for {model['id']}: "
+            f"expected {payload.get('csv_rows')!r}, got {csv_rows}"
+        )
     return {**validated, "csv_path": str(csv_path)}
+
+
+def _print_fidelity_failure(model: dict, validated: dict) -> None:
+    payload = validated["payload"]
+    metrics = payload["metrics"]
+    thresholds = payload["thresholds"]
+    print(
+        f"[FIDELITY FAILED] model={model['id']} certificate={validated['path']}",
+        flush=True,
+    )
+    for key in ("rho_AB", "rho_BC", "rho_AC", "eff_over_eta", "frac_changed"):
+        value = float(metrics[key])
+        threshold = float(thresholds[key])
+        status = "PASS" if value >= threshold else "FAIL"
+        print(
+            f"[FIDELITY {status}] {key}={value:.6g} threshold={threshold:.6g}",
+            flush=True,
+        )
 
 
 @contextmanager
@@ -416,16 +540,42 @@ def _exclusive_fidelity_build_lock(certificate: Path):
     lock_path = certificate.with_name(f"{certificate.name}.lock")
     lock_path.parent.mkdir(parents=True, exist_ok=True)
     with open(lock_path, "a+", encoding="utf-8") as lock:
-        print(f"WAIT exclusive fidelity build lock: {lock_path}", flush=True)
-        fcntl.flock(lock.fileno(), fcntl.LOCK_EX)
+        timeout = float(os.environ.get("FDMU_FIDELITY_LOCK_TIMEOUT_SECONDS", "1800"))
+        if timeout <= 0:
+            raise ValueError("FDMU_FIDELITY_LOCK_TIMEOUT_SECONDS must be positive")
+        started = time.monotonic()
+        next_notice = 0.0
+        while True:
+            try:
+                fcntl.flock(lock.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                break
+            except BlockingIOError:
+                elapsed = time.monotonic() - started
+                if elapsed >= timeout:
+                    lock.seek(0)
+                    owner = lock.read().strip() or "owner metadata unavailable"
+                    raise TimeoutError(
+                        f"fidelity build lock timeout after {elapsed:.1f}s: "
+                        f"{lock_path}; current metadata={owner}"
+                    )
+                if elapsed >= next_notice:
+                    print(
+                        f"WAIT exclusive fidelity build lock: {lock_path} "
+                        f"elapsed_s={elapsed:.1f} timeout_s={timeout:.1f}",
+                        flush=True,
+                    )
+                    next_notice = elapsed + 60.0
+                time.sleep(min(1.0, timeout - elapsed))
         try:
             lock.seek(0)
             lock.truncate()
             lock.write(
                 json.dumps(
                     {
+                        "host": socket.gethostname(),
                         "pid": os.getpid(),
                         "acquired_at_utc": datetime.now(timezone.utc).isoformat(),
+                        "campaign_log": os.environ.get("FDMU_CAMPAIGN_LOG"),
                     },
                     sort_keys=True,
                 )
@@ -549,7 +699,7 @@ def _load_fidelity_certificates(
                 "development-only frozen-cell fidelity command before audit "
                 f"(waited {wait_seconds}s)"
             )
-        certificates[model["id"]] = validate_fidelity_certificate(cfg, model)
+        certificates[model["id"]] = validate_fidelity_artifact_pair(cfg, model)
     return certificates
 
 
@@ -623,6 +773,21 @@ def _complete(out: Path, objectives: list[str], audit: bool) -> bool:
     if not _trajectories_complete(out, objectives):
         return False
     return not audit or (_predictors_opened(out) and (out / "channel_report.csv").exists())
+
+
+def _manifest_mismatches(out: Path, expected: dict) -> list[str]:
+    path = out / "run_manifest.json"
+    if not path.is_file():
+        return ["run_manifest.json"]
+    try:
+        manifest = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return ["run_manifest.json"]
+    return sorted(
+        key
+        for key, value in expected.items()
+        if manifest.get(key) != value
+    )
 
 
 def _has_artifacts(out: Path) -> bool:
@@ -704,10 +869,10 @@ def main() -> None:
         env["HF_DATASETS_OFFLINE"] = "1"
     git_state = _git_state()
 
-    if a.phase == "audit" and not a.dry_run and git_state["code_dirty"]:
+    if a.phase in {"audit", "fidelity"} and not a.dry_run and git_state["code_dirty"]:
         raise RuntimeError(
-            "refusing sealed audit from a dirty worktree; commit the campaign config, "
-            "objective freeze, and code first"
+            f"refusing {a.phase} from a dirty worktree; commit the campaign config "
+            "and code first"
         )
 
     if not a.dry_run:
@@ -721,7 +886,14 @@ def main() -> None:
     n = 0
     if a.phase == "fidelity":
         for model, (csv_path, certificate, cmd) in zip(
-            models, fidelity_commands(cfg, models, output_root), strict=True
+            models,
+            fidelity_commands(
+                cfg,
+                models,
+                output_root,
+                code_commit=str(git_state["code_commit"]),
+            ),
+            strict=True,
         ):
             if a.dry_run:
                 _run(cmd, True, env)
@@ -738,7 +910,9 @@ def main() -> None:
                     and certificate.is_file()
                 ):
                     try:
-                        validate_fidelity_artifact_pair(cfg, model)
+                        existing = validate_fidelity_artifact_pair(
+                            cfg, model, require_passed=False
+                        )
                     except (OSError, ValueError, json.JSONDecodeError) as exc:
                         _preserve_fidelity_artifacts(
                             csv_path,
@@ -746,6 +920,12 @@ def main() -> None:
                             reason=f"invalid current-contract certificate: {exc}",
                         )
                     else:
+                        if not existing["payload"]["passed"]:
+                            _print_fidelity_failure(model, existing)
+                            raise RuntimeError(
+                                f"stored current-contract fidelity result failed for "
+                                f"{model['id']}; deterministic rerun disabled"
+                            )
                         if a.resume:
                             print(
                                 f"SKIP fully validated fidelity certificate: {certificate}",
@@ -766,7 +946,26 @@ def main() -> None:
                 try:
                     _run(cmd, False, env)
                 except BaseException as exc:
-                    if csv_path.exists() or certificate.exists():
+                    failed = None
+                    if (
+                        csv_path.is_file()
+                        and csv_path.stat().st_size > 0
+                        and certificate.is_file()
+                    ):
+                        try:
+                            failed = validate_fidelity_artifact_pair(
+                                cfg, model, require_passed=False
+                            )
+                        except (OSError, ValueError, json.JSONDecodeError):
+                            failed = None
+                    if failed is not None and not failed["payload"]["passed"]:
+                        _print_fidelity_failure(model, failed)
+                        print(
+                            "[FIDELITY FAILED] artifacts retained in place; "
+                            "automatic deterministic rerun is disabled",
+                            flush=True,
+                        )
+                    elif csv_path.exists() or certificate.exists():
                         _preserve_fidelity_artifacts(
                             csv_path,
                             certificate,
@@ -831,21 +1030,6 @@ def main() -> None:
             selected_authors=selected_authors,
         ):
             objectives = cfg["audit"]["objectives"] + cfg["audit"].get("stress_objectives", [])
-            if a.resume and _complete(out, objectives, audit=True):
-                print(f"SKIP complete: {out}")
-                continue
-            if (a.resume and _trajectories_complete(out, objectives)
-                    and _predictors_opened(out)):
-                print(f"RESUME report-only: {out}")
-                _run(
-                    [sys.executable, str(REPORT), "--run-dir", str(out), "--n-boot", "2000"],
-                    a.dry_run,
-                    env,
-                )
-                n += 1
-                if a.limit and n >= a.limit:
-                    break
-                continue
             if a.dry_run:
                 # Contract validation must not depend on mutable runtime
                 # artifacts from an earlier attempt.
@@ -854,7 +1038,38 @@ def main() -> None:
                 if a.limit and n >= a.limit:
                     break
                 continue
-            if _has_artifacts(out) and a.resume and not a.dry_run:
+            expected_manifest = {**metadata, **git_state}
+            manifest_mismatches = _manifest_mismatches(out, expected_manifest)
+            if (
+                a.resume
+                and _complete(out, objectives, audit=True)
+                and not manifest_mismatches
+            ):
+                print(f"SKIP complete and current-contract: {out}")
+                continue
+            if (
+                a.resume
+                and _trajectories_complete(out, objectives)
+                and _predictors_opened(out)
+                and not manifest_mismatches
+            ):
+                print(f"RESUME current-contract report-only: {out}")
+                _run(
+                    [sys.executable, str(REPORT), "--run-dir", str(out), "--n-boot", "2000"],
+                    False,
+                    env,
+                )
+                n += 1
+                if a.limit and n >= a.limit:
+                    break
+                continue
+            if manifest_mismatches and _has_artifacts(out):
+                print(
+                    f"STALE audit manifest at {out}; mismatched current-contract "
+                    f"fields={manifest_mismatches}",
+                    flush=True,
+                )
+            if _has_artifacts(out) and a.resume:
                 _quarantine_partial_audit(out)
             elif _has_artifacts(out):
                 raise RuntimeError(

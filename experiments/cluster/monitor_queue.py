@@ -77,13 +77,32 @@ def latest_running_log(unit_id: str) -> Path | None:
     return max(matches, key=lambda path: path.stat().st_mtime) if matches else None
 
 
+def heartbeat_age(queue: Path, unit_id: str) -> float | None:
+    heartbeat = queue / "claimed" / f"{unit_id}.hb"
+    claim = queue / "claimed" / f"{unit_id}.json"
+    for stamp in (heartbeat, claim):
+        try:
+            return max(0.0, time.time() - stamp.stat().st_mtime)
+        except FileNotFoundError:
+            continue
+    return None
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--queue", type=Path, required=True)
     parser.add_argument("--match", required=True)
     parser.add_argument("--interval", type=float, default=30.0)
     parser.add_argument("--tail-lines", type=int, default=30)
+    parser.add_argument(
+        "--stale-after",
+        type=float,
+        default=1800.0,
+        help="fail when a claimed unit heartbeat exceeds this age",
+    )
     args = parser.parse_args()
+    if args.stale_after <= 0:
+        parser.error("--stale-after must be positive")
 
     while True:
         states = {
@@ -120,9 +139,32 @@ def main() -> int:
             return 1
 
         for unit_id in states["claimed"]:
+            age = heartbeat_age(args.queue, unit_id)
+            if age is None:
+                print(
+                    f"[INFO] unit={unit_id} changed state during polling",
+                    flush=True,
+                )
+                continue
+            if age > args.stale_after:
+                print(
+                    f"[ERROR] STALE CLAIM unit={unit_id} heartbeat_age_s={age:.1f} "
+                    f"threshold_s={args.stale_after:.1f}",
+                    flush=True,
+                )
+                print(
+                    "[ERROR] verify the owning worker is dead on its host, then run "
+                    "workqueue.py requeue-stale; automatic requeue is intentionally disabled",
+                    flush=True,
+                )
+                return 2
             log = latest_running_log(unit_id)
             last = tail(log, 1) if log else "(waiting for unit log)"
-            print(f"[INFO] RUN unit={unit_id} last_log={last}", flush=True)
+            print(
+                f"[INFO] RUN unit={unit_id} heartbeat_age_s={age:.1f} "
+                f"last_log={last}",
+                flush=True,
+            )
 
         if not states["pending"] and not states["claimed"]:
             print(f"[INFO] [{now}] model queue complete", flush=True)

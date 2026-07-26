@@ -242,7 +242,12 @@ def main() -> None:
     sft_examples = list(req.forget) + list(req.universe.examples)
     cache_path = (_output_root(cfg) / "sft_cache" / model_id
                   / f"tofu-a{args.author}_seed-{seed}.pt")
-    contract = gate_runtime._sft_cache_contract(runtime, req, probe_block)
+    contract = gate_runtime._sft_cache_contract(
+        runtime,
+        req,
+        probe_block,
+        tuple(probe_block.select(model0)),
+    )
     sft_result = gate_runtime._load_sft_cache(model0, cache_path, contract, log)
     if sft_result is None:
         sft_result = gate_runtime.sft(model0, sft_examples, runtime, log, probe_block)
@@ -250,8 +255,7 @@ def main() -> None:
         raise RuntimeError(
             f"SFT gate failed: {sft_result['full_mean_nll']} > {sft_result['target']}"
         )
-    state0 = {name: tensor.detach().cpu().clone()
-              for name, tensor in model0.state_dict().items()}
+    state0 = gate_runtime._snapshot_sft_state(model0, contract)
     if not cache_path.exists():
         gate_runtime._write_sft_cache(cache_path, contract, sft_result, state0, log)
     del model0
@@ -259,7 +263,7 @@ def main() -> None:
 
     def fresh():
         model = gate_runtime.load_model(runtime, tokenizer)
-        model.load_state_dict(state0)
+        gate_runtime._apply_sft_state(model, state0, contract)
         return model
 
     probe_spec = ProbeSpec(

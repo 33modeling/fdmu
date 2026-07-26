@@ -33,6 +33,7 @@ import yaml
 
 ROOT = Path(__file__).resolve().parents[2]
 SELF = Path(__file__).resolve()
+sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "src"))
 
 
@@ -420,41 +421,10 @@ def _alpha_freeze(config_path: Path, cfg: dict, models: list[dict]) -> tuple[Pat
 
 
 def _fidelity_certificate(cfg: dict, model: dict) -> tuple[Path, dict]:
-    declared = cfg["audit"].get("fidelity_certificates", {})
-    if model["id"] not in declared:
-        raise ValueError(f"no fidelity certificate declared for {model['id']}")
-    path = Path(declared[model["id"]])
-    if not path.is_absolute():
-        path = (ROOT / path).resolve()
-    if not path.exists():
-        raise FileNotFoundError(
-            f"missing randomized-sensitivity fidelity certificate: {path}"
-        )
-    payload = json.loads(path.read_text(encoding="utf-8"))
-    expected = {
-        "schema": "fd-fidelity-certificate-v1",
-        "passed": True,
-        "model": str(model["path"]),
-        "dtype": str(cfg["common"]["dtype"]),
-        "block_last_n": int(cfg["common"]["block_last_n"]),
-        "R": int(cfg["common"]["probe_dirs"]),
-        "eta": float(cfg["common"]["probe_norm_eta"]),
-        "probe_seed": int(cfg["common"]["probe_seed"]),
-    }
-    for key, value in expected.items():
-        if payload.get(key) != value:
-            raise ValueError(
-                f"fidelity certificate mismatch for {model['id']}/{key}: "
-                f"expected {value!r}, got {payload.get(key)!r}"
-            )
-    expected_authors = set(_expand_int_ranges(
-        str(cfg["common"]["candidate_author_pools"]["calibration"])
-    ))
-    if set(payload.get("candidate_authors") or []) != expected_authors:
-        raise ValueError("fidelity certificate used another development candidate pool")
-    if int(payload.get("n_candidates", 0)) < int(cfg["fidelity"]["n_candidates"]):
-        raise ValueError("fidelity certificate has too few candidates")
-    return path, payload
+    from experiments.channel_matrix import run_campaign
+
+    validated = run_campaign.validate_fidelity_artifact_pair(cfg, model)
+    return Path(validated["path"]), validated["payload"]
 
 
 def _validate_contract(cfg: dict) -> None:
@@ -843,7 +813,12 @@ def _run_worker(
     sft_examples = list(req.forget) + list(req.universe.examples)
     root = _runtime_output_root(cfg)
     cache_path = root / "sft_cache" / model_id / f"tofu-a{author}_seed-{seed}.pt"
-    contract = gate_runtime._sft_cache_contract(runtime, req, probe_block)
+    contract = gate_runtime._sft_cache_contract(
+        runtime,
+        req,
+        probe_block,
+        tuple(probe_block.select(model0)),
+    )
     sft_result = gate_runtime._load_sft_cache(model0, cache_path, contract, log)
     if sft_result is None:
         sft_result = gate_runtime.sft(model0, sft_examples, runtime, log, probe_block)
@@ -854,8 +829,7 @@ def _run_worker(
     utility_nll0 = gate_runtime._mean_example_nll(
         model0, utility, int(common["batch_size"]), runtime.device
     )
-    state0 = {name: tensor.detach().cpu().clone()
-              for name, tensor in model0.state_dict().items()}
+    state0 = gate_runtime._snapshot_sft_state(model0, contract)
     if not cache_path.exists():
         gate_runtime._write_sft_cache(cache_path, contract, sft_result, state0, log)
     model_info = {
@@ -872,7 +846,7 @@ def _run_worker(
 
     def fresh():
         model = gate_runtime.load_model(runtime, tokenizer)
-        model.load_state_dict(state0)
+        gate_runtime._apply_sft_state(model, state0, contract)
         return model
 
     try:

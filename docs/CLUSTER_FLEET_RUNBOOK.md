@@ -113,9 +113,14 @@ certificate 생성 후 그 실패 unit만 자동으로 재대기시킨다.
 
 Fidelity 생성은 certificate별 공유 `flock`으로 직렬화한다. CSV와 JSON은
 임시 파일을 `fsync`한 뒤 원자적으로 게시하고, resume/enqueue/audit은 모두
-모델 경로, dtype, block, `R`, eta, seed, candidate roster를 같은 validator로
-검사한다. 오래됐거나 한쪽만 있는 artifact는
+모델 fingerprint, 코드 commit, dataset, author, dtype, block, `R`, eta, seed,
+candidate roster, threshold와 CSV SHA-256을 같은 validator로 검사한다.
+락은 기본 30분 후 소유 host/PID/log와 함께 실패하며 무한 대기하지 않는다.
+오래됐거나 한쪽만 있는 artifact는
 `runs/forensics/fidelity-artifacts/`로 이동한 뒤 다시 생성한다.
+현재 계약과 일치하지만 `passed=false`인 결과는 metric별 기준을 출력하고
+그 자리에 보존한다. 같은 deterministic cell을 자동으로 반복하지 않으며,
+threshold를 낮추거나 audit을 강행하지 않는다.
 
 실행 중 `RuntimeError`가 발생하면 해당 unit은 완료된 것이 아니다. 특히
 `inline_container.cc:659 unexpected pos`는 Python 659줄이 아니라 PyTorch
@@ -144,17 +149,23 @@ bash experiments/cluster/launch_node.sh \
 7B도 같은 원칙을 적용하되 큐는
 `/group-volume/fdmu/runs/cluster_queue/wave2`다. `done` 디렉토리, 정상
 결과, 정상 SFT cache를 삭제하거나 큐 전체를 초기화하지 않는다. 현재 SFT
-cache writer는 공유 cache를 잠그고 worker별 임시 파일에 쓴 뒤 원자적으로
-교체하며, 과거 실행의 고정 이름 `*.pt.tmp`는 다음 쓰기에서 격리 없이
-자동 제거한다.
+cache writer는 worker별 stage에 legacy 순차 형식으로 쓴 뒤 SHA-256을
+검증하고, 최종 이름을 게시하는 짧은 구간만 공유 cache를 잠근다. 24시간을
+넘긴 abandoned 임시 파일만 자동 제거한다.
 
 14B의 최종 `.pt/.json` cache pair가 불완전하거나
 `inline_container.cc:659 unexpected pos` 계열로 손상된 경우에는
 `runs/forensics/sft-cache-corrupt/`로 보존 이동하고 cache miss로 재학습한다.
-새 cache는 크기와 SHA-256을 기록해 다음 load에서 검증한다. 계약 불일치나
-일반적인 일시 I/O 오류는 자동 격리하지 않고 실패시켜 잘못된 재학습을 막는다.
+`probe_block` 캠페인은 전체 fp32 14B state가 아니라 SFT가 수정하는 마지막
+8개 down-projection만 `sft-cache-v3`에 저장한다. 새 cache는 key/shape/dtype,
+크기와 SHA-256을 다음 load에서 검증한다. 이전 전체-model cache와 계약
+불일치는 forensics로 보존한 뒤 새 block cache를 만든다. 일반적인 일시 I/O
+오류는 숨기거나 무한 재시도하지 않고 즉시 실패시킨다.
 14B 원클릭 실행기는 fidelity 전에 GPU 0 compute process가 없는지 확인하며,
 같은 `wave1_14b`의 GPU 1-7 worker가 남아 있으면 시작을 거부한다.
+노드 launcher는 호스트 lease 아래에서 충돌 검사와 worker 생성을 수행하고,
+watcher/worker에는 lease FD를 넘기지 않는다. lease 대기는 기본 60초 후
+실패한다. 3초 안에 죽은 worker의 로그 tail을 출력한 뒤 즉시 실패한다.
 
 ### 1. 작업 enqueue (아무 노드에서 1회)
 
@@ -245,6 +256,8 @@ python experiments/cluster/workqueue.py retry-failed --queue <Q>
 (status가 보여주는 host에 들어가 프로세스 확인). NFS 지연으로 하트비트만 늦은
 살아있는 런을 requeue하면 같은 run 디렉토리에 이중 실행이 붙을 수 있다.
 기본 임계 30분은 하트비트 주기(60초)의 30배라 정상 지연으로는 안 걸린다.
+원클릭 monitor도 이 임계를 넘은 claim을 무한 `running`으로 표시하지 않고
+종료하며, 안전 확인 전 자동 requeue는 하지 않는다.
 
 ## 병렬 폭 감각
 

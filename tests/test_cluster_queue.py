@@ -17,6 +17,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "experiments" / "cluster"))
 
 import make_units  # noqa: E402
+import monitor_queue  # noqa: E402
 import quarantine_failed_audit  # noqa: E402
 import worker  # noqa: E402
 from workqueue import ClaimLostError, Unit, WorkQueue  # noqa: E402
@@ -221,6 +222,23 @@ def test_requeue_stale_by_heartbeat_age(tmp_path):
     assert payload["attempts"] == 1
 
 
+def test_monitor_heartbeat_age_tolerates_claim_state_transition(tmp_path):
+    queue = tmp_path / "q"
+    claimed = queue / "claimed"
+    claimed.mkdir(parents=True)
+    assert monitor_queue.heartbeat_age(queue, "a") is None
+
+    claim = claimed / "a.json"
+    claim.write_text("{}", encoding="utf-8")
+    old = time.time() - 120
+    os.utime(claim, times=(old, old))
+    assert monitor_queue.heartbeat_age(queue, "a") >= 119
+
+    heartbeat = claimed / "a.hb"
+    heartbeat.touch()
+    assert monitor_queue.heartbeat_age(queue, "a") < 5
+
+
 def test_stale_worker_cannot_finish_or_heartbeat_reclaimed_unit(tmp_path):
     q = WorkQueue(tmp_path / "q")
     q.enqueue([_unit("a")])
@@ -363,10 +381,8 @@ def test_model_launchers_pin_queues_without_force_override():
     assert "experiments/cluster/monitor_queue.py" in fourteen
     assert "setup_group_volume.sh" in seven
     assert "setup_group_volume.sh" in fourteen
-    assert "skipping shared setup lock" in seven
-    assert "skipping shared setup lock" in fourteen
-    assert "cluster_environment_imports_ready" in seven
-    assert "cluster_environment_imports_ready" in fourteen
+    assert 'bash "$ROOT/experiments/cluster/setup_group_volume.sh"' in seven
+    assert 'bash "$ROOT/experiments/cluster/setup_group_volume.sh"' in fourteen
     assert "stage aggregate-latex" in seven
     assert "stage aggregate-latex" in fourteen
     assert "h100_campaign.sh aggregate" in seven
@@ -394,6 +410,11 @@ def test_model_launchers_pin_queues_without_force_override():
     assert "refusing queue re-pin from a dirty worktree" in fourteen
     assert '--match-unit "${UNIT_MATCH}"' in launch
     assert '--prefer-unit-prefix "${UNIT_PREFER}"' in launch
+    assert "HOST_LAUNCH_LOCK" in launch
+    assert "HOST_LAUNCH_LOCK_TIMEOUT_SECONDS:-60" in launch
+    assert launch.count("8>&- >>") == 2
+    assert '8>&- >> "${out}" 2>&1 &' in launch
+    assert "worker died during startup" in launch
     enqueue = (ROOT / "experiments/cluster/enqueue_table12.sh").read_text(
         encoding="utf-8"
     )

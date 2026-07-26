@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import hashlib
 import json
 import math
 import random
@@ -20,6 +21,7 @@ import yaml
 
 
 ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "src"))
 
 from rsus.analysis.channels import DECLARED_CHANNEL, HEADLINE_PROBE  # noqa: E402
@@ -102,6 +104,22 @@ def _config_roster(
         for author in author_ids
         for seed in seed_ids
     }
+
+
+def _current_contract(
+    config_path: Path,
+    model_id: str,
+) -> tuple[str, str] | None:
+    cfg = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    declared = (cfg.get("audit") or {}).get("fidelity_certificates")
+    if not isinstance(declared, dict) or model_id not in declared:
+        return None
+    from experiments.channel_matrix import run_campaign
+
+    model = run_campaign._enabled_models(cfg, {model_id})[0]
+    fidelity = run_campaign.validate_fidelity_artifact_pair(cfg, model)
+    config_sha = hashlib.sha256(config_path.read_bytes()).hexdigest()
+    return config_sha, fidelity["sha256"]
 
 
 def _run_paths(root: Path, model_id: str | None = None) -> list[Path]:
@@ -486,6 +504,24 @@ def main() -> None:
     runs = [item[0] for item in loaded]
     manifests = [item[1] for item in loaded]
     objectives, stress_objectives, predictors = _validate(manifests)
+    if a.config is not None:
+        current_contract = _current_contract(Path(a.config), a.model_id)
+        if current_contract is not None:
+            current_config_sha, current_fidelity_sha = current_contract
+            stale = [
+                str(run.path)
+                for run, manifest in zip(runs, manifests, strict=True)
+                if (
+                    manifest.get("campaign_config_sha256") != current_config_sha
+                    or manifest.get("fidelity_certificate_sha256")
+                    != current_fidelity_sha
+                )
+            ]
+            if stale:
+                raise ValueError(
+                    "audit manifests do not match the current config/fidelity "
+                    f"contract: {stale}"
+                )
     all_objectives = objectives + stress_objectives
     if expected is None:
         _validate_balanced(runs)

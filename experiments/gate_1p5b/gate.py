@@ -14,6 +14,7 @@ from __future__ import annotations
 import argparse
 from contextlib import contextmanager
 from datetime import datetime, timezone
+import errno
 import fcntl
 import gc
 import hashlib
@@ -24,6 +25,8 @@ import pickle
 import platform
 import shutil
 import sys
+import tempfile
+import time
 import uuid
 from pathlib import Path
 
@@ -353,9 +356,12 @@ def sft(model, examples, a, log, trainable_block=None) -> dict[str, float | int 
             "reached": reached}
 
 
-def _sft_cache_contract(a, req, probe_block) -> dict:
+def _sft_cache_contract(a, req, probe_block, trainable_keys) -> dict:
+    state_scope = (
+        "trainable_block" if a.trainable_scope == "probe_block" else "full_model"
+    )
     return {
-        "schema": "sft-cache-v2",
+        "schema": "sft-cache-v3",
         "model": a.model,
         "dtype": a.dtype,
         "attn_impl": a.attn_impl,
@@ -366,6 +372,10 @@ def _sft_cache_contract(a, req, probe_block) -> dict:
         "trainable_scope": a.trainable_scope,
         "trainable_pattern": (
             probe_block.pattern if a.trainable_scope == "probe_block" else None
+        ),
+        "state_scope": state_scope,
+        "state_keys": (
+            sorted(trainable_keys) if state_scope == "trainable_block" else None
         ),
         "sft_lr": a.sft_lr,
         "sft_steps": a.sft_steps,
@@ -398,6 +408,97 @@ def _sha256_file(path: Path) -> str:
         for chunk in iter(lambda: handle.read(8 * 2**20), b""):
             digest.update(chunk)
     return digest.hexdigest()
+
+
+def _fsync_directory(path: Path) -> None:
+    """Make renames durable when the backing filesystem supports directory fsync."""
+    flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0)
+    descriptor = os.open(path, flags)
+    try:
+        try:
+            os.fsync(descriptor)
+        except OSError as error:
+            if error.errno not in {errno.EINVAL, errno.ENOTSUP}:
+                raise
+    finally:
+        os.close(descriptor)
+
+
+def _sft_cache_local_stage(
+    path: Path,
+    state_bytes: int,
+    token: str,
+    log,
+) -> Path | None:
+    """Choose bounded node-local staging when it has enough free space."""
+    configured = os.environ.get("SFT_CACHE_LOCAL_TMPDIR", "").strip()
+    root = (
+        Path(os.path.expandvars(os.path.expanduser(configured)))
+        if configured
+        else Path(tempfile.gettempdir()) / "fdmu-sft-cache"
+    )
+    required = state_bytes + 1024 * 2**20
+    try:
+        root.mkdir(parents=True, exist_ok=True)
+        stale_before = time.time() - 24 * 60 * 60
+        for stale in root.glob(f"{path.name}.*.stage"):
+            try:
+                stat = stale.stat()
+            except FileNotFoundError:
+                continue
+            if stat.st_mtime <= stale_before:
+                stale.unlink()
+                log(
+                    f"removed stale local SFT cache stage path={stale} "
+                    f"age_hours={(time.time() - stat.st_mtime) / 3600:.1f} "
+                    f"size_gib={stat.st_size / 2**30:.2f}"
+                )
+        free_bytes = shutil.disk_usage(root).free
+    except OSError as error:
+        log(
+            f"SFT cache local staging unavailable path={root} "
+            f"error={type(error).__name__}: {error}; using shared temporary"
+        )
+        return None
+    if free_bytes < required:
+        log(
+            f"SFT cache local staging skipped path={root} "
+            f"need_gib={required / 2**30:.2f} free_gib={free_bytes / 2**30:.2f}; "
+            "using shared temporary"
+        )
+        return None
+    stage = root / f"{path.name}.{token}.stage"
+    log(
+        f"SFT cache staging path={stage} "
+        f"free_gib={free_bytes / 2**30:.2f}"
+    )
+    return stage
+
+
+def _remove_stale_sft_temporaries_locked(path: Path, log) -> None:
+    """Remove only old writer debris; live writers serialize outside the lock."""
+    meta_path = path.with_suffix(path.suffix + ".json")
+    candidates = {
+        path.with_suffix(path.suffix + ".tmp"),
+        meta_path.with_suffix(meta_path.suffix + ".tmp"),
+        *path.parent.glob(f".{path.name}.*.tmp"),
+        *meta_path.parent.glob(f".{meta_path.name}.*.tmp"),
+    }
+    stale_before = time.time() - 24 * 60 * 60
+    for stale in candidates:
+        try:
+            stat = stale.stat()
+        except FileNotFoundError:
+            continue
+        if stat.st_mtime > stale_before:
+            continue
+        size_gib = stat.st_size / 2**30
+        stale.unlink()
+        log(
+            f"removed stale SFT cache temporary "
+            f"path={stale} age_hours={(time.time() - stat.st_mtime) / 3600:.1f} "
+            f"size_gib={size_gib:.2f}"
+        )
 
 
 def _quarantine_sft_cache_locked(path: Path, reason: str, log) -> Path:
@@ -456,6 +557,92 @@ def _known_sft_cache_corruption(error: Exception) -> bool:
     )
 
 
+def _validate_sft_result(result) -> str | None:
+    if not isinstance(result, dict):
+        return "metadata has no valid sft_result"
+    for field in ("steps", "full_mean_nll", "target", "reached"):
+        if field not in result:
+            return f"metadata sft_result is missing {field!r}"
+    if not isinstance(result["steps"], int) or isinstance(result["steps"], bool):
+        return "metadata sft_result has invalid steps"
+    if not isinstance(result["full_mean_nll"], (int, float)):
+        return "metadata sft_result has invalid full_mean_nll"
+    if not isinstance(result["target"], (int, float)):
+        return "metadata sft_result has invalid target"
+    if not isinstance(result["reached"], bool):
+        return "metadata sft_result has invalid reached"
+    return None
+
+
+def _sft_expected_state(model, contract: dict) -> tuple[dict, str | None]:
+    state_scope = contract.get("state_scope", "full_model")
+    if state_scope == "full_model":
+        return dict(model.state_dict()), None
+    if state_scope != "trainable_block":
+        return {}, f"unsupported SFT cache state_scope {state_scope!r}"
+    keys = contract.get("state_keys")
+    if (
+        not isinstance(keys, list)
+        or not keys
+        or not all(isinstance(key, str) and key for key in keys)
+        or len(keys) != len(set(keys))
+    ):
+        return {}, "trainable-block cache contract has invalid state_keys"
+    parameters = dict(model.named_parameters())
+    unknown = sorted(set(keys) - set(parameters))
+    if unknown:
+        return {}, f"trainable-block cache contract has unknown keys {unknown[:5]}"
+    return {name: parameters[name] for name in keys}, None
+
+
+def _snapshot_sft_state(model, contract: dict) -> dict:
+    """Clone only state that SFT is permitted to modify."""
+    expected, error = _sft_expected_state(model, contract)
+    if error is not None:
+        raise RuntimeError(error)
+    return {
+        name: tensor.detach().cpu().clone()
+        for name, tensor in expected.items()
+    }
+
+
+def _validate_sft_state_dict(model, state, contract: dict) -> str | None:
+    """Check the scoped state contract before mutating the live model."""
+    if not isinstance(state, dict):
+        return f"loaded state is {type(state).__name__}, expected dict"
+    expected, contract_error = _sft_expected_state(model, contract)
+    if contract_error is not None:
+        return contract_error
+    missing = sorted(set(expected) - set(state))
+    unexpected = sorted(set(state) - set(expected))
+    if missing or unexpected:
+        return (
+            f"state-dict keys mismatch missing={missing[:5]} "
+            f"unexpected={unexpected[:5]}"
+        )
+    for name, expected_tensor in expected.items():
+        cached_tensor = state[name]
+        if not torch.is_tensor(cached_tensor):
+            return f"state-dict entry {name!r} is not a tensor"
+        if tuple(cached_tensor.shape) != tuple(expected_tensor.shape):
+            return (
+                f"state-dict shape mismatch for {name!r}: "
+                f"expected={tuple(expected_tensor.shape)} "
+                f"actual={tuple(cached_tensor.shape)}"
+            )
+        if cached_tensor.dtype != expected_tensor.dtype:
+            return (
+                f"state-dict dtype mismatch for {name!r}: "
+                f"expected={expected_tensor.dtype} actual={cached_tensor.dtype}"
+            )
+    return None
+
+
+def _apply_sft_state(model, state: dict, contract: dict) -> None:
+    state_scope = contract.get("state_scope", "full_model")
+    model.load_state_dict(state, strict=state_scope == "full_model")
+
+
 def _read_sft_cache_metadata_locked(
     path: Path,
     contract: dict,
@@ -472,7 +659,7 @@ def _read_sft_cache_metadata_locked(
         return None
     try:
         metadata = json.loads(meta_path.read_text(encoding="utf-8"))
-    except json.JSONDecodeError as error:
+    except (json.JSONDecodeError, UnicodeDecodeError) as error:
         _quarantine_sft_cache_locked(
             path,
             f"invalid metadata JSON: {error}",
@@ -483,11 +670,15 @@ def _read_sft_cache_metadata_locked(
         _quarantine_sft_cache_locked(path, "metadata is not a JSON object", log)
         return None
     if metadata.get("contract") != contract:
-        raise RuntimeError(
-            f"SFT cache contract mismatch at {path}; preserve it and use a new cache path"
+        _quarantine_sft_cache_locked(
+            path,
+            "SFT cache contract mismatch; preserving old pair before rebuild",
+            log,
         )
-    if not isinstance(metadata.get("sft_result"), dict):
-        _quarantine_sft_cache_locked(path, "metadata has no valid sft_result", log)
+        return None
+    result_error = _validate_sft_result(metadata.get("sft_result"))
+    if result_error is not None:
+        _quarantine_sft_cache_locked(path, result_error, log)
         return None
 
     integrity = metadata.get("integrity")
@@ -537,7 +728,10 @@ def _load_sft_cache(model, path: Path, contract: dict, log) -> dict | None:
         try:
             try:
                 state = torch.load(path, map_location="cpu", weights_only=True)
-            except TypeError:  # torch versions before weights_only
+            except TypeError as error:  # torch versions before weights_only
+                message = str(error).lower()
+                if "weights_only" not in message or "unexpected keyword" not in message:
+                    raise
                 state = torch.load(path, map_location="cpu")
         except Exception as error:
             if not _known_sft_cache_corruption(error):
@@ -548,7 +742,12 @@ def _load_sft_cache(model, path: Path, contract: dict, log) -> dict | None:
                 log,
             )
             return None
-    model.load_state_dict(state)
+        state_error = _validate_sft_state_dict(model, state, contract)
+        if state_error is not None:
+            del state
+            _quarantine_sft_cache_locked(path, state_error, log)
+            return None
+    _apply_sft_state(model, state, contract)
     del state
     result = metadata["sft_result"]
     log(f"loaded validated development SFT cache {path} "
@@ -568,77 +767,134 @@ def _write_sft_cache(
     token = f"{os.getpid()}-{uuid.uuid4().hex}"
     tmp_state = path.with_name(f".{path.name}.{token}.tmp")
     tmp_meta = meta_path.with_name(f".{meta_path.name}.{token}.tmp")
+    state_bytes = sum(
+        tensor.numel() * tensor.element_size()
+        for tensor in state.values()
+        if torch.is_tensor(tensor)
+    )
+    local_stage = _sft_cache_local_stage(path, state_bytes, token, log)
+    serialization_path = local_stage or tmp_state
+
+    # Hold the cross-host lock only while inspecting or publishing final names.
+    # A 14B serialization can take minutes and must not make other workers look
+    # dead while no shared state is being changed.
     with _sft_cache_guard(path, exclusive=True):
-        stale_paths = {
-            path.with_suffix(path.suffix + ".tmp"),
-            meta_path.with_suffix(meta_path.suffix + ".tmp"),
-            *path.parent.glob(f".{path.name}.*.tmp"),
-            *meta_path.parent.glob(f".{meta_path.name}.*.tmp"),
-        }
-        for stale in stale_paths:
-            if stale.exists():
-                size_gib = stale.stat().st_size / 2**30
-                stale.unlink()
-                log(
-                    f"removed abandoned SFT cache temporary "
-                    f"path={stale} size_gib={size_gib:.2f}"
-                )
+        _remove_stale_sft_temporaries_locked(path, log)
         metadata = _read_sft_cache_metadata_locked(path, contract, log)
         if metadata is not None:
             log(f"reusing SFT cache written by a concurrent worker: {path}")
             return False
 
-        state_bytes = sum(
-            tensor.numel() * tensor.element_size()
-            for tensor in state.values()
-            if torch.is_tensor(tensor)
+    free_bytes = shutil.disk_usage(path.parent).free
+    log(
+        f"writing SFT cache path={path} "
+        f"estimated_gib={state_bytes / 2**30:.2f} "
+        f"shared_free_gib={free_bytes / 2**30:.2f}"
+    )
+    if free_bytes < state_bytes + 1024 * 2**20:
+        with _sft_cache_guard(path, exclusive=True):
+            metadata = _read_sft_cache_metadata_locked(path, contract, log)
+            if metadata is not None:
+                log(f"reusing SFT cache written by a concurrent worker: {path}")
+                return False
+        raise RuntimeError(
+            f"insufficient disk for SFT cache {path}: "
+            f"need>{(state_bytes + 1024 * 2**20) / 2**30:.2f} GiB, "
+            f"free={free_bytes / 2**30:.2f} GiB"
         )
-        free_bytes = shutil.disk_usage(path.parent).free
-        log(
-            f"writing SFT cache path={path} "
-            f"estimated_gib={state_bytes / 2**30:.2f} "
-            f"free_gib={free_bytes / 2**30:.2f}"
+
+    try:
+        for attempt in range(1, 3):
+            serialization_path.unlink(missing_ok=True)
+            try:
+                # The legacy sequential serializer never enters
+                # inline_container.cc and is therefore suitable for very large
+                # state dictionaries and filesystems with fragile seek support.
+                log(
+                    f"serializing SFT cache attempt={attempt}/2 "
+                    f"path={serialization_path} format=torch-legacy"
+                )
+                torch.save(
+                    state,
+                    serialization_path,
+                    _use_new_zipfile_serialization=False,
+                )
+                with serialization_path.open("rb") as handle:
+                    os.fsync(handle.fileno())
+                break
+            except Exception as error:
+                serialization_path.unlink(missing_ok=True)
+                if attempt == 2 or not _known_sft_cache_corruption(error):
+                    raise
+                log(
+                    f"RETRY SFT cache serialization after known PyTorch "
+                    f"container failure attempt={attempt}/2 "
+                    f"error={type(error).__name__}: {error}"
+                )
+        else:  # pragma: no cover - the loop either breaks or raises
+            raise AssertionError("unreachable SFT cache serialization state")
+
+        source_size = serialization_path.stat().st_size
+        source_sha = _sha256_file(serialization_path)
+
+        # Avoid copying a second 14B snapshot to shared storage if another
+        # worker published while this worker was serializing locally.
+        with _sft_cache_guard(path, exclusive=True):
+            metadata = _read_sft_cache_metadata_locked(path, contract, log)
+            if metadata is not None:
+                log(f"reusing SFT cache written by a concurrent worker: {path}")
+                return False
+
+        published_sha = source_sha
+        if local_stage is not None:
+            with serialization_path.open("rb") as source, tmp_state.open("xb") as target:
+                shutil.copyfileobj(source, target, length=8 * 2**20)
+                target.flush()
+                os.fsync(target.fileno())
+            copied_size = tmp_state.stat().st_size
+            copied_sha = _sha256_file(tmp_state)
+            if copied_size != source_size or copied_sha != source_sha:
+                raise RuntimeError(
+                    f"SFT cache staging copy verification failed for {path}: "
+                    f"source_size={source_size} copied_size={copied_size} "
+                    f"source_sha256={source_sha} copied_sha256={copied_sha}"
+                )
+            published_sha = copied_sha
+
+        integrity = {
+            "algorithm": "sha256",
+            "size_bytes": tmp_state.stat().st_size,
+            "sha256": published_sha,
+            "serialization": "torch-legacy",
+        }
+        tmp_meta.write_text(
+            json.dumps(
+                {
+                    "contract": contract,
+                    "sft_result": result,
+                    "integrity": integrity,
+                },
+                indent=2,
+                sort_keys=True,
+            ),
+            encoding="utf-8",
         )
-        if free_bytes < state_bytes + 512 * 2**20:
-            raise RuntimeError(
-                f"insufficient disk for SFT cache {path}: "
-                f"need>{(state_bytes + 512 * 2**20) / 2**30:.2f} GiB, "
-                f"free={free_bytes / 2**30:.2f} GiB"
-            )
-        try:
-            # The sequential serializer avoids PyTorch inline-container seek
-            # failures observed for concurrent 14B writes on shared storage.
-            torch.save(
-                state,
-                tmp_state,
-                _use_new_zipfile_serialization=False,
-            )
-            with tmp_state.open("rb") as handle:
-                os.fsync(handle.fileno())
-            integrity = {
-                "algorithm": "sha256",
-                "size_bytes": tmp_state.stat().st_size,
-                "sha256": _sha256_file(tmp_state),
-            }
-            tmp_meta.write_text(
-                json.dumps(
-                    {
-                        "contract": contract,
-                        "sft_result": result,
-                        "integrity": integrity,
-                    },
-                    indent=2,
-                    sort_keys=True,
-                ),
-                encoding="utf-8",
-            )
-            with tmp_meta.open("rb") as handle:
-                os.fsync(handle.fileno())
+        with tmp_meta.open("rb") as handle:
+            os.fsync(handle.fileno())
+
+        with _sft_cache_guard(path, exclusive=True):
+            metadata = _read_sft_cache_metadata_locked(path, contract, log)
+            if metadata is not None:
+                log(f"reusing SFT cache written by a concurrent worker: {path}")
+                return False
             os.replace(tmp_state, path)
+            _fsync_directory(path.parent)
             os.replace(tmp_meta, meta_path)
-        finally:
-            tmp_state.unlink(missing_ok=True)
-            tmp_meta.unlink(missing_ok=True)
+            _fsync_directory(path.parent)
+    finally:
+        serialization_path.unlink(missing_ok=True)
+        tmp_state.unlink(missing_ok=True)
+        tmp_meta.unlink(missing_ok=True)
     log(f"wrote development SFT cache {path}")
     return True
 
@@ -741,9 +997,19 @@ def main():
         "tokenizer": type(tokenizer).__name__,
         "vocab_size": len(tokenizer),
     }
+    trainable_state_keys = (
+        tuple(selected_probe_params)
+        if a.trainable_scope == "probe_block"
+        else ()
+    )
     del selected_probe_params
     sft_examples = list(req.forget) + list(req.universe.examples)
-    cache_contract = _sft_cache_contract(a, req, probe_block)
+    cache_contract = _sft_cache_contract(
+        a,
+        req,
+        probe_block,
+        trainable_state_keys,
+    )
     cache_path = resolve_sft_cache_path(
         a.sft_cache,
         automatic_root=ROOT / "runs" / "sft_cache",
@@ -773,9 +1039,16 @@ def main():
             f"full-set mean NLL={sft_result['full_mean_nll']:.3f} > "
             f"target={sft_result['target']:.3f}"
         )
-    # Keep the frozen target on host memory.  Otherwise model0 + state0 + the
-    # fresh optimizer model coexist on device during every trajectory.
-    state0 = {k: v.detach().cpu().clone() for k, v in model0.state_dict().items()}
+    # For probe_block campaigns, only the parameters that SFT can modify are
+    # cached and retained on CPU. Fresh models provide the unchanged base state.
+    state0 = _snapshot_sft_state(model0, cache_contract)
+    state0_bytes = sum(
+        tensor.numel() * tensor.element_size() for tensor in state0.values()
+    )
+    log(
+        f"SFT frozen state scope={cache_contract['state_scope']} "
+        f"tensors={len(state0)} size_gib={state0_bytes / 2**30:.2f}"
+    )
     if cache_path is not None and not sft_cache_hit:
         for cache_attempt in range(3):
             if _write_sft_cache(
@@ -795,15 +1068,10 @@ def main():
             )
             if concurrent_result is not None:
                 sft_result = concurrent_result
-                state0 = {
-                    k: v.detach().cpu().clone()
-                    for k, v in model0.state_dict().items()
-                }
+                sft_cache_hit = True
+                state0 = _snapshot_sft_state(model0, cache_contract)
                 break
-            state0 = {
-                k: v.detach().cpu().clone()
-                for k, v in model0.state_dict().items()
-            }
+            state0 = _snapshot_sft_state(model0, cache_contract)
         else:
             raise RuntimeError(
                 f"SFT cache did not stabilize after 3 attempts: {cache_path}"
@@ -814,7 +1082,10 @@ def main():
     def fresh():
         """Load exactly one disposable GPU model from the CPU SFT snapshot."""
         m = load_model(a, tokenizer)
-        m.load_state_dict(state0)
+        state_error = _validate_sft_state_dict(m, state0, cache_contract)
+        if state_error is not None:
+            raise RuntimeError(f"in-memory SFT state is invalid: {state_error}")
+        _apply_sft_state(m, state0, cache_contract)
         return m
 
     folds = make_folds({e.example_id: e.group for e in req.universe.examples}, 0.5, a.seed)
@@ -992,6 +1263,9 @@ def main():
             "hit": sft_cache_hit,
             "path": str(cache_path) if cache_path is not None else None,
             "contract_sha256": contract_sha256(cache_contract),
+            "state_scope": cache_contract["state_scope"],
+            "state_tensors": len(state0),
+            "state_size_bytes": state0_bytes,
         },
         "objective_configs": {
             g: {
