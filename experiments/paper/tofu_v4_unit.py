@@ -920,9 +920,9 @@ def run_unit(args: argparse.Namespace) -> None:
         del parent_model
         gate_runtime.clear_cuda_cache()
         if not reached and args.stage in {"protection", "target_evaluation"}:
-            raise TOFUUnitError(
-                f"{args.parent}/{args.request}/seed-{args.seed} did not reach "
-                "the direct forgetting gate"
+            log(
+                "[PARENT RESULT] direct forgetting gate not reached; "
+                "recording measured infeasible result and continuing"
             )
 
     prediction_rows: list[dict[str, Any]] = []
@@ -1130,7 +1130,7 @@ def run_unit(args: argparse.Namespace) -> None:
         ) -> dict[str, Any]:
             model = fresh()
             load_params_(block.select(model), parent_checkpoint["block"])
-            if arm == "no_repair":
+            if arm == "no_repair" or not parent_checkpoint["reached"]:
                 record = parent_record
                 updates = rollbacks = 0.0
                 partition_sha = None
@@ -1332,7 +1332,9 @@ def run_unit(args: argparse.Namespace) -> None:
                     "repair_updates": result["repair_updates"],
                     "repair_rollbacks": result["repair_rollbacks"],
                     "parent_checkpoint_id": parent_checkpoint["id"],
-                    "parent_checkpoint_first_reaching": True,
+                    "parent_checkpoint_first_reaching": parent_checkpoint[
+                        "first_reaching"
+                    ],
                     "protection_selection": protection_selection,
                 }
                 if result["arm"] == "repeated_random":

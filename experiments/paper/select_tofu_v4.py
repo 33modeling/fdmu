@@ -187,6 +187,7 @@ def select_parents(
     parents = {}
     diagnostics = {}
     unresolved = []
+    fallback_parents = []
     for parent in parent_roster:
         members = [
             row
@@ -218,6 +219,10 @@ def select_parents(
             _finite_number(
                 row.get("cvar95_damage"),
                 f"{setting}/{parent}.cvar95_damage",
+            )
+            _finite_number(
+                row.get("forget_recall"),
+                f"{setting}/{parent}.forget_recall",
             )
             step = row.get("step")
             if isinstance(step, bool) or not isinstance(step, int) or step < 1:
@@ -252,6 +257,10 @@ def select_parents(
                 _finite_number(row["mean_damage"], "mean_damage")
                 for row in cells.values()
             ]
+            recalls = [
+                _finite_number(row["forget_recall"], "forget_recall")
+                for row in cells.values()
+            ]
             item = {
                 "candidate_setting": candidate,
                 "complete": complete,
@@ -260,6 +269,14 @@ def select_parents(
                 "extra_runs": sorted(observed - expected),
                 "worst_cvar95_damage": max(cvars) if cvars else None,
                 "mean_damage": sum(means) / len(means) if means else None,
+                "reached_cells": sum(
+                    row.get("reached") is True for row in cells.values()
+                ),
+                "required_cells": len(expected),
+                "worst_forget_recall": max(recalls) if recalls else None,
+                "mean_forget_recall": (
+                    sum(recalls) / len(recalls) if recalls else None
+                ),
                 "max_step": max(
                     (int(row["step"]) for row in cells.values()), default=None
                 ),
@@ -280,8 +297,26 @@ def select_parents(
             )
             parents[parent] = winner["candidate_setting"]
         else:
-            parents[parent] = None
-            unresolved.append(parent)
+            fallback = [item for item in candidate_diagnostics if item["complete"]]
+            if fallback:
+                winner = min(
+                    fallback,
+                    key=lambda item: (
+                        -int(item["reached_cells"]),
+                        float(item["worst_forget_recall"]),
+                        float(item["mean_forget_recall"]),
+                        float(item["worst_cvar95_damage"]),
+                        float(item["mean_damage"]),
+                        int(item["max_step"]),
+                        float(item["candidate_setting"]["lr"]),
+                        json.dumps(item["candidate_setting"], sort_keys=True),
+                    ),
+                )
+                parents[parent] = winner["candidate_setting"]
+                fallback_parents.append(parent)
+            else:
+                parents[parent] = None
+                unresolved.append(parent)
         diagnostics[parent] = candidate_diagnostics
     if frozen and unresolved:
         raise SelectionError(
@@ -292,10 +327,18 @@ def select_parents(
         "contract": "tofu-pdf-v4-parent-freeze",
         "source_campaign": campaign["campaign_id"],
         "setting": setting,
-        "selection_rule": "all-cell-reach-then-minimax-cvar-mean-damage-steps-lr",
+        "selection_rule": (
+            "strict-feasible-then-best-observed-"
+            "reach-recall-cvar-mean-damage-steps-lr"
+        ),
         "frozen_before_prediction": frozen,
         "parents": parents,
         "unresolved": unresolved,
+        "fallback_parents": fallback_parents,
+        "strict_parent_gate_passed": {
+            parent: parent not in fallback_parents and parent not in unresolved
+            for parent in parent_roster
+        },
         "development_artifacts": sources,
         "diagnostics": diagnostics,
     }

@@ -73,6 +73,7 @@ GPU_IDS=0,1 bash local_run/run_tofu_1p5b_4090x2.sh
 | 로그 | 의미 |
 |---|---|
 | `CALIBRATION SKIPPED` | terminal calibration marker가 유효하며 GPU 재학습 없음 |
+| `CALIBRATION_PROPOSAL_UPGRADED` | strict 미달 parent를 best-observed fallback으로 확정 |
 | `PARENT FREEZE SKIPPED` | 승인 record와 freeze 해시가 일치하며 재계산 없음 |
 | `JOINT SWEEP SKIPPED` | `BEST.json`과 terminal sweep status가 유효하며 재학습 없음 |
 | `BEST_AVAILABLE_SELECTED` | strict 조건 미달이며 가장 좋은 관측 trial로 계속 진행 |

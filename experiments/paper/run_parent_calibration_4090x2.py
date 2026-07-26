@@ -19,6 +19,7 @@ from experiments.paper.run_joint_dev_sweep import (  # noqa: E402
     _EventLog,
     _absolute_executable,
     _atomic_json,
+    _atomic_text,
     _environment_snapshot,
     _load_json,
     _load_yaml,
@@ -170,7 +171,20 @@ def _write_proposal(
         sources=sources,
         frozen=False,
     )
-    _write_once(destination, yaml.safe_dump(proposal, sort_keys=False))
+    rendered = yaml.safe_dump(proposal, sort_keys=False)
+    if destination.is_file():
+        existing = _load_yaml(destination)
+        if existing == proposal:
+            return proposal
+        if existing.get("unresolved") and not proposal.get("unresolved"):
+            _atomic_text(destination, rendered)
+            _status(
+                "CALIBRATION_PROPOSAL_UPGRADED "
+                f"path={destination} fallback_parents="
+                f"{proposal.get('fallback_parents', [])}"
+            )
+            return proposal
+    _write_once(destination, rendered)
     return proposal
 
 

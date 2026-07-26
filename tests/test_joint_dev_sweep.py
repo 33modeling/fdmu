@@ -15,6 +15,7 @@ from experiments.paper.approve_parent_freeze import (
     ApprovalError,
     validate_draft,
 )
+from experiments.paper.select_tofu_v4 import select_parents
 from experiments.paper.run_joint_dev_sweep import (
     SweepError,
     _EventLog,
@@ -763,3 +764,60 @@ def test_exhausted_sweep_promotes_best_available_and_returns_terminal_result(
     assert status["status"] == "best_available"
     assert status["exit_code"] == 0
     assert status["strict_joint_dominance"] is False
+
+
+def test_parent_calibration_uses_best_observed_when_strict_gate_fails(
+    monkeypatch,
+):
+    candidates = [{"lr": 1e-5, "steps": 10}, {"lr": 2e-5, "steps": 10}]
+    allowed = {
+        json.dumps(item, sort_keys=True, separators=(",", ":")): item
+        for item in candidates
+    }
+    monkeypatch.setattr(
+        "experiments.paper.select_tofu_v4._expected",
+        lambda _campaign, roster: {("request", 0)},
+    )
+    monkeypatch.setattr(
+        "experiments.paper.select_tofu_v4._allowed_parent_grid",
+        lambda _runtime, setting, parent: allowed,
+    )
+    rows = [
+        {
+            "campaign_phase": "calibration",
+            "setting": "setting",
+            "parent": "rmu",
+            "request": "request",
+            "seed": 0,
+            "candidate_setting": candidate,
+            "reached": False,
+            "forget_recall": recall,
+            "mean_damage": damage,
+            "cvar95_damage": damage,
+            "step": 10,
+        }
+        for candidate, recall, damage in (
+            (candidates[0], 0.8, 0.2),
+            (candidates[1], 0.5, 0.3),
+        )
+    ]
+
+    result = select_parents(
+        rows,
+        campaign={"campaign_id": "campaign"},
+        runtime={
+            "parent_roster": ["rmu"],
+            "parent": {
+                "calibration_mean_damage_max": 0.1,
+                "calibration_cvar95_damage_max": 0.1,
+            },
+        },
+        setting="setting",
+        sources=[],
+        frozen=False,
+    )
+
+    assert result["parents"]["rmu"] == candidates[1]
+    assert result["fallback_parents"] == ["rmu"]
+    assert result["strict_parent_gate_passed"]["rmu"] is False
+    assert result["unresolved"] == []

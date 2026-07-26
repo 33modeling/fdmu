@@ -644,11 +644,6 @@ def _parse_protection_records(
         first_reaching = _required_bool(
             raw, "parent_checkpoint_first_reaching", where=where
         )
-        if not first_reaching:
-            raise EvidenceValidationError(
-                f"{where} did not start from the first direct-criterion-reaching "
-                "parent checkpoint"
-            )
         margins_feasible = all(
             value >= 0.0
             for value in (
@@ -707,6 +702,14 @@ def _normalize_protection_unit(
             f"protection unit {unit.key!r} mixes parent checkpoints: "
             f"{sorted(checkpoint_ids)}"
         )
+    first_reaching_values = {
+        record.parent_checkpoint_first_reaching for record in records
+    }
+    if len(first_reaching_values) != 1:
+        raise EvidenceValidationError(
+            f"protection unit {unit.key!r} mixes first direct-criterion-reaching "
+            "parent status across arms"
+        )
 
     regular_sets: dict[str, set[str]] = {}
     for arm in NON_RANDOM_ARMS:
@@ -735,8 +738,10 @@ def _normalize_protection_unit(
     # Feasibility and common candidate support are separate funnels. A unit can
     # have every arm complete and constraint-feasible yet fail the paired claim
     # because one arm changed candidate support.
-    feasible = bool(present and draw_complete and all_records_expected) and all(
-        record.feasible for record in all_records_expected
+    feasible = (
+        bool(present and draw_complete and all_records_expected)
+        and all(record.parent_checkpoint_first_reaching for record in all_records_expected)
+        and all(record.feasible for record in all_records_expected)
     )
 
     groups: dict[str, str] = {}

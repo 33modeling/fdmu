@@ -144,6 +144,8 @@ tail -f /rdata/minsoo3.kim/results/paper/tofu_qwen25_1p5b/fidelity/launcher_logs
 Strict joint dominance를 만족하면 해당 trial을 선택한다. 선언한 sweep을 모두
 실행해도 만족하지 않으면 가장 성능이 좋은 관측 trial을 `best_available`로
 선택하고, 낮은 성능과 실패 판정을 그대로 기록한 채 LaTeX 생성까지 계속한다.
+Parent calibration의 strict gate를 만족하지 못한 parent도 가장 좋은 관측
+설정을 fallback으로 선택하고 이후 결과에서 infeasible로 기록한다.
 Fidelity threshold 실패도 같은 방식으로 결과에 `false`로 기록되며 최종
 `table1.tex`과 `final/RESULT_CONCLUSION.json` 생성을 막지 않는다.
 
