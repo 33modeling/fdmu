@@ -4,12 +4,22 @@
 
 ## 1. TOFU 1.5B 개발 파이프라인
 
-설정 확인부터 최종 LaTeX까지 원클릭 실행:
+## 지금 calibration까지 실행한 경우
+
+아래 **같은 원클릭 명령 하나만 다시 실행**한다. `parent_calibration/`,
+`sft_cache/`, `joint_sweep/`를 삭제하지 않는다.
 
 ```bash
 cd /path/to/fdmu
 GPU_IDS=0,1 bash local_run/run_tofu_1p5b_4090x2.sh
 ```
+
+런처는 완료된 calibration unit을 검증해 재사용하고, `pending=0`이면 parent
+freeze를 자동 생성·검증한 뒤 joint sweep과 최종 LaTeX까지 계속 진행한다.
+오류로 종료되어도 개별 calibration/freeze/fidelity/finalize 스크립트를 실행하지
+말고 위 명령만 다시 실행한다. 사람의 입력이나 수동 YAML 수정은 없다.
+
+## 전체 흐름
 
 실행 순서:
 
@@ -28,21 +38,6 @@ environment bootstrap + dependency/CUDA/data 검사
 calibration input에서 다시 계산해 일치 여부를 확인하고, `BEST.json`은
 target-free terminal winner와 trial 산출물을 검증한다. 각 단계의 SHA-256
 freeze 기록을 남긴 뒤 자동으로 다음 단계로 진행한다.
-
-단계별 실행과 재개도 지원한다. 먼저 calibration과 sweep까지만 실행한다.
-
-```bash
-RUN_FINALIZE=0 GPU_IDS=0,1 \
-  bash local_run/run_tofu_1p5b_4090x2.sh
-```
-
-`joint_sweep/BEST.json`이 생성된 뒤 finalize만 실행한다.
-
-```bash
-bash local_run/run_tofu_1p5b_fidelity.sh
-
-GPU_IDS=0,1 bash local_run/finalize_joint_sweep_to_latex.sh
-```
 
 최종 LaTeX는 기본적으로
 `/rdata/minsoo3.kim/results/paper/tofu_qwen25_1p5b/final/table1.tex`에

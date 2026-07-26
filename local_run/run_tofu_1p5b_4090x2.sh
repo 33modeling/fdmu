@@ -87,6 +87,8 @@ run_stage_accept() {
 
 printf '[%s] TOFU 1.5B 4090x2 pipeline start pid=%s log=%s\n' \
   "$(timestamp)" "$$" "$PIPELINE_LOG"
+printf '[RESUME] this is the only operator command; completed calibration, sweep, and final units are validated and reused\n'
+printf '[RESUME] after a failure, rerun this same command without deleting RUN_ROOT or SFT cache\n'
 printf '[CONFIG] repo=%s python=%s gpus=%s run_root=%s\n' \
   "$ROOT" "$PYTHON" "${GPU_IDS:-0,1}" "$RUN_ROOT"
 printf '[STORAGE] calibration=%s sft_cache=%s sweep=%s final=%s\n' \
@@ -96,7 +98,8 @@ df -h "$RUN_ROOT" 2>&1 || true
 # Exit 4 is accepted for calibration artifacts produced by older checkouts.
 # Current calibration exits 0 once its target-free proposal is resolved.
 run_stage_accept calibration "0 4" bash local_run/run_tofu_1p5b_calibration.sh
-run_stage parent-freeze-validation \
+printf '[AUTO] calibration is resolved; creating or validating the parent freeze without operator input\n'
+run_stage automatic-parent-freeze \
   bash local_run/approve_tofu_1p5b_parent_freeze.sh --approve
 run_stage joint-sweep bash local_run/sweep_joint_1p5b_4090x2.sh "$@"
 if [[ "${RUN_FINALIZE:-1}" == "1" ]]; then

@@ -267,10 +267,7 @@ def run(args: argparse.Namespace) -> int:
         )
         return 3
     _status(f"AUTOMATIC_FREEZE_READY proposal={proposal_path}")
-    _status(
-        "FREEZE_COMMAND "
-        "bash local_run/approve_tofu_1p5b_parent_freeze.sh --approve"
-    )
+    _status("NEXT_AUTOMATIC_STAGE parent-freeze (no operator input required)")
     return 0
 
 

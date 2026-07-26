@@ -82,25 +82,22 @@ total:             280
 GPU_IDS=0,1 bash local_run/run_tofu_1p5b_4090x2.sh
 ```
 
+Calibration 완료 후나 중간 오류 후에도 위 명령 하나만 다시 실행한다. 완료
+unit과 SFT cache는 검증 후 재사용되고 parent freeze, joint sweep, target,
+LaTeX가 자동으로 이어진다. 결과 폴더를 삭제하거나 하위 스크립트를 하나씩
+실행하지 않는다.
+
 통합 로그는 `<RUN_ROOT>/launcher_logs/current.log`에 남는다. Parent proposal과
 joint `BEST.json`은 target 전에 target-free 입력에서 재검증되며, 각 파일의
 SHA-256을 freeze 기록에 남긴 뒤 사람의 입력 없이 다음 단계로 진행한다.
 Declared fidelity 결과는
 `<RUN_ROOT>/fidelity/fidelity_summary.json`에 생성된다.
 
-4090 x2 joint sweep이 이미 `BEST.json`을 만들었다면 calibration과 D_prot를
-다시 실행하지 않고 다음 두 단계를 순서대로 사용한다.
-
-```bash
-bash local_run/run_tofu_1p5b_fidelity.sh
-
-GPU_IDS=0,1 bash local_run/finalize_joint_sweep_to_latex.sh
-```
-
-이 명령은 winning D_prot를 재사용해 D_pred, prospective selection freeze,
-target evaluation, raw aggregation, evidence 판정, `final/table1.tex` 생성을
-순서대로 수행한다. Finalizer는 target을 보기 전에 고정된 development-only
-BEST와 sweep status를 검증하고 `JOINT_BEST_FREEZE.json`을 기록한다.
+원클릭 runner는 winning D_prot를 재사용해 D_pred, prospective selection
+freeze, target evaluation, raw aggregation, evidence 판정,
+`final/table1.tex` 생성을 순서대로 수행한다. Finalizer는 target을 보기 전에
+고정된 development-only BEST와 sweep status를 검증하고
+`JOINT_BEST_FREEZE.json`을 기록한다.
 
 이미 동결된 stage manifest에서 범용 Table 1 runner만 실행할 때는 다음 명령을
 사용한다.

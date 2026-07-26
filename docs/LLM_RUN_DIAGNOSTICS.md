@@ -20,6 +20,14 @@ requeue하지 않는다.
 
 ## RTX 4090 x2: 1.5B
 
+운영자에게 안내할 실행 명령은 아래 하나뿐이다. Calibration 완료 또는 중간
+오류 후에도 같은 명령을 재실행한다. 하위 단계 스크립트를 개별 실행하거나
+기존 결과/cache를 삭제하도록 안내하지 않는다.
+
+```bash
+GPU_IDS=0,1 bash local_run/run_tofu_1p5b_4090x2.sh
+```
+
 기본 root:
 
 ```text

@@ -54,6 +54,10 @@ GPU 머신에서는 기존 검증된 `.venv`가 있으면 다시 만들지 않�
 GPU_IDS=0,1 bash local_run/run_tofu_1p5b_4090x2.sh
 ```
 
+Calibration까지 끝났거나 중간 오류로 종료된 경우에도 결과를 삭제하거나
+하위 스크립트를 따로 실행하지 않는다. 위 명령 하나를 그대로 다시 실행하면
+완료 unit과 SFT cache를 검증·재사용하고 자동 freeze부터 이어서 진행한다.
+
 이전 실패에서 남은 4090 compute 프로세스까지 정리하고 같은 결과를 재개할
 때는 아래 복구 원클릭 명령을 사용한다. 선택한 GPU의 기존 compute
 프로세스를 종료하므로 전용 4090 머신에서만 실행한다. 결과와 cache는
@@ -70,17 +74,6 @@ SHA-256이 포함된 freeze 기록을 남긴 뒤 자동으로 다음 단계로 �
 완료 unit과 검증된 SFT cache는 재사용한다. 결과와 로그는 기본적으로
 `/rdata/minsoo3.kim/results/paper/tofu_qwen25_1p5b/`에 쓴다. 전체 로그는
 `launcher_logs/current.log`, 최종 표는 `final/table1.tex`이다.
-
-단계별 실행은 sweep까지만 수행한 뒤 finalize를 재개한다.
-
-```bash
-RUN_FINALIZE=0 GPU_IDS=0,1 \
-  bash local_run/run_tofu_1p5b_4090x2.sh
-
-bash local_run/run_tofu_1p5b_fidelity.sh
-
-GPU_IDS=0,1 bash local_run/finalize_joint_sweep_to_latex.sh
-```
 
 ### 범용 로컬 PDF-v4 진단
 
