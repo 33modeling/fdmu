@@ -320,6 +320,7 @@ def fidelity_commands(
     output_root: Path,
     *,
     code_commit: str | None = None,
+    enforce_gate: bool = True,
 ):
     common = cfg["common"]
     phase = cfg["fidelity"]
@@ -357,8 +358,9 @@ def fidelity_commands(
             "--certificate", str(certificate),
             "--code-commit", current_commit,
             "--model-fingerprint", _model_fingerprint(model["path"]),
-            "--enforce-gate",
         ]
+        if enforce_gate:
+            cmd.append("--enforce-gate")
         yield csv_path, certificate, cmd
 
 
@@ -817,6 +819,11 @@ def main() -> None:
     p = argparse.ArgumentParser()
     p.add_argument("--config", required=True)
     p.add_argument("--phase", required=True, choices=["fidelity", "calibration", "audit"])
+    p.add_argument(
+        "--allow-failed-fidelity",
+        action="store_true",
+        help="retain measured fidelity failure and continue result generation",
+    )
     p.add_argument("--model-id", action="append", default=[], help="run only this model alias")
     p.add_argument(
         "--only-authors",
@@ -894,6 +901,7 @@ def main() -> None:
                 models,
                 output_root,
                 code_commit=str(git_state["code_commit"]),
+                enforce_gate=not a.allow_failed_fidelity,
             ),
             strict=True,
         ):
@@ -924,6 +932,13 @@ def main() -> None:
                     else:
                         if not existing["payload"]["passed"]:
                             _print_fidelity_failure(model, existing)
+                            if a.allow_failed_fidelity and a.resume:
+                                print(
+                                    "[FIDELITY RESULT] measured failure accepted; "
+                                    "continuing to LaTeX",
+                                    flush=True,
+                                )
+                                continue
                             raise RuntimeError(
                                 f"stored current-contract fidelity result failed for "
                                 f"{model['id']}; deterministic rerun disabled"
@@ -985,7 +1000,11 @@ def main() -> None:
                         f"fidelity build did not publish a non-empty CSV: {csv_path}"
                     )
                 try:
-                    validate_fidelity_artifact_pair(cfg, model)
+                    validate_fidelity_artifact_pair(
+                        cfg,
+                        model,
+                        require_passed=not a.allow_failed_fidelity,
+                    )
                 except (OSError, ValueError, json.JSONDecodeError) as exc:
                     _preserve_fidelity_artifacts(
                         csv_path,

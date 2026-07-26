@@ -111,6 +111,59 @@ def test_resolve_joint_winner_uses_sealed_trial_artifacts(tmp_path: Path) -> Non
     assert record_path.read_bytes() == first
 
 
+def test_resolve_joint_winner_accepts_measured_best_available(
+    tmp_path: Path,
+) -> None:
+    joint = tmp_path / "joint_sweep"
+    trial = joint / "trials" / "best-observed"
+    campaign = trial / "config" / "campaign.local.yaml"
+    runtime = trial / "config" / "tofu_v4.local.yaml"
+    evidence = tmp_path / "evidence.yaml"
+    comparison = trial / "joint_comparison.json"
+    protection = trial / "stage" / "selection_inputs.jsonl"
+    for path in (campaign, runtime, evidence, protection):
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("value: true\n", encoding="utf-8")
+    _write_json(comparison, {"passed": False})
+    _write_json(
+        trial / "trial.json",
+        {
+            "resolved_configs": {
+                "campaign": str(campaign),
+                "runtime": str(runtime),
+            },
+            "canonical_sources": {"evidence": str(evidence)},
+        },
+    )
+    _write_json(
+        joint / "BEST.json",
+        {
+            "status": "best_available",
+            "human_review_required": False,
+            "development_only": True,
+            "target_used": False,
+            "strict_joint_dominance": False,
+            "trial_dir": str(trial),
+            "recommended_runtime": str(runtime),
+            "joint_comparison": str(comparison),
+        },
+    )
+    _write_json(
+        joint / "SWEEP_STATUS.json",
+        {
+            "status": "best_available",
+            "terminal": True,
+            "target_used": False,
+            "trial_dir": str(trial),
+        },
+    )
+
+    resolved = resolve_joint_winner(joint)
+
+    assert resolved["trial_dir"] == trial.resolve()
+    assert resolved["runtime"] == runtime.resolve()
+
+
 def test_final_campaign_points_to_external_selection_freeze(
     tmp_path: Path,
 ) -> None:
@@ -177,6 +230,7 @@ def test_finalization_marker_skips_only_hash_valid_table_outputs(
         "readiness": final / setting / "evidence_readiness.json",
         "ledger": final / setting / "evidence_ledger.json",
         "selection_freeze": final / setting / "selection_freeze.yaml",
+        "conclusion": final / "RESULT_CONCLUSION.json",
     }
     for name, path in paths.items():
         path.parent.mkdir(parents=True, exist_ok=True)

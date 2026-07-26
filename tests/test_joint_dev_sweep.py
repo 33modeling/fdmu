@@ -20,6 +20,7 @@ from experiments.paper.run_joint_dev_sweep import (
     _EventLog,
     _absolute_executable,
     _best_parent_freeze,
+    _promote_best_available,
     _run_lanes,
     _unit_complete,
     _write_or_rebind_manifest,
@@ -717,3 +718,48 @@ def test_joint_completion_accepts_legacy_draft_without_gpu_work(tmp_path):
     )
     assert not complete
     assert "comparison" in reason
+
+
+def test_exhausted_sweep_promotes_best_available_and_returns_terminal_result(
+    tmp_path,
+):
+    root = tmp_path / "joint"
+    trial = root / "trials" / "near"
+    runtime = trial / "config" / "tofu_v4.local.yaml"
+    comparison = trial / "joint_comparison.json"
+    report_path = root / "exhaustions" / "report.json"
+    runtime.parent.mkdir(parents=True)
+    report_path.parent.mkdir(parents=True)
+    runtime.write_text("settings: {}\n", encoding="utf-8")
+    comparison.write_text('{"passed": false}\n', encoding="utf-8")
+    (trial / "trial.json").write_text(
+        json.dumps(
+            {"resolved_configs": {"runtime": str(runtime.resolve())}}
+        ),
+        encoding="utf-8",
+    )
+    report = {
+        "status": "no_joint_dominance",
+        "terminal": True,
+        "closest_candidate": {
+            "trial_id": "near",
+            "trial_dir": str(trial.resolve()),
+            "groups_passed": 0,
+            "total_shortfall": 1.25,
+        },
+    }
+    report_path.write_text(json.dumps(report), encoding="utf-8")
+
+    best = _promote_best_available(
+        output_root=root,
+        report_path=report_path,
+        report=report,
+    )
+
+    assert best["status"] == "best_available"
+    assert best["strict_joint_dominance"] is False
+    assert best["trial_id"] == "near"
+    status = json.loads((root / "SWEEP_STATUS.json").read_text())
+    assert status["status"] == "best_available"
+    assert status["exit_code"] == 0
+    assert status["strict_joint_dominance"] is False

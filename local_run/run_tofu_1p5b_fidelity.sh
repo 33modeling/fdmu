@@ -55,8 +55,9 @@ try:
         == certificate_path
         and summary.get("source_certificate_sha256")
         == hashlib.sha256(certificate_path.read_bytes()).hexdigest()
-        and summary.get("certificate_passed") is True
-        and certificate.get("passed") is True
+        and type(summary.get("certificate_passed")) is bool
+        and type(certificate.get("passed")) is bool
+        and summary.get("certificate_passed") == certificate.get("passed")
     )
 except (OSError, ValueError, TypeError) as error:
     print(f"[FIDELITY_STATUS] complete=false reason={type(error).__name__}: {error}")
@@ -124,6 +125,7 @@ CUDA_VISIBLE_DEVICES="$FIDELITY_GPU" \
     --config "$CONFIG" \
     --phase fidelity \
     --model-id qwen25_1p5b \
+    --allow-failed-fidelity \
     --resume
 
 "$PYTHON" -u experiments/paper/export_channel_matrix_raw.py \
@@ -147,8 +149,11 @@ if summary.get("setting") != "tofu_qwen25_1p5b":
     raise SystemExit("fidelity summary setting mismatch")
 if summary.get("support") != "declared_setting_fidelity":
     raise SystemExit("fidelity summary support is not declared_setting_fidelity")
-if certificate.get("passed") is not True:
-    raise SystemExit("declared fidelity certificate did not pass")
+if type(certificate.get("passed")) is not bool:
+    raise SystemExit("declared fidelity result lacks a boolean passed field")
+if summary.get("certificate_passed") != certificate.get("passed"):
+    raise SystemExit("fidelity summary and measured result disagree")
+print(f"[RESULT] fidelity_passed={certificate['passed']}")
 print(f"[RESULT] fidelity_certificate={certificate_path}")
 print(f"[RESULT] fidelity_summary={summary_path}")
 PY

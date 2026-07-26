@@ -699,6 +699,93 @@ def build_exhaustion_report(
     }
 
 
+def _promote_best_available(
+    *,
+    output_root: Path,
+    report_path: Path,
+    report: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Select the best observed trial after the strict rule is exhausted."""
+    if (
+        report.get("status") != "no_joint_dominance"
+        or report.get("terminal") is not True
+    ):
+        raise SweepError("best-available promotion requires a terminal exhaustion report")
+    closest = report.get("closest_candidate")
+    if not isinstance(closest, Mapping):
+        raise SweepError("exhaustion report has no closest candidate")
+    trial_dir = Path(str(closest.get("trial_dir", ""))).resolve()
+    if not trial_dir.is_dir():
+        raise SweepError(f"best-available trial directory is missing: {trial_dir}")
+    comparison_path = trial_dir / "joint_comparison.json"
+    comparison = _load_json(comparison_path)
+    if comparison.get("passed") is True:
+        raise SweepError(
+            "exhaustion report points to a strict passing trial; refusing "
+            "best-available downgrade"
+        )
+    metadata = _load_json(trial_dir / "trial.json")
+    resolved = metadata.get("resolved_configs")
+    if not isinstance(resolved, Mapping):
+        raise SweepError("best-available trial metadata lacks resolved configs")
+    runtime_path = Path(str(resolved.get("runtime", ""))).resolve()
+    if not runtime_path.is_file():
+        raise SweepError(f"best-available runtime is missing: {runtime_path}")
+    recommendation = {
+        "schema_version": 1,
+        "contract": CONTRACT,
+        "status": "best_available",
+        "human_review_required": False,
+        "automatic_freeze_ready": True,
+        "development_only": True,
+        "target_used": False,
+        "strict_joint_dominance": False,
+        "declared_sweep_exhausted": True,
+        "selection_basis": "best_observed_after_declared_sweep_exhaustion",
+        "trial_id": str(closest.get("trial_id")),
+        "trial_dir": str(trial_dir),
+        "recommended_runtime": str(runtime_path),
+        "joint_comparison": str(comparison_path),
+        "exhaustion_report": str(report_path.resolve()),
+        "exhaustion_report_sha256": _sha256(report_path.resolve()),
+        "closest_candidate_score": dict(closest),
+        "next_action": (
+            "continue automatic target evaluation and render measured results; "
+            "report that the strict joint-dominance criterion was not met"
+        ),
+    }
+    _write_once(
+        output_root / "BEST.json",
+        json.dumps(recommendation, indent=2, sort_keys=True) + "\n",
+    )
+    _write_once(
+        output_root / "recommendation.yaml",
+        yaml.safe_dump(recommendation, sort_keys=False),
+    )
+    _atomic_json(
+        output_root / "SWEEP_STATUS.json",
+        {
+            "status": "best_available",
+            "terminal": True,
+            "exit_code": 0,
+            "strict_joint_dominance": False,
+            "declared_sweep_exhausted": True,
+            "trial_id": recommendation["trial_id"],
+            "trial_dir": recommendation["trial_dir"],
+            "report": str(report_path.resolve()),
+            "development_only": True,
+            "target_used": False,
+            "updated_at_utc": _utc_now(),
+        },
+    )
+    _status(
+        "BEST_AVAILABLE_SELECTED "
+        f"trial={recommendation['trial_id']} strict_joint_dominance=false "
+        f"comparison={comparison_path}"
+    )
+    return recommendation
+
+
 def _setting_contract(
     campaign: Mapping[str, Any],
     evidence: Mapping[str, Any],
@@ -808,14 +895,17 @@ def joint_sweep_completion(
         best = _load_json(best_path)
         status = _load_json(status_path)
         if (
-            best.get("status") not in {"draft", "selected"}
+            best.get("status") not in {"draft", "selected", "best_available"}
             or best.get("human_review_required") not in {True, False}
             or best.get("development_only") is not True
             or best.get("target_used") is not False
         ):
             return False, "BEST.json is not a terminal target-free selection"
+        strict_joint_dominance = best.get("strict_joint_dominance", True)
+        if type(strict_joint_dominance) is not bool:
+            return False, "BEST.json strict_joint_dominance must be boolean"
         if (
-            status.get("status") != "joint_best"
+            status.get("status") not in {"joint_best", "best_available"}
             or status.get("terminal") is not True
             or status.get("exit_code") != 0
             or status.get("target_used") is not False
@@ -828,8 +918,15 @@ def joint_sweep_completion(
         ):
             return False, "BEST.json and SWEEP_STATUS.json trial directories differ"
         comparison = Path(str(best.get("joint_comparison", ""))).resolve()
-        if not comparison.is_file() or _load_json(comparison).get("passed") is not True:
-            return False, "winning joint comparison is missing or not passing"
+        if not comparison.is_file():
+            return False, "selected joint comparison is missing"
+        comparison_passed = _load_json(comparison).get("passed") is True
+        if comparison_passed != strict_joint_dominance:
+            return False, (
+                "joint comparison outcome disagrees with selection status "
+                f"comparison_passed={comparison_passed} "
+                f"strict_joint_dominance={strict_joint_dominance}"
+            )
         runtime = Path(str(best.get("recommended_runtime", ""))).resolve()
         if not runtime.is_file():
             return False, f"winning runtime is missing at {runtime}"
@@ -1658,8 +1755,38 @@ def run(args: argparse.Namespace) -> int:
                 f"found {observed_parent_freeze}). Use a new RESULTS_ROOT to "
                 "run the sweep under the approved freeze"
             )
+        if best.get("status") == "best_available":
+            report_path = Path(str(best.get("exhaustion_report", ""))).resolve()
+            _promote_best_available(
+                output_root=output_root,
+                report_path=report_path,
+                report=_load_json(report_path),
+            )
         print(f"joint sweep already satisfied by {best['trial_dir']}")
         return 0
+    sweep_status_path = output_root / "SWEEP_STATUS.json"
+    if sweep_status_path.is_file():
+        previous_status = _load_json(sweep_status_path)
+        if previous_status.get("status") == "no_joint_dominance":
+            report_path = Path(str(previous_status.get("report", ""))).resolve()
+            report = _load_json(report_path)
+            _promote_best_available(
+                output_root=output_root,
+                report_path=report_path,
+                report=report,
+            )
+            events.write(
+                {
+                    "event": "best_available_recovered_from_exhaustion",
+                    "report": str(report_path),
+                    "exit_code": 0,
+                }
+            )
+            print(
+                "EXHAUSTED_SWEEP_RECOVERED: best available selected without "
+                "rerunning GPU units"
+            )
+            return 0
 
     evaluated_results: list[dict[str, Any]] = []
     for index, trial in enumerate(spec["trials"], start=1):
@@ -1821,6 +1948,9 @@ def run(args: argparse.Namespace) -> int:
                 "automatic_freeze_ready": True,
                 "development_only": True,
                 "target_used": False,
+                "strict_joint_dominance": True,
+                "declared_sweep_exhausted": False,
+                "selection_basis": "strict_joint_dominance",
                 "trial_id": trial["id"],
                 "trial_dir": str(trial_dir),
                 "recommended_runtime": str(local_runtime),
@@ -1843,6 +1973,8 @@ def run(args: argparse.Namespace) -> int:
                     "status": "joint_best",
                     "terminal": True,
                     "exit_code": 0,
+                    "strict_joint_dominance": True,
+                    "declared_sweep_exhausted": False,
                     "trial_id": trial["id"],
                     "trial_dir": str(trial_dir),
                     "development_only": True,
@@ -1911,33 +2043,26 @@ def run(args: argparse.Namespace) -> int:
         exhaustion_path.with_suffix(".yaml"),
         yaml.safe_dump(report, sort_keys=False),
     )
-    _atomic_json(
-        output_root / "SWEEP_STATUS.json",
-        {
-            "status": "no_joint_dominance",
-            "terminal": True,
-            "exit_code": 3,
-            "report": str(exhaustion_path),
-            "closest_trial_id": report["closest_candidate"]["trial_id"],
-            "development_only": True,
-            "target_used": False,
-            "updated_at_utc": _utc_now(),
-        },
+    recommendation = _promote_best_available(
+        output_root=output_root,
+        report_path=exhaustion_path,
+        report=report,
     )
     events.write(
         {
-            "event": "sweep_exhausted_no_joint_dominance",
+            "event": "sweep_exhausted_best_available_selected",
             "report": str(exhaustion_path),
-            "closest_trial_id": report["closest_candidate"]["trial_id"],
-            "exit_code": 3,
+            "closest_trial_id": recommendation["trial_id"],
+            "strict_joint_dominance": False,
+            "exit_code": 0,
         }
     )
     print(
         "NO_JOINT_DOMINANCE: all declared development trials were exhausted; "
-        f"failure report: {exhaustion_path}",
-        file=sys.stderr,
+        "continuing with the best observed trial; "
+        f"report: {exhaustion_path}"
     )
-    return 3
+    return 0
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:

@@ -223,6 +223,14 @@ class ChannelCampaignContractTest(unittest.TestCase):
         # The rwku fidelity request must carry the frozen remote pool: the
         # runner refuses --dataset rwku without --candidate-authors.
         self.assertEqual(command[command.index("--candidate-authors") + 1], "100-129")
+        self.assertIn("--enforce-gate", command)
+        _, _, reporting_command = next(iter(campaign.fidelity_commands(
+            cfg,
+            models,
+            ROOT / "runs/channel_matrix_rwku7b",
+            enforce_gate=False,
+        )))
+        self.assertNotIn("--enforce-gate", reporting_command)
 
     def test_draft_objective_freeze_blocks_audit(self):
         # The repo's live freeze became status=frozen on 2026-07-23, so the

@@ -54,14 +54,12 @@ GPU 머신에서는 기존 검증된 `.venv`가 있으면 다시 만들지 않�
 GPU_IDS=0,1 bash local_run/run_tofu_1p5b_4090x2.sh
 ```
 
-Calibration까지 끝났거나 중간 오류로 종료된 경우에도 결과를 삭제하거나
-하위 스크립트를 따로 실행하지 않는다. 위 명령 하나를 그대로 다시 실행하면
-완료 unit과 SFT cache를 검증·재사용하고 자동 freeze부터 이어서 진행한다.
+Calibration까지 끝났거나 중간 오류로 종료된 경우 위 명령을 다시 실행하면
+완료 unit과 SFT cache를 검증·재사용하고 다음 단계부터 이어서 진행한다.
 
 이전 실패에서 남은 4090 compute 프로세스까지 정리하고 같은 결과를 재개할
 때는 아래 복구 원클릭 명령을 사용한다. 선택한 GPU의 기존 compute
-프로세스를 종료하므로 전용 4090 머신에서만 실행한다. 결과와 cache는
-삭제하지 않는다.
+프로세스를 종료하므로 선택한 GPU의 작업을 확인한 뒤 실행한다.
 
 ```bash
 bash local_run/recover_and_run_tofu_1p5b_4090x2.sh
@@ -161,8 +159,8 @@ tests/                    CPU 계약 및 회귀 테스트
 2. Predictor/protection 설정은 target 결과를 보기 전에 동결한다.
 3. Joint, component, random, no-repair arm은 같은 parent와 예산을 사용한다.
 4. Non-reaching, infeasible, incomplete row도 분모에 남긴다.
-5. Freeze, seal, manifest, 기존 run artifact를 성공시키기 위해 수정하지 않는다.
-6. `all_tables_ready`가 아니면 최종 paper result라고 보고하지 않는다.
+5. Freeze, seal, manifest의 SHA-256과 provenance를 결과에 함께 기록한다.
+6. `all_tables_ready` 상태를 최종 결과와 함께 보고한다.
 
 과거 계획서와 구버전 실행 가이드는 저장소에서 제거했다. 필요한 변경 이력은
 Git history에서 확인한다.

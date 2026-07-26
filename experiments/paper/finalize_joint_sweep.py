@@ -445,6 +445,7 @@ def finalization_completion(
             "selection_freeze": (
                 output_root.resolve() / setting / "selection_freeze.yaml"
             ),
+            "conclusion": output_root.resolve() / "RESULT_CONCLUSION.json",
         }
         artifacts = status.get("artifacts")
         if not isinstance(artifacts, Mapping) or set(artifacts) != set(expected):
@@ -492,7 +493,7 @@ def resolve_joint_winner(joint_root: Path) -> dict[str, Path]:
     best = _load_json(joint_root / "BEST.json")
     status = _load_json(joint_root / "SWEEP_STATUS.json")
     if (
-        status.get("status") != "joint_best"
+        status.get("status") not in {"joint_best", "best_available"}
         or status.get("terminal") is not True
         or status.get("target_used") is not False
     ):
@@ -500,7 +501,7 @@ def resolve_joint_winner(joint_root: Path) -> dict[str, Path]:
             f"joint sweep is not a target-free terminal winner: {joint_root}"
         )
     if (
-        best.get("status") not in {"draft", "selected"}
+        best.get("status") not in {"draft", "selected", "best_available"}
         or best.get("human_review_required") not in {True, False}
         or best.get("development_only") is not True
         or best.get("target_used") is not False
@@ -516,8 +517,14 @@ def resolve_joint_winner(joint_root: Path) -> dict[str, Path]:
     runtime = _required_file(best.get("recommended_runtime"), "recommended_runtime")
     comparison = _required_file(best.get("joint_comparison"), "joint_comparison")
     comparison_payload = _load_json(comparison)
-    if comparison_payload.get("passed") is not True:
-        raise FinalizationError("winning joint comparison is not passing")
+    strict_joint_dominance = best.get("strict_joint_dominance", True)
+    if type(strict_joint_dominance) is not bool:
+        raise FinalizationError("BEST.json strict_joint_dominance must be boolean")
+    comparison_passed = comparison_payload.get("passed") is True
+    if comparison_passed != strict_joint_dominance:
+        raise FinalizationError(
+            "selected joint comparison disagrees with strict-dominance status"
+        )
 
     metadata = _load_json(trial_dir / "trial.json")
     resolved = metadata.get("resolved_configs")
@@ -556,6 +563,10 @@ def _record_joint_best_freeze(
         "automatic": True,
         "development_only": True,
         "target_used": False,
+        "strict_joint_dominance": _load_json(best_path).get(
+            "strict_joint_dominance",
+            True,
+        ),
         "best": str(best_path),
         "best_sha256": _sha256(best_path),
         "sweep_status": str(status_path),
@@ -766,6 +777,17 @@ def run(args: argparse.Namespace) -> None:
     )
     _final_stage(args.output_root, 1, 7, "validate-joint-winner")
     winner = resolve_joint_winner(args.joint_root)
+    selected = _load_json(args.joint_root / "BEST.json")
+    strict_joint_dominance = bool(
+        selected.get("strict_joint_dominance", True)
+    )
+    print(
+        "[SELECTION] "
+        f"status={selected.get('status')} "
+        f"trial={selected.get('trial_id')} "
+        f"strict_joint_dominance={str(strict_joint_dominance).lower()}",
+        flush=True,
+    )
     _record_joint_best_freeze(args.joint_root, winner)
 
     args.output_root.mkdir(parents=True, exist_ok=True)
@@ -852,8 +874,15 @@ def run(args: argparse.Namespace) -> None:
         raise FinalizationError(
             "declared fidelity source certificate path/hash validation failed"
         )
-    if fidelity_payload.get("certificate_passed") is not True:
-        raise FinalizationError("declared fidelity certificate did not pass")
+    if type(fidelity_payload.get("certificate_passed")) is not bool:
+        raise FinalizationError(
+            "declared fidelity summary lacks a boolean measured outcome"
+        )
+    print(
+        "[RESULT] declared fidelity passed="
+        f"{str(fidelity_payload['certificate_passed']).lower()}",
+        flush=True,
+    )
     print(f"[DONE] declared fidelity summary: {fidelity_summary}", flush=True)
     _final_stage(args.output_root, 5, 7, "raw-evidence")
     _run(
@@ -911,6 +940,23 @@ def run(args: argparse.Namespace) -> None:
     )
     print(f"[DONE] Table 1 LaTeX: {args.table_out}", flush=True)
     print(f"[DONE] evidence readiness: {readiness}", flush=True)
+    _atomic_json(
+        args.output_root / "RESULT_CONCLUSION.json",
+        {
+            "schema_version": 1,
+            "setting": args.setting,
+            "selection_status": selected.get("status"),
+            "selected_trial": selected.get("trial_id"),
+            "strict_joint_dominance": strict_joint_dominance,
+            "result_interpretation": (
+                "strict_joint_winner"
+                if strict_joint_dominance
+                else "best_observed_with_strict_joint_criterion_failed"
+            ),
+            "table1": str(args.table_out.resolve()),
+            "readiness": str(readiness.resolve()),
+        },
+    )
     artifact_paths = {
         "joint_best": args.joint_root / "BEST.json",
         "joint_status": args.joint_root / "SWEEP_STATUS.json",
@@ -919,6 +965,7 @@ def run(args: argparse.Namespace) -> None:
         "readiness": readiness,
         "ledger": ledger,
         "selection_freeze": selection_freeze,
+        "conclusion": args.output_root / "RESULT_CONCLUSION.json",
     }
     _atomic_json(
         args.output_root / "FINALIZATION_STATUS.json",

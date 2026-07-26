@@ -1,8 +1,7 @@
 # Local LLM Run Diagnostics
 
-이 문서는 로컬 LLM과 실행 에이전트가 사용자에게 진단 명령을 떠넘기지 않고
-직접 로그를 찾아 원인을 분류하기 위한 필수 가이드다. 실행 중인 GPU 작업,
-queue, cache, manifest, seal은 수정하거나 삭제하지 않는다.
+이 문서는 로컬 LLM과 실행 에이전트가 로그를 찾아 원인을 분류하기 위한
+가이드다.
 
 ## 공통 진단 순서
 
@@ -20,9 +19,7 @@ requeue하지 않는다.
 
 ## RTX 4090 x2: 1.5B
 
-운영자에게 안내할 실행 명령은 아래 하나뿐이다. Calibration 완료 또는 중간
-오류 후에도 같은 명령을 재실행한다. 하위 단계 스크립트를 개별 실행하거나
-기존 결과/cache를 삭제하도록 안내하지 않는다.
+전체 자동 실행과 재개에 사용하는 명령:
 
 ```bash
 GPU_IDS=0,1 bash local_run/run_tofu_1p5b_4090x2.sh
@@ -61,6 +58,7 @@ GPU_IDS=0,1 bash local_run/run_tofu_1p5b_4090x2.sh
 | finalize 로그 | `<RUN_ROOT>/final/launcher_logs/current.log` |
 | finalize 내부 단계 | `<RUN_ROOT>/final/FINAL_CURRENT_STAGE.json` |
 | finalize 완료 마커 | `<RUN_ROOT>/final/FINALIZATION_STATUS.json` |
+| strict/best-available 결론 | `<RUN_ROOT>/final/RESULT_CONCLUSION.json` |
 | 최종 LaTeX | `<RUN_ROOT>/final/table1.tex` |
 
 최상위 순서는 `environment-bootstrap` → `calibration` →
@@ -77,6 +75,7 @@ GPU_IDS=0,1 bash local_run/run_tofu_1p5b_4090x2.sh
 | `CALIBRATION SKIPPED` | terminal calibration marker가 유효하며 GPU 재학습 없음 |
 | `PARENT FREEZE SKIPPED` | 승인 record와 freeze 해시가 일치하며 재계산 없음 |
 | `JOINT SWEEP SKIPPED` | `BEST.json`과 terminal sweep status가 유효하며 재학습 없음 |
+| `BEST_AVAILABLE_SELECTED` | strict 조건 미달이며 가장 좋은 관측 trial로 계속 진행 |
 | `DECLARED FIDELITY SKIPPED` | 기존 setting-level summary와 source hash 재사용 |
 | `LATEX SKIPPED` | 최종 marker의 Table 1 및 evidence artifact 해시가 모두 일치 |
 | `UNIT REUSED` / `TRIAL_REUSE` | 해당 유닛 검증 완료, `retraining=0` |
@@ -88,6 +87,8 @@ GPU_IDS=0,1 bash local_run/run_tofu_1p5b_4090x2.sh
 `FINAL_CURRENT_STAGE.json`에서 prediction, selection freeze, target evaluation,
 raw/aggregate evidence, Table 1 생성을 구분한다. 완료된 최종화는
 `FINALIZATION_STATUS.json`의 artifact SHA-256을 검증한 뒤 전체를 건너뛴다.
+Strict joint dominance나 fidelity threshold가 실패해도 측정 실패를 결과로
+기록하고 Table 1 생성을 계속한다.
 
 현재 GPU 실행을 재시작하지 않고 read-only watcher만 붙일 때:
 

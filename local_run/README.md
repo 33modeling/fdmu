@@ -6,8 +6,7 @@
 
 ## 지금 calibration까지 실행한 경우
 
-아래 **같은 원클릭 명령 하나만 다시 실행**한다. `parent_calibration/`,
-`sft_cache/`, `joint_sweep/`를 삭제하지 않는다.
+아래 원클릭 명령으로 전체 파이프라인을 실행하거나 재개할 수 있다.
 
 ```bash
 cd /path/to/fdmu
@@ -16,8 +15,7 @@ GPU_IDS=0,1 bash local_run/run_tofu_1p5b_4090x2.sh
 
 런처는 완료된 calibration unit을 검증해 재사용하고, `pending=0`이면 parent
 freeze를 자동 생성·검증한 뒤 joint sweep과 최종 LaTeX까지 계속 진행한다.
-오류로 종료되어도 개별 calibration/freeze/fidelity/finalize 스크립트를 실행하지
-말고 위 명령만 다시 실행한다. 사람의 입력이나 수동 YAML 수정은 없다.
+오류 후 같은 명령을 실행하면 완료된 단계는 재사용하고 미완료 단계부터 이어진다.
 
 재실행 시 terminal marker가 유효한 단계는 다음처럼 즉시 건너뛴다.
 
@@ -43,13 +41,13 @@ environment bootstrap + dependency/CUDA/data 검사
   -> parent calibration
   -> resolved parent freeze 자동 검증
   -> joint development sweep
-  -> trial 검증과 종료 판정
+  -> strict 판정 또는 best observed 자동 선택
   -> declared setting-level fidelity
   -> D_pred -> selection freeze -> target
   -> raw evidence -> table1.tex
 ```
 
-원클릭 실행기는 사람의 입력을 기다리지 않는다. parent proposal은 sealed
+원클릭 실행기는 parent proposal을 sealed
 calibration input에서 다시 계산해 일치 여부를 확인하고, `BEST.json`은
 target-free terminal winner와 trial 산출물을 검증한다. 각 단계의 SHA-256
 freeze 기록을 남긴 뒤 자동으로 다음 단계로 진행한다.
@@ -117,8 +115,7 @@ final:       <RUN_ROOT>/final
 할 때만 `CALIBRATION_ROOT`, `SFT_CACHE_ROOT`, `RESULTS_ROOT`, `JOINT_ROOT`,
 `FINAL_ROOT`를 덮어쓴다. `JOINT_ROOT`의 기본값은 `RESULTS_ROOT`이므로 custom
 sweep 위치를 finalize가 그대로 사용한다. `MODEL_PATH`, `HF_HOME`, `GPU_IDS`도
-환경변수로 변경할 수 있다. 저장소의 tracked config나 shell을 머신별 경로로
-수정하지 않는다.
+환경변수로 변경할 수 있다.
 
 Declared fidelity 단계는 target 실행 전에 별도 support에서 certificate를 만들고
 `<RUN_ROOT>/fidelity/fidelity_summary.json`에 저장한다. Finalize는
@@ -144,9 +141,11 @@ tail -f /rdata/minsoo3.kim/results/paper/tofu_qwen25_1p5b/fidelity/launcher_logs
 현재 실행을 재시작하지 않고 watcher만 붙이는 방법과 로그별 원인 분석 순서는
 [`docs/LLM_RUN_DIAGNOSTICS.md`](../docs/LLM_RUN_DIAGNOSTICS.md)를 따른다.
 
-`PARENT_CALIBRATION_UNRESOLVED`나 `NO_JOINT_DOMINANCE`는 숨길 오류가 아니라
-유효한 종료 결과다. Freeze 파일을 손으로 채우거나 target 결과를 보고 sweep을
-확장하지 않는다.
+Strict joint dominance를 만족하면 해당 trial을 선택한다. 선언한 sweep을 모두
+실행해도 만족하지 않으면 가장 성능이 좋은 관측 trial을 `best_available`로
+선택하고, 낮은 성능과 실패 판정을 그대로 기록한 채 LaTeX 생성까지 계속한다.
+Fidelity threshold 실패도 같은 방식으로 결과에 `false`로 기록되며 최종
+`table1.tex`과 `final/RESULT_CONCLUSION.json` 생성을 막지 않는다.
 
 ## 2. 범용 단일-arm PDF-v4 진단
 
@@ -182,5 +181,4 @@ fail closed한다.
 1. Launcher 로그의 첫 `[ERROR]`와 stage 이름을 확인한다.
 2. `.venv/bin/python -c 'import torch, transformers, datasets, yaml'`을 실행한다.
 3. `nvidia-smi`에서 GPU 0,1의 기존 compute process를 확인한다.
-4. Partial output은 삭제하지 말고 별도 forensics 경로로 옮긴다.
-5. 같은 명령을 다시 실행해 검증된 SFT cache와 완료 unit만 재사용한다.
+4. 같은 명령을 다시 실행하면 검증된 SFT cache와 완료 unit을 재사용한다.
