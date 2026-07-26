@@ -33,6 +33,8 @@ def test_4090_pipeline_accepts_resolved_calibration_boundary_only():
     assert '"0 3 4"' not in launcher
     assert 'STATUS_FILE="$RUN_ROOT/CURRENT_STAGE.txt"' in launcher
     assert 'ERROR_FILE="$RUN_ROOT/LAST_ERROR.txt"' in launcher
+    assert '"$JOINT_ROOT/LATEST_FAILURE.txt"' in launcher
+    assert "COMPLETE FAILURE REPORT" in launcher
     assert "PIPELINE_HEARTBEAT_SECONDS" in launcher
     assert 'setsid -- "$@" &' in launcher
     assert 'kill -TERM -- "-$ACTIVE_STAGE_PGID"' in launcher

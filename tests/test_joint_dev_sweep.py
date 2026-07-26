@@ -646,6 +646,17 @@ def test_lane_failure_terminates_and_reaps_other_gpu_process(tmp_path):
         )
 
     assert time.monotonic() - started < 10
+    failure = json.loads(
+        (tmp_path / "trial" / "LATEST_FAILURE.json").read_text(encoding="utf-8")
+    )
+    assert failure["unit"] == "fail__request__seed-0"
+    assert failure["returncode"] == 7
+    assert failure["diagnosis"] == "PROCESS_EXIT_7"
+    failure_text = (tmp_path / "trial" / "LATEST_FAILURE.txt").read_text(
+        encoding="utf-8"
+    )
+    assert "ROOT_CAUSE=joint-unit-failure" in failure_text
+    assert "returncode=7" in failure_text
     pid = int(slow_pid.read_text(encoding="utf-8"))
     with pytest.raises(ProcessLookupError):
         os.kill(pid, 0)

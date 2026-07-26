@@ -163,12 +163,29 @@ on_error() {
     printf 'command=%q\n' "$command"
     printf 'failed_at_utc=%s\n' "$(timestamp)"
     printf 'log=%s\n' "$PIPELINE_LOG"
+    if [[ "$STAGE" == "joint-sweep" ]]; then
+      if [[ -s "$JOINT_ROOT/LATEST_FAILURE.txt" ]]; then
+        printf '\n'
+        printf 'joint_failure_summary=%s\n' "$JOINT_ROOT/LATEST_FAILURE.txt"
+        printf '\n'
+        cat "$JOINT_ROOT/LATEST_FAILURE.txt"
+      elif [[ -e "$JOINT_ROOT/launcher_logs/current.log" ]]; then
+        printf '\n'
+        printf 'joint_failure_summary=unavailable; joint launcher tail follows\n'
+        printf '%s\n' '----- JOINT LAUNCHER LOG TAIL (last 160 lines) -----'
+        tail -n 160 "$JOINT_ROOT/launcher_logs/current.log" 2>/dev/null || true
+        printf '%s\n' '----- END JOINT LAUNCHER LOG TAIL -----'
+      fi
+    fi
   } > "$temporary"
   mv -f "$temporary" "$ERROR_FILE"
   printf '\n========== [STAGE %s/%s] %s FAILED ==========\n' \
     "$STAGE_INDEX" "$STAGE_TOTAL" "$STAGE" >&2
   printf '[%s] [ERROR] exit=%s line=%s command=%q\n' \
     "$(timestamp)" "$code" "$line" "$command" >&2
+  printf '%s\n' '----- COMPLETE FAILURE REPORT -----' >&2
+  cat "$ERROR_FILE" >&2
+  printf '%s\n' '----- END COMPLETE FAILURE REPORT -----' >&2
   printf '[CONTEXT] run_root=%s calibration=%s sweep=%s final=%s log=%s\n' \
     "$RUN_ROOT" "$CALIBRATION_ROOT" "$JOINT_ROOT" "$FINAL_ROOT" "$PIPELINE_LOG"
   df -h "$RUN_ROOT" 2>&1 || true

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+from collections import deque
 import csv
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
@@ -12,10 +13,12 @@ import math
 import os
 from pathlib import Path
 import re
+import signal
 import subprocess
 import sys
 import threading
 import time
+import traceback
 from typing import Any, Iterable, Mapping, Sequence
 
 import yaml
@@ -64,6 +67,82 @@ def _utc_now() -> str:
 
 def _status(message: str) -> None:
     print(f"[{_utc_now()}] {message}", flush=True)
+
+
+def _tail_text(path: Path, *, lines: int = 120) -> str:
+    try:
+        with path.open("r", encoding="utf-8", errors="replace") as handle:
+            return "".join(deque(handle, maxlen=lines)).rstrip()
+    except OSError as error:
+        return f"<unable to read {path}: {error}>"
+
+
+def _diagnose_unit_failure(returncode: int | None, output: str) -> str:
+    lowered = output.lower()
+    signatures = (
+        ("cuda out of memory", "CUDA_OUT_OF_MEMORY"),
+        ("outofmemoryerror", "CUDA_OUT_OF_MEMORY"),
+        ("no space left on device", "DISK_FULL"),
+        ("disk quota exceeded", "DISK_QUOTA_EXCEEDED"),
+        ("permission denied", "PERMISSION_DENIED"),
+        ("modulenotfounderror", "PYTHON_DEPENDENCY_MISSING"),
+        ("unexpected pos", "CORRUPT_PYTORCH_CHECKPOINT"),
+        ("input/output error", "STORAGE_IO_ERROR"),
+        ("stale file handle", "STORAGE_IO_ERROR"),
+        ("file not found", "MISSING_FILE"),
+        ("filenotfounderror", "MISSING_FILE"),
+    )
+    for marker, diagnosis in signatures:
+        if marker in lowered:
+            return diagnosis
+    if returncode is None:
+        return "UNIT_LAUNCH_EXCEPTION"
+    if returncode < 0:
+        number = -returncode
+        try:
+            name = signal.Signals(number).name
+        except ValueError:
+            name = f"SIGNAL_{number}"
+        if number == signal.SIGKILL:
+            return f"{name}_HOST_OOM_OR_EXTERNAL_KILL"
+        return f"{name}_EXTERNAL_OR_CLEANUP_SIGNAL"
+    return f"PROCESS_EXIT_{returncode}"
+
+
+def _write_root_failure(
+    root: Path,
+    record: Mapping[str, Any],
+) -> Path:
+    root.mkdir(parents=True, exist_ok=True)
+    json_path = root / "LATEST_FAILURE.json"
+    text_path = root / "LATEST_FAILURE.txt"
+    _atomic_json(json_path, dict(record))
+    command = record.get("command")
+    command_text = (
+        " ".join(str(value) for value in command)
+        if isinstance(command, list)
+        else ""
+    )
+    body = "\n".join(
+        [
+            "ROOT_CAUSE=joint-unit-failure",
+            f"unit={record.get('unit', 'unknown')}",
+            f"gpu={record.get('gpu', 'unknown')}",
+            f"attempt={record.get('attempt', 'unknown')}",
+            f"returncode={record.get('returncode', 'unknown')}",
+            f"diagnosis={record.get('diagnosis', 'unknown')}",
+            f"failed_at_utc={record.get('finished_at_utc', _utc_now())}",
+            f"log={record.get('log', 'unknown')}",
+            f"command={command_text}",
+            "",
+            "----- ROOT UNIT LOG TAIL (last 120 lines) -----",
+            str(record.get("log_tail", "")).rstrip(),
+            "----- END ROOT UNIT LOG TAIL -----",
+            "",
+        ]
+    )
+    _atomic_text(text_path, body)
+    return text_path
 
 
 def _load_yaml(path: Path) -> dict[str, Any]:
@@ -1144,7 +1223,7 @@ def _run_unit(
     events: _EventLog,
     active_processes: dict[int, subprocess.Popen[str]] | None = None,
     process_lock: threading.Lock | None = None,
-) -> tuple[bool, str]:
+) -> tuple[bool, str, dict[str, Any]]:
     identity = (
         f"{unit['parent']}__{unit['request']}__seed-{unit['seed']}"
     )
@@ -1213,6 +1292,7 @@ def _run_unit(
                     if active_processes.get(gpu) is process:
                         active_processes.pop(gpu, None)
     duration = time.monotonic() - started_monotonic
+    log_tail = _tail_text(log_path) if returncode != 0 else ""
     status = {
         "unit": identity,
         "attempt": attempt,
@@ -1223,6 +1303,11 @@ def _run_unit(
         "returncode": returncode,
         "log": str(log_path),
         "command": command,
+        "diagnosis": (
+            _diagnose_unit_failure(returncode, log_tail)
+            if returncode != 0
+            else "SUCCESS"
+        ),
     }
     _atomic_json(status_path, status)
     events.write(
@@ -1239,7 +1324,9 @@ def _run_unit(
         f"UNIT_END gpu={gpu} unit={identity} returncode={returncode} "
         f"elapsed={duration:.1f}s"
     )
-    return returncode == 0, identity
+    if returncode != 0:
+        status["log_tail"] = log_tail
+    return returncode == 0, identity, status
 
 
 def _run_lanes(
@@ -1252,6 +1339,7 @@ def _run_lanes(
     progress_label: str = "",
     completed_offset: int = 0,
     total_units: int | None = None,
+    failure_root: Path | None = None,
 ) -> None:
     if not units:
         _status("UNITS all manifest units already validated; nothing to execute")
@@ -1263,6 +1351,9 @@ def _run_lanes(
     running: dict[int, str] = {}
     completed = 0
     failures: list[str] = []
+    cancelled: list[str] = []
+    root_failure: dict[str, Any] | None = None
+    root_failure_path: Path | None = None
     process_lock = threading.Lock()
     active_processes: dict[int, subprocess.Popen[str]] = {}
     started = time.monotonic()
@@ -1312,23 +1403,24 @@ def _run_lanes(
                 ) or "none"
                 done = completed
                 failed = len(failures)
+                cancelled_count = len(cancelled)
             elapsed = time.monotonic() - started
             remaining = len(units) - done
             eta = (elapsed / done * remaining) if done else None
             prefix = f"{progress_label} " if progress_label else ""
             _status(
                 f"PROGRESS {prefix}completed={completed_offset + done}/{total} "
-                f"failed={failed} elapsed={elapsed:.1f}s "
+                f"failed={failed} cancelled={cancelled_count} elapsed={elapsed:.1f}s "
                 f"eta_seconds={eta:.0f} running=[{active}]"
                 if eta is not None
                 else
                 f"PROGRESS {prefix}completed={completed_offset + done}/{total} "
-                f"failed={failed} elapsed={elapsed:.1f}s "
+                f"failed={failed} cancelled={cancelled_count} elapsed={elapsed:.1f}s "
                 f"eta_seconds=pending running=[{active}]"
             )
 
     def worker(gpu: int, lane: Sequence[Mapping[str, Any]]) -> None:
-        nonlocal completed
+        nonlocal completed, root_failure, root_failure_path
         for unit in lane:
             if stopped.is_set():
                 break
@@ -1343,23 +1435,66 @@ def _run_lanes(
                     f"CACHE_WAIT gpu={gpu} unit={identity} "
                     f"request={cache_key[0]} seed={cache_key[1]}"
                 )
-            with cache_locks[cache_key]:
-                ok, identity = _run_unit(
-                    unit,
-                    gpu=gpu,
-                    trial_dir=trial_dir,
-                    events=events,
-                    active_processes=active_processes,
-                    process_lock=process_lock,
-                )
+            try:
+                with cache_locks[cache_key]:
+                    ok, identity, unit_status = _run_unit(
+                        unit,
+                        gpu=gpu,
+                        trial_dir=trial_dir,
+                        events=events,
+                        active_processes=active_processes,
+                        process_lock=process_lock,
+                    )
+            except Exception as error:
+                ok = False
+                unit_status = {
+                    "unit": identity,
+                    "attempt": "launch",
+                    "gpu": gpu,
+                    "finished_at_utc": _utc_now(),
+                    "returncode": None,
+                    "log": "not-created-or-incomplete",
+                    "command": unit.get("command"),
+                    "diagnosis": "UNIT_LAUNCH_EXCEPTION",
+                    "log_tail": traceback.format_exc(),
+                    "exception": f"{type(error).__name__}: {error}",
+                }
             with state_lock:
                 running.pop(gpu, None)
                 completed += 1
+                primary_failure = not ok and root_failure is None
+                if primary_failure:
+                    root_failure = unit_status
+                    stopped.set()
             if not ok:
                 with state_lock:
-                    failures.append(identity)
-                stopped.set()
-                terminate_active(f"unit-failed:{identity}")
+                    if primary_failure:
+                        failures.append(identity)
+                    else:
+                        cancelled.append(identity)
+                if primary_failure:
+                    summary_root = failure_root if failure_root is not None else trial_dir
+                    root_failure_path = _write_root_failure(
+                        summary_root,
+                        unit_status,
+                    )
+                    print(
+                        "\n========== JOINT ROOT FAILURE ==========",
+                        file=sys.stderr,
+                        flush=True,
+                    )
+                    print(
+                        root_failure_path.read_text(encoding="utf-8"),
+                        file=sys.stderr,
+                        end="",
+                        flush=True,
+                    )
+                    print(
+                        "========================================\n",
+                        file=sys.stderr,
+                        flush=True,
+                    )
+                    terminate_active(f"root-unit-failed:{identity}")
                 break
 
     monitor_thread = threading.Thread(
@@ -1388,11 +1523,22 @@ def _run_lanes(
         prefix = f"{progress_label} " if progress_label else ""
         _status(
             f"PROGRESS {prefix}completed={completed_offset + completed}/{total} "
-            f"failed={len(failures)} elapsed={elapsed:.1f}s "
+            f"failed={len(failures)} cancelled={len(cancelled)} "
+            f"elapsed={elapsed:.1f}s "
             f"eta_seconds=0 running=[{active}]"
         )
     if failures:
-        raise SweepError(f"unit execution failed; inspect logs for {failures}")
+        assert root_failure is not None
+        raise SweepError(
+            "unit execution failed: "
+            f"root_cause={root_failure['unit']} "
+            f"gpu={root_failure['gpu']} "
+            f"returncode={root_failure['returncode']} "
+            f"diagnosis={root_failure['diagnosis']} "
+            f"log={root_failure['log']} "
+            f"summary={root_failure_path}; "
+            f"cancelled_after_root_failure={cancelled}"
+        )
 
 
 def _prepare_trial(
@@ -1673,6 +1819,11 @@ def run(args: argparse.Namespace) -> int:
         if not path.exists():
             raise SweepError(f"{name} is missing: {path}")
     output_root.mkdir(parents=True, exist_ok=True)
+    for stale_failure in (
+        output_root / "LATEST_FAILURE.json",
+        output_root / "LATEST_FAILURE.txt",
+    ):
+        stale_failure.unlink(missing_ok=True)
     resolved_spec = {**spec, "paths": dict(spec["paths"])}
     resolved_spec["paths"]["output_root"] = str(output_root)
     spec_digest = _json_sha(resolved_spec)
@@ -1870,6 +2021,7 @@ def run(args: argparse.Namespace) -> int:
             ),
             completed_offset=len(manifest["units"]) - len(pending),
             total_units=len(manifest["units"]),
+            failure_root=output_root,
         )
         manifest_path = trial_dir / "manifest.yaml"
         _seal_trial(
@@ -2112,7 +2264,12 @@ def main(argv: list[str] | None = None) -> int:
         print(str(error), file=sys.stderr)
         return 4
     except (SweepError, OSError, subprocess.SubprocessError) as error:
-        print(f"joint development sweep failed: {error}", file=sys.stderr)
+        print(
+            f"\n[FATAL] joint development sweep failed: {error}",
+            file=sys.stderr,
+            flush=True,
+        )
+        traceback.print_exc()
         return 2
 
 
