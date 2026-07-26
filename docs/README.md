@@ -19,7 +19,7 @@ prompt는 제거했으며, 과거 내용은 Git history에서만 확인한다.
 
 | 주제 | 문서 |
 |---|---|
-| 최신 PDF와 구현 차이 | [PDF-v4 code audit](PDF_V4_CODE_AUDIT.md) |
+| 현재 paper/code 구현 상태 | [Paper/code audit](PDF_V4_CODE_AUDIT.md) |
 | Table 1/2 수식과 판정 | [Table 1/2 metrics](TABLE12_METRICS.md) |
 | Predictor 값 해석 | [Predictor metrics](PREDICTOR_METRICS.md) |
 | Raw evidence에서 표까지 | [Paper evidence pipeline](PAPER_EVIDENCE_PIPELINE.md) |
@@ -28,9 +28,10 @@ prompt는 제거했으며, 과거 내용은 Git history에서만 확인한다.
 
 | 주제 | 문서 |
 |---|---|
-| 구버전 7B/14B channel-matrix | [Channel-matrix README](../experiments/channel_matrix/README.md) |
+| H100 7B/14B campaign과 7B paper backfill | [Channel-matrix README](../experiments/channel_matrix/README.md) |
 
-진단 실험은 최신 PDF paper target evidence가 아니다.
+14B aggregate는 diagnostic-only다. 7B aggregate와 `render-only`는 완료된
+channel-matrix 결과를 현재 paper evidence/LaTeX 형식으로 변환한다.
 
 ## 보존 기록
 

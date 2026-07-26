@@ -6,11 +6,10 @@ only a normalized ledger checked against `configs/paper/evidence.yaml`.
 The formulas and interpretation of every generated Table 1/2 column are
 documented in [`TABLE12_METRICS.md`](TABLE12_METRICS.md).
 
-`KDD_UnlearningFail.pdf` is normative. The current config is only the
-implementation denominator and is not yet the paper denominator: it has nine
-setting rows and 7B as primary, whereas the latest PDF has eight Table 2 rows
-and defines TOFU primary/scale/family as 1.5B/7B/Llama. No claim-bearing run
-should start until that roster mismatch is resolved.
+The tracked `paper/` source and `configs/paper/evidence.yaml` are normative.
+They define the active nine-setting denominator and TOFU/Qwen2.5-7B primary.
+The checked-in `KDD_UnlearningFail.pdf` is an older snapshot and must not
+override that roster.
 
 Within one config revision, every configured setting--parent row appears in
 the readiness report even if it was never attempted. A row cannot pass while a

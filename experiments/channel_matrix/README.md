@@ -1,8 +1,8 @@
-# Channel-matrix diagnostic campaign
+# H100 channel-matrix campaign
 
-이 디렉터리는 7B/14B TOFU의 이전 channel-matrix 진단을 보존한다. 최신
-PDF-v4의 `D_cal/D_pred/D_prot/target` roster와 Table 1/2 claim workflow가
-아니므로 결과를 paper target evidence로 재명명하지 않는다.
+이 디렉터리는 7B/14B TOFU H100 campaign을 실행한다. 7B aggregate는 완료된
+channel-matrix 결과를 현재 paper evidence schema로 backfill하고 최종
+LaTeX를 publish한다. 14B aggregate는 아직 diagnostic CSV/JSON만 생성한다.
 
 ## 구현
 
@@ -41,20 +41,26 @@ Calibration/audit/alpha phase는 직접 여러 개 띄우지 말고 cluster queu
 사용한다.
 
 ```bash
-bash experiments/cluster/run_tofu_7b_h100.sh
+bash experiments/cluster/run_tofu_7b_h100.sh experiment
 bash experiments/cluster/run_tofu_14b_h100.sh
 ```
 
 서로 다른 모델 실행기는 서로 다른 머신에서 실행한다. Queue와 결과는
-`runs/` 아래에 생성되고 Git이 추적하지 않는다.
+`/group-volume/fdmu/runs/` 아래에 생성되고 Git이 추적하지 않는다.
+
+기존 7B 결과에서 GPU 작업 없이 현재 paper LaTeX만 생성:
+
+```bash
+bash experiments/cluster/run_tofu_7b_h100.sh render-only
+```
 
 ## 불변 조건
 
-- Objective와 alpha는 development 결과로만 제안하고 사람이 commit한 freeze를
-  audit 전에 확인한다.
+- Objective와 alpha는 development 결과로만 만들고 audit은 추적 중인 frozen
+  config만 사용한다. 원클릭 launcher는 실행 중 승인을 기다리지 않는다.
 - Audit outcome으로 설정을 다시 고르지 않는다.
 - Partial run, seal, manifest를 덮어쓰거나 삭제하지 않는다.
 - Fidelity certificate summary는 RQ2의 per-unit `fidelity_raw.jsonl`을
   대신하지 않는다.
-- PDF-v4 evidence가 필요하면 `experiments/paper/` producer와
+- 7B paper backfill은 `experiments/paper/finalize_channel_matrix.py`와
   [paper evidence pipeline](../../docs/PAPER_EVIDENCE_PIPELINE.md)을 사용한다.

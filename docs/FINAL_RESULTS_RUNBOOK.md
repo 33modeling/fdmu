@@ -1,290 +1,170 @@
-# Final results runbook
+# Final results and LaTeX runbook
 
-이 문서는 최신 PDF 기준 TOFU Table 1 결과를 만들고 확인하는 실행 절차다.
-Predictor 값의 해석은 [`PREDICTOR_METRICS.md`](PREDICTOR_METRICS.md)를 본다.
+이 문서는 현재 코드 기준으로 기존 결과를 최종 paper LaTeX로 만드는 절차다.
+현재 계약의 primary setting은 `TOFU / Qwen2.5-7B`이며, 7개 parent와 9개
+setting을 고정 분모로 사용한다.
 
-## 0. 현재 범위
-
-최신 `KDD_UnlearningFail.pdf`에서 TOFU primary는
-`Qwen2.5-1.5B / fp32`다. 따라서 이 문서의 기본 setting은 다음과 같다.
+기준 파일:
 
 ```text
-tofu_qwen25_1p5b
+paper/
+configs/paper/evidence.yaml
+src/rsus/evidence/tables.py
 ```
 
-현재 `configs/paper/evidence.yaml`에는 이전 7B-primary, 14B 포함 9-setting
-roster가 남아 있다. 아래 전용 runner는 **TOFU 1.5B의 per-setting Table 1**을
-만들 수 있지만, 현재 config 그대로는 최신 PDF의 전체 8-setting Table 2와
-paper-wide `all_tables_ready`를 만들었다고 해석하면 안 된다.
+루트의 `KDD_UnlearningFail.pdf`는 현재 `paper/` 소스보다 오래된
+스냅샷이다.
 
-또한 이전 9-setting용 `experiments/cluster/enqueue_table12.sh`를 최신 PDF
-paper evidence 실행에 사용하면 안 된다.
+## 1. 기존 7B 결과로 LaTeX만 생성
 
-## 1. 실행 환경
-
-모델 실행은 fp32와 RQ3 repair 때문에 H100급 GPU 환경을 전제로 한다.
-저장소 루트에서 실행한다.
+다음 명령은 CPU-only다. Queue를 변경하지 않고 worker, GPU 학습, SFT,
+audit을 시작하지 않는다.
 
 ```bash
-cd /path/to/fdmu
-source /group-volume/fdmu/.venv/bin/activate
-
-python -c 'import torch; print(torch.__version__, torch.cuda.is_available())'
+git pull --ff-only origin main
+bash experiments/cluster/run_tofu_7b_h100.sh render-only
 ```
 
-두 번째 출력이 `True`여야 한다. 기본 모델 경로는 campaign config의
-다음 위치다.
+최종 공유 파일:
 
 ```text
-/group-volume/models/Qwen2.5-1.5B-Instruct
+/group-volume/fdmu/runs/paper_v4/table_core_evidence.tex
+/group-volume/fdmu/runs/paper_v4/table_robustness.tex
 ```
 
-현재 `/home/kms`의 기본 Python에는 `torch`가 없으므로 그 환경에서는 실제
-GPU workflow를 실행할 수 없다.
+같은 일반 파일이 선택된 7B run의 다음 폴더에도 복사된다.
 
-## 2. 먼저 실행 계획만 생성
+```text
+<CAMPAIGN_ROOT>/aggregate/paper_v4/table_core_evidence.tex
+<CAMPAIGN_ROOT>/aggregate/paper_v4/table_robustness.tex
+```
 
-아래 명령은 GPU 학습을 하지 않고 정확한 stage manifest 네 개를 만든다.
+`table_core_evidence.tex`에는 다음 5개 표가 들어간다.
+
+1. Prospective rank prediction
+2. Loss Susceptibility fidelity and cost
+3. Harmful-tail recovery
+4. Fixed-budget repair effects
+5. Repair feasibility/native-retention contract
+
+`table_robustness.tex`에는 9개 setting의 claim breadth와 evidence funnel이
+들어간다.
+
+터미널에서 바로 확인:
 
 ```bash
-python experiments/paper/run_tofu_table1.py \
-  --action plan \
-  --setting tofu_qwen25_1p5b
+sed -n '1,360p' /group-volume/fdmu/runs/paper_v4/table_core_evidence.tex
+sed -n '1,220p' /group-volume/fdmu/runs/paper_v4/table_robustness.tex
 ```
 
-생성 위치:
+렌더 상태와 판정 원본:
 
 ```text
-runs/paper/tofu_table1/manifests/
-  tofu_qwen25_1p5b__calibration.yaml
-  tofu_qwen25_1p5b__prediction.yaml
-  tofu_qwen25_1p5b__protection.yaml
-  tofu_qwen25_1p5b__target_evaluation.yaml
+/group-volume/fdmu/runs/paper_v4/PUBLISH_STATUS.json
+/group-volume/fdmu/runs/paper_v4/evidence_readiness.json
+/group-volume/fdmu/runs/paper_v4/evidence_ledger.json
 ```
 
-이 단계에서 manifest roster와 명령을 검토한 뒤 실제 실행으로 넘어간다.
-현재 동결 roster의 planned unit 수는 다음과 같다.
+## 2. 표 읽는 법
+
+Core 표는 다음 parent를 항상 같은 순서와 분모로 출력한다.
 
 ```text
-calibration:        28
-prediction:         56
-protection:         56
-target_evaluation: 140
-total:             280
+GradDiff, NPO, SimNPO, GRU, RMU, RepNoise, Circuit Breakers
 ```
 
-## 3. 전체 TOFU 결과 실행
+`E/P`는 `eligible/pass`다.
 
-4090 x2에서 환경 설정부터 calibration, joint sweep, target, evidence,
-`table1.tex`까지 원클릭으로 실행한다.
+| 표기 | 의미 |
+|---|---|
+| `y/y` | 판정 자격이 있고 해당 조건 통과 |
+| `y/n` | 판정 자격은 있지만 해당 조건 실패 |
+| `n/--` | 자격 조건이 부족해 pass를 판정하지 않음 |
+
+`Rank E/P`는 `rho(S,d)`, `g_G`, `g_H`, `g_ctl`의 rank condition이다.
+최종 `RQ1 E/P`는 이 rank condition에 harmful-tail 조건을 추가한다.
+RQ1 성공에는 둘 다 `y/y`가 필요하다.
+
+Forgetting gate에 도달하지 못한 parent는 마지막 완료 checkpoint의 관측값을
+descriptive value로 표시할 수 있지만 claim에는 사용할 수 없으므로 `n/--`로
+남는다. 미완료 evidence는 `\tblph`로 표시하며 행 자체를 삭제하지 않는다.
+
+## 3. 전체 7B 실험
+
+GPU campaign을 실제로 실행할 때만 `experiment` 모드를 사용한다.
+
+```bash
+bash experiments/cluster/run_tofu_7b_h100.sh experiment
+```
+
+이 경로는 failed audit 복구, enqueue, 현재 호스트의 빈 GPU별 worker 실행,
+monitor, aggregate, 최종 LaTeX publish를 수행한다. `render-only`와
+`experiment`는 명시적으로 구분되며 인자 없이 실행하면 종료 코드 2로
+중단된다.
+
+Launcher 로그:
+
+```text
+/group-volume/fdmu/runs/users/<user>/logs/cluster/
+```
+
+Campaign 로그:
+
+```text
+<USER_RUN_ROOT>/logs/channel_matrix/
+```
+
+## 4. 14B와 1.5B
+
+14B H100 launcher는 현재 experiment-only이며 aggregate 결과는 CSV/JSON
+diagnostic이다.
+
+```bash
+bash experiments/cluster/run_tofu_14b_h100.sh
+```
+
+14B diagnostic:
+
+```text
+<USER_RUN_ROOT>/channel_matrix_14b/aggregate/pooled_channel_report.json
+<USER_RUN_ROOT>/channel_matrix_14b/aggregate/pooled_channel_report.csv
+```
+
+RTX 4090 x2의 1.5B scale-boundary pipeline:
 
 ```bash
 GPU_IDS=0,1 bash local_run/run_tofu_1p5b_4090x2.sh
 ```
 
-Calibration 완료 후나 중간 오류 후에도 위 명령 하나만 다시 실행한다. 완료
-unit과 SFT cache는 검증 후 재사용되고 parent freeze, joint sweep, target,
-LaTeX가 자동으로 이어진다. 결과 폴더를 삭제하거나 하위 스크립트를 하나씩
-실행하지 않는다.
+이 경로는 완료 unit과 검증된 SFT cache를 재사용한다. 1.5B 결과가 존재한다는
+사실이 현재 primary를 1.5B로 바꾸지는 않는다.
 
-통합 로그는 `<RUN_ROOT>/launcher_logs/current.log`에 남는다. Parent proposal과
-joint `BEST.json`은 target 전에 target-free 입력에서 재검증되며, 각 파일의
-SHA-256을 freeze 기록에 남긴 뒤 사람의 입력 없이 다음 단계로 진행한다.
-Declared fidelity 결과는
-`<RUN_ROOT>/fidelity/fidelity_summary.json`에 생성된다.
+## 5. 여러 실행 결과 병합
 
-원클릭 runner는 winning D_prot를 재사용해 D_pred, prospective selection
-freeze, target evaluation, raw aggregation, evidence 판정,
-`final/table1.tex` 생성을 순서대로 수행한다. Finalizer는 target을 보기 전에
-고정된 development-only BEST와 sweep status를 검증하고
-`JOINT_BEST_FREEZE.json`을 기록한다.
+`publish_evidence.py`는 공유 `.publish.lock`을 잡은 뒤 incoming ledger를
+`(setting, parent)` 키로 병합한다. 새 setting 결과를 publish해도 다른
+setting의 기존 row를 삭제하지 않는다. 같은 키만 새 결과로 교체하고,
+병합된 ledger에서 두 최종 LaTeX 파일을 원자적으로 다시 생성한다.
 
-이미 동결된 stage manifest에서 범용 Table 1 runner만 실행할 때는 다음 명령을
-사용한다.
+직접 publish가 필요한 경우:
 
 ```bash
-python experiments/paper/run_tofu_table1.py \
-  --action run \
-  --setting tofu_qwen25_1p5b
+/group-volume/fdmu/.venv/bin/python experiments/paper/publish_evidence.py \
+  --ledger <SETTING_EVIDENCE_LEDGER.json> \
+  --combined-root /group-volume/fdmu/runs/paper_v4 \
+  --evidence-config configs/paper/evidence.yaml
 ```
 
-Runner는 다음 순서를 강제한다.
+일반적으로 7B에서는 전용 `render-only` 명령을 사용한다.
 
-```text
-D_cal 실행
-  -> parent 설정 동결
-  -> D_pred 실행
-  -> D_prot 실행
-  -> alpha_pred, alpha_prot, control, Kp 동결
-  -> target_evaluation 실행
-  -> raw evidence 집계
-  -> RQ1/RQ2/RQ3 판정
-  -> Table 1 생성
-```
+## 6. 완료 판정
 
-현재 top-level runner는 unit을 순차 실행하며 `--resume` 옵션이 없다. 중간에
-중단된 뒤 같은 `--action run`을 다시 실행하면 완료 unit도 다시 호출한다.
-따라서 장시간 실행은 유지되는 H100 세션에서 수행해야 한다.
-
-## 4. SFT 재사용
-
-각 request/seed의 SFT checkpoint는 다음 위치에 저장된다.
-
-```text
-runs/paper/tofu_v4/sft_cache/
-  <setting>/<request>__seed-<seed>__<contract-digest>.pt
-  <setting>/<request>__seed-<seed>__<contract-digest>.pt.json
-```
-
-동일한 model, request, seed, candidate universe, trainable block, SFT
-hyperparameter contract가 일치하면 checkpoint를 불러오고 SFT를 다시 하지
-않는다. 로그에는 다음과 같이 표시된다.
-
-```text
-loaded validated development SFT cache ...
-```
-
-각 unit의 `run_manifest.json`에는 아래 값이 기록된다.
-
-```json
-{
-  "sft_cache": {
-    "hit": true
-  }
-}
-```
-
-Contract가 다른 cache를 같은 checkpoint로 조용히 재사용하지 않는다.
-이전 고정 이름 `<request>__seed-<seed>.pt` 캐시는 metadata contract가 현재
-실행과 정확히 일치할 때만 계속 사용한다. 불일치하거나 불완전한 이전 캐시는
-삭제하지 않고 보존하며, 현재 contract digest 경로에 새 checkpoint를 만든다.
-
-## 5. 최종 결과 파일
-
-전체 runner가 성공하면 가장 먼저 볼 파일은 다음 두 개다.
-
-```text
-paper/sections/generated/table1.tex
-runs/paper/tofu_table1/tofu_qwen25_1p5b/evidence_readiness.json
-```
-
-주요 산출물 전체:
-
-| 파일 | 의미 |
-|---|---|
-| `paper/sections/generated/table1.tex` | TOFU 1.5B의 최종 2-panel Table 1 |
-| `runs/paper/tofu_table1/tofu_qwen25_1p5b/evidence_readiness.json` | parent별 RQ1/RQ2/RQ3 eligibility, pass, 실패 이유 |
-| `runs/paper/tofu_table1/tofu_qwen25_1p5b/evidence_ledger.json` | bootstrap effect와 funnel을 담은 정규화 evidence |
-| `runs/paper/tofu_table1/tofu_qwen25_1p5b/raw_plan.json` | 집계에 사용한 동결 plan |
-| `runs/paper/tofu_table1/tofu_qwen25_1p5b/*/sealed/*.jsonl` | stage별 검증·봉인 raw evidence |
-| `runs/paper/tofu_table1/tofu_qwen25_1p5b/*/sealed/stage_manifest.json` | stage 산출물 개수와 SHA-256 |
-
-Table을 터미널에서 바로 확인:
+LaTeX 파일이 존재한다는 것과 모든 claim이 성공했다는 것은 다르다.
 
 ```bash
-sed -n '1,260p' paper/sections/generated/table1.tex
+jq '.settings.tofu_qwen25_7b' \
+  /group-volume/fdmu/runs/paper_v4/evidence_readiness.json
 ```
 
-Parent별 최종 판정 확인:
-
-```bash
-jq '{
-  setting: .settings.tofu_qwen25_1p5b,
-  rows: [
-    .rows[]
-    | select(.setting == "tofu_qwen25_1p5b")
-    | {
-        parent,
-        completed,
-        rq1: (.rq1 | {eligible, claim_pass, reasons}),
-        rq2: (.rq2 | {eligible, claim_pass, reasons}),
-        rq3: (.rq3 | {eligible, claim_pass, reasons})
-      }
-  ]
-}' runs/paper/tofu_table1/tofu_qwen25_1p5b/evidence_readiness.json
-```
-
-행별로 좋은 결과는 각 parent의 `RQ1`, `RQ2`, `RQ3`에서
-`eligible=true`, `claim_pass=true`인 것이다. Table의 표기는 `Y/Y`다.
-
-Setting 전체의 최종 판정은 모든 parent가 통과해야 하는 방식이 아니다.
-Bonferroni 보정 후 output-readout parent group과 representation-readout
-parent group에서 각각 최소 한 parent가 RQ1, RQ2, RQ3를 모두 통과해야 한다.
-아래 값이 최종 setting chain 판정이다.
-
-```bash
-jq '.settings.tofu_qwen25_1p5b.chain' \
-  runs/paper/tofu_table1/tofu_qwen25_1p5b/evidence_readiness.json
-```
-
-최종 성공 값:
-
-```json
-{
-  "pass": true
-}
-```
-
-## 6. 이미 실험 결과가 있을 때 표만 재생성
-
-`evidence_ledger.json`이 이미 있으면 GPU 모델 실행이나 SFT 없이 CPU에서
-Table과 readiness만 다시 만들 수 있다.
-
-```bash
-python experiments/paper/build_evidence.py \
-  --config configs/paper/evidence.yaml \
-  --ledger runs/paper/tofu_table1/tofu_qwen25_1p5b/evidence_ledger.json \
-  --readiness-out runs/paper/tofu_table1/tofu_qwen25_1p5b/evidence_readiness.json \
-  --table1-setting tofu_qwen25_1p5b \
-  --table1-out paper/sections/generated/table1.tex
-```
-
-이 명령은 저장된 ledger를 다시 판정하고 LaTeX를 렌더링할 뿐 학습을 실행하지
-않는다.
-
-## 7. 전체 paper table 생성
-
-모든 setting의 ledger가 완성되고 `configs/paper/evidence.yaml`을 최신 PDF의
-8-setting roster와 동기화한 뒤에는 다음 명령을 사용한다.
-
-```bash
-python experiments/paper/build_evidence.py \
-  --config configs/paper/evidence.yaml \
-  --ledger results/paper/evidence_ledger.json \
-  --paper-root paper \
-  --require-ready
-```
-
-성공 시 생성되는 main table:
-
-```text
-paper/sections/generated/table_core_evidence.tex
-paper/sections/generated/table_robustness.tex  # Table 2A breadth + 2B funnel
-paper/sections/generated/results_macros.tex
-```
-
-`--require-ready`는 등록된 row나 artifact가 하나라도 불완전하면 exit code
-`2`로 실패한다. Placeholder가 있는 상태를 최종 완료로 오인하지 않기 위한
-검사다.
-
-현재 `paper/main.tex`과 `paper/sections/05_experiments.tex`에는 위 generated
-Table 파일을 자동으로 `\input`하는 구문이 없다. 따라서 생성된 `.tex` 파일
-자체는 확인할 수 있지만, 현재 manuscript PDF를 다시 컴파일해도 새 Table이
-자동 삽입되지는 않는다. Manuscript 반영은 generated Table include 위치를
-확정한 뒤 별도로 연결해야 한다.
-
-## 8. 빠른 선택
-
-```text
-실행 계획만 확인:
-  run_tofu_table1.py --action plan
-
-TOFU GPU 실험부터 최종 Table 1까지:
-  run_tofu_table1.py --action run
-
-기존 ledger에서 Table만 다시 생성:
-  build_evidence.py --ledger ... --table1-out ...
-
-전체 paper readiness를 강제:
-  build_evidence.py --paper-root paper --require-ready
-```
+각 parent의 `eligible`, `claim_pass`, `reasons`와 setting의 `chain`을 함께
+확인한다. 실패하거나 비적격인 결과도 LaTeX는 끝까지 생성되어야 한다.

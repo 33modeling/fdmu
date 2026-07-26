@@ -1,7 +1,7 @@
 # Predictor metric guide
 
-이 문서는 최신 `KDD_UnlearningFail.pdf`의 Table 1 Panel A에서 predictor를
-평가하는 메트릭만 따로 설명한다. 전체 Table 1/2 정의는
+이 문서는 현재 `paper/`의 prospective-rank, fidelity, harmful-tail 표에서
+predictor를 평가하는 메트릭만 따로 설명한다. 전체 evidence-table 정의는
 [`TABLE12_METRICS.md`](TABLE12_METRICS.md)를 따른다.
 
 ## 1. Predictor가 맞혀야 하는 것
@@ -185,22 +185,37 @@ request proximity와 같은 정보가 아니라 추가 predictive value를 주�
 
 ## 5. 최종 판정 읽는 법
 
+### Rank E/P
+
+`Rank E/P`는 순위 번호가 아니라 rank-condition의 `eligible/pass`다.
+
+```text
+Rank pass =
+    eligible
+    and LB(rho_S) > 0
+    and LB(g_G) > 0
+    and LB(g_H) > 0
+    and LB(g_ctl) > 0
+    and four-way IUT p <= 0.05
+```
+
 ### RQ1 E/P
 
 `E/P`는 `eligible/pass`다.
 
 ```text
 RQ1 pass =
-    eligible
-    and LB(rho_S) > 0
-    and LB(g_G) > 0
-    and LB(g_H) > 0
+    Rank pass
     and LB(L_tail) > 0
-    and four-way IUT p <= 0.05
+    and five-way IUT p <= 0.05
 ```
 
 Eligibility에는 valid selection/profile, common support, external gate reach,
 `eligible n/N >= 0.80`이 포함된다.
+
+따라서 RQ1 성공을 주장하려면 `Rank E/P`와 `RQ1 E/P`가 모두 `y/y`여야
+한다. Rank `y/y`, RQ1 `y/n`은 순위 조건은 통과했지만 harmful-tail 조건이
+실패했다는 뜻이다.
 
 ### RQ2 E/P
 
@@ -219,10 +234,9 @@ exact-reference, control validity가 포함된다.
 
 | 표기 | 해석 |
 |---|---|
-| `Y/Y` | evidence가 유효하고 통계 기준도 모두 통과 |
-| `Y/N` | 계산 자격은 있지만 하나 이상의 bound 또는 IUT가 실패 |
-| `N/N` | coverage, validity, support 또는 완료 조건이 부족 |
-| `N/Y` | 허용되지 않음. pass는 eligible일 때만 가능 |
+| `y/y` | evidence가 유효하고 해당 통계 기준도 통과 |
+| `y/n` | 계산 자격은 있지만 하나 이상의 bound 또는 IUT가 실패 |
+| `n/--` | coverage, validity, support 또는 완료 조건이 부족해 판정하지 않음 |
 
 좋은 predictor의 최종 형태는 Table 1 Panel A에서 **RQ1 `Y/Y`와 RQ2
 `Y/Y`를 동시에 얻는 것**이다. `Joint rho` 하나만 높거나 fidelity만 높은

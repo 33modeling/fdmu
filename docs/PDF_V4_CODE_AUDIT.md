@@ -1,144 +1,103 @@
-# PDF Chapter 4 to code audit
+# Current paper/code audit
 
-Audit date: 2026-07-24
-Remediation update: 2026-07-25
-Normative specification: `KDD_UnlearningFail.pdf` (13 pages)
+Audit basis: current `main` branch.
 
-## Bottom line
+## Source of truth
 
-The active code contract is aligned with the July 24 PDF at the metric,
-repair, evidence-schema, and Table 1 column level. It is not aligned at the
-setting-roster level. The PDF declares TOFU primary/scale/family as
-Qwen2.5-1.5B/Qwen2.5-7B/Llama-3.1-8B and Table 2 has eight rows; the active
-config instead promotes 7B to primary and adds 1.5B-boundary plus 14B to a
-nine-row denominator. This remediation does not create experimental results
-and does not make the repository claim-ready.
-
-Legacy channel-matrix and Stage1/Stage2 programs remain diagnostic tools. They
-are not accepted as paper evidence. The paper path is:
+The active contract is defined jointly by:
 
 ```text
-campaign.yaml
-  -> preflight.py
-  -> dataset PAPER_UNIT_CONTRACT producer
-  -> run_v4_stage.py
-  -> aggregate_raw.py
-  -> build_evidence.py
+paper/
+configs/paper/evidence.yaml
+configs/paper/campaign.yaml
+src/rsus/evidence/tables.py
 ```
 
-## Compatibility matrix
+The checked-in `KDD_UnlearningFail.pdf` is an older snapshot. It must not be
+used to replace the current 7B-primary, nine-setting contract with its older
+1.5B-primary, eight-row layout.
 
-| PDF requirement | Remediated code status | Evidence |
-|---|---|---|
-| Normalized symmetric loss-shake and fp32 confirmatory execution | Implemented | `src/rsus/probe/finite_diff.py`, `src/rsus/probe/fidelity.py` |
-| Hidden proximity and separately frozen `alpha_pred`/`alpha_prot` | Implemented | `src/rsus/probe/baselines.py`, `src/rsus/analysis/mixture.py` |
-| Damage at first saved direct-criterion-reaching checkpoint | Implemented; non-reaching runs fail closed | `src/rsus/generators/base.py`, `experiments/gate_1p5b/gate.py`, `src/rsus/local_pdf_v4.py` |
-| Equation (7): protected loss plus entry-distribution KL on neutral data | Implemented | `src/rsus/repair.py` |
-| Equation (8): damped active-constraint filter, refresh, rollback and retry | Implemented and unit-tested | `src/rsus/repair.py`, `tests/test_repair_v4.py` |
-| `B_tok` repair budget and final feasibility gates | Implemented in v4 repair wrapper | `src/rsus/repair.py`, `src/rsus/generators/repaired.py` |
-| Exact `Kp`, selector-independent neutral data and score-independent folds | Implemented and frozen in manifests/plans | `src/rsus/partition.py`, `src/rsus/local_pdf_v4.py`, `experiments/paper/init_raw_plan.py` |
-| Exact `D_cal`, `D_pred`, `D_prot`, target roster consumption | Orchestrator implemented for its config; active setting roster does not match the latest PDF | `experiments/paper/run_v4_stage.py`, `configs/paper/campaign.yaml` |
-| Dataset model execution into paper raw schemas | Implemented for TOFU; other datasets remain blocked | `experiments/paper/tofu_v4_unit.py`, `configs/paper/campaign.yaml` |
-| RQ1 four lower bounds and at least 80% tail eligibility | Implemented in schema-v2 raw aggregation and decision gate | `src/rsus/evidence/raw.py`, `src/rsus/evidence/pdf_v4.py` |
-| RQ2 fidelity/add-value four-way IUT | Implemented | `src/rsus/evidence/raw.py`, `src/rsus/evidence/pdf_v4.py` |
-| RQ3 eight damage UCBs and four native-NI LBs | Implemented; native raw data is mandatory | `src/rsus/evidence/raw.py`, `src/rsus/evidence/pdf_v4.py` |
-| Fractional empirical CVaR.95 | Implemented and regression-tested | `src/rsus/analysis/prediction.py`, evidence raw tests |
+## Active roster
 
-## Resolved mismatches
+- Primary: TOFU / Qwen2.5-7B
+- Scale boundary: TOFU / Qwen2.5-1.5B
+- Model scale: TOFU / Qwen2.5-14B
+- Model family: TOFU / Llama-3.1-8B
+- Dataset replication: WMDP-bio/MMLU, MUSE-News, RWKU
+- Stress: MUSE-Books, PISTOL
+- Parents: GradDiff, NPO, SimNPO, GRU, RMU, RepNoise, Circuit Breakers
 
-1. The active paper stages no longer point at `channel_matrix` launchers.
-   `run_v4_stage.py` validates the exact parent/request/seed Cartesian roster,
-   resolves the configured adapter, executes shell-free argv commands, checks
-   each shard, and writes consolidated JSONL plus SHA-256 provenance.
+All nine settings and all seven parents remain in the denominator even when
+their evidence is missing, invalid, infeasible, or non-reaching.
 
-2. The evidence ledger is schema version 2 with separate `rq1`, `rq2`, and
-   `rq3` blocks. The old two-claim registry and decision path have been
-   replaced atomically.
+## Implemented contract
 
-3. RQ1 now requires favorable lower bounds for absolute joint rho,
-   joint-minus-S0, joint-minus-S1, and positive-damage tail lift. `tail_m` is
-   frozen per plan unit and fewer than 80% eligible reached units cannot pass.
+| Requirement | Current implementation |
+|---|---|
+| Forward-only Loss Susceptibility and exact-gradient reference | `src/rsus/probe/finite_diff.py`, `src/rsus/probe/fidelity.py` |
+| Representation Proximity and frozen joint mixture | `src/rsus/probe/baselines.py`, `src/rsus/analysis/mixture.py` |
+| First-reaching parent checkpoint | `src/rsus/generators/base.py`, campaign runners |
+| Fixed-budget repair, KL, active constraints, rollback | `src/rsus/repair.py` |
+| RQ1 rank and harmful-tail evidence | `src/rsus/evidence/raw.py`, `src/rsus/evidence/pdf_v4.py` |
+| RQ2 fidelity and added-value evidence | `src/rsus/evidence/raw.py`, `src/rsus/evidence/pdf_v4.py` |
+| RQ3 damage, native NI, feasibility evidence | `src/rsus/evidence/raw.py`, `src/rsus/evidence/pdf_v4.py` |
+| Shared ledger merge and atomic LaTeX publish | `experiments/paper/publish_evidence.py` |
+| Current core and robustness tables | `src/rsus/evidence/tables.py` |
 
-4. RQ2 now consumes one fidelity record per unit and requires the four PDF
-   effects plus perturbation, exact-reference, and common-control validity.
+The current core output contains five tables: prospective rank prediction,
+Loss Susceptibility fidelity, harmful-tail recovery, repair effects, and the
+repair contract. Robustness output contains claim breadth and the evidence
+funnel.
 
-5. RQ3 now requires candidate-level native retention for every arm and draw.
-   A row cannot pass without all five arms, every repeated-random draw, common
-   candidate support, nonnegative feasibility slacks, eight favorable damage
-   UCBs, and four favorable native-NI lower bounds.
+## Execution paths
 
-6. Paper protection rows must identify one first-reaching parent checkpoint.
-   The stage executor and raw parser both reject terminal-budget substitution.
+Existing 7B results can be converted to the current paper schema without GPU
+work:
 
-7. Every dataset config now declares a native metric name, orientation, and
-   frozen non-inferiority margin. Missing values block plan creation and
-   preflight.
+```bash
+bash experiments/cluster/run_tofu_7b_h100.sh render-only
+```
 
-8. MUSE-News and MUSE-Books loaders are registered, but their capability
-   correctly says that the current corpus-level request does not provide
-   independent target-request rosters. Preflight does not treat registration
-   alone as paper readiness.
+The full 7B H100 campaign uses explicit experiment mode:
 
-9. Stage orchestration and dataset model execution are now separate contracts.
-   `run_v4_stage.py` cannot satisfy `PAPER_UNIT_CONTRACT`; TOFU uses the real
-   model producer in `tofu_v4_unit.py`.
+```bash
+bash experiments/cluster/run_tofu_7b_h100.sh experiment
+```
 
-10. TOFU now has a complete freeze-ordered workflow:
-    `run_tofu_table1.py` runs parent calibration, prediction/control selection,
-    protection selection, target execution, raw aggregation, and Table 1
-    rendering. Non-differentiable forgetting/native constraints participate in
-    tentative-update rollback through `external_feasibility`.
+The 14B launcher currently produces diagnostic CSV/JSON aggregates. The 1.5B
+4090 pipeline is a scale-boundary experiment and does not define the current
+primary setting.
 
-## Remaining blockers
+## Remaining evidence gaps
 
-These are real missing inputs or experiments, not code paths that may be
-silently substituted:
+These are missing executions or dataset producers, not missing table rows:
 
-- The configured `/group-volume/models/...` paths are absent on this host.
-- Non-TOFU datasets still need their own `PAPER_UNIT_CONTRACT` producers.
-- Llama-3.1-8B is not provisioned.
-- `configs/paper/selection_freeze.yaml` does not exist until the implemented
-  TOFU `D_pred`/`D_prot` selector has consumed real development artifacts.
-- `configs/paper/tofu_parent_freeze_1p5b.yaml` remains draft until real
-  `D_cal` results resolve all seven parents.
-- WMDP-bio/MMLU and PISTOL lack real adapters and exact request rosters.
-- MUSE needs defensible independent deletion-request semantics before its four
-  rosters can be frozen.
-- WMDP, MUSE, and PISTOL roster placeholders remain unresolved.
-- No full GPU campaign has produced the candidate-level RQ1/RQ2/RQ3 shards.
-- The active evidence config has nine setting rows, while the PDF Table 2 has
-  eight; primary/scale roles and the extra 14B row must be reconciled to the
-  PDF before a claim-bearing run.
-- The checked-in LaTeX predates the supplied PDF; the generated current-format
-  Table 1 is written separately because the PDF's matching source tree is not
-  present in this repository.
+- 14B has no committed paper prediction-alpha freeze and remains
+  diagnostic-only.
+- Non-TOFU settings do not yet have complete dataset-specific
+  `PAPER_UNIT_CONTRACT` producers.
+- A setting without fidelity evidence keeps RQ2 cells explicitly ineligible.
+- A parent without complete five-arm repair evidence keeps RQ3 cells
+  explicitly ineligible.
+- Missing settings remain visible as placeholders in the nine-setting
+  robustness denominator.
 
-## Specification gaps
-
-The PDF itself still leaves values that must be frozen before a confirmatory
-run:
-
-- dataset-specific native metrics and scientifically justified NI margins;
-- exact direct, paraphrase, extraction/generation, and utility boundaries;
-- the intended `theta0` preparation and checkpoint provenance;
-- the final semantic duplicate/paraphrase eligibility review;
-- operational token-equivalent accounting if backward work is weighted other
-  than the implemented convention;
-- tie policy for the positive-damage top-`m` outcome boundary.
-
-The implementation resolves Equation (7) as mean teacher-forced answer-token
-KL against cached full fp32 entry distributions. Equation (8) uses one
-oriented constraint per frozen token plus example-average margins and a fixed
-ridge. These conventions are explicit in code and must be stated in the paper
-or changed before a confirmatory run.
+The 7B backfill exports all seven parent rows. GradDiff and RMU use their
+frozen prediction selections. Other parents use explicitly declared
+descriptive selections and remain claim-ineligible unless a valid frozen
+selection is supplied. A non-reaching parent may display its last completed
+checkpoint descriptively, but it cannot license a claim.
 
 ## Verification boundary
 
-CPU tests cover v4 repair, exact `Kp`, score-independent manifests, first-reach
-provenance, stage-roster sealing, RQ1/RQ2/RQ3 aggregation, tail eligibility,
-native non-inferiority, fractional CVaR, registry validation, and preflight.
+A generated `.tex` file proves that rendering completed; it does not prove
+that the claims passed. Use:
 
-`experiments/paper/preflight.py` is expected to exit 2 in the current checkout.
-`summary.unready_executors` is empty because the stage orchestrator is real;
-`summary.unready_unit_producers` remains nonempty until dataset model runners
-exist. No GPU/model campaign was run as part of this remediation.
+```text
+/group-volume/fdmu/runs/paper_v4/evidence_readiness.json
+/group-volume/fdmu/runs/paper_v4/PUBLISH_STATUS.json
+```
+
+`Rank E/P=y/y` establishes only the rank condition. Full RQ1 additionally
+requires harmful-tail recovery, so claim success requires both `Rank E/P`
+and final `RQ1 E/P` to be `y/y`.

@@ -1,22 +1,31 @@
-# FDMU: prospective retain-risk prediction and protection
+# When Does LLM Unlearning Fail?
 
-FDMU는 machine unlearning 전에 retain candidate의 손상 위험을 예측하고,
+이 저장소는 machine unlearning 전에 retain candidate의 손상 위험을 예측하고,
 동일한 first-reaching parent checkpoint에서 고정 예산 repair를 비교하는
-실험 코드다. 현재 논문 계약은 `D_cal -> D_pred -> D_prot -> target` 순서와
-target 이전 freeze를 강제한다.
+논문 코드다. 현재 논문 제목은 *When Does LLM Unlearning Fail? Predicting
+and Protecting Susceptible Retained Behavior*이며, 실행 계약은
+`D_cal -> D_pred -> D_prot -> target` 순서와 target 이전 freeze를 강제한다.
 
 ## 현재 상태
 
-- Loss-shake, exact-gradient fidelity, proximity, joint predictor 구현
-- GradDiff, NPO, SimNPO, GRU, RMU, RepNoise, Circuit Breakers parent 구현
-- PDF-v4 repair, comparator arms, raw evidence, IUT, LaTeX renderer 구현
-- TOFU 1.5B paper unit producer와 4090 x2 개발 스윕 구현
-- H100 7B/14B channel-matrix 실행기와 공유 파일 큐 구현
-- 최신 PDF 전체 Table 2 roster는 아직 완성되지 않음
-- 실제 target campaign 결과가 없으면 generated table의 placeholder가 정상
+- 현재 코드와 `paper/`의 primary setting은 `TOFU / Qwen2.5-7B`다.
+  Qwen2.5-1.5B는 scale boundary, Qwen2.5-14B는 model-scale setting이다.
+- 논문 분모는 9개 setting과 7개 parent(GradDiff, NPO, SimNPO, GRU, RMU,
+  RepNoise, Circuit Breakers)로 고정되어 있다.
+- Loss Susceptibility, exact-gradient fidelity, Representation Proximity,
+  joint predictor, repair arms, raw evidence, IUT 판정, 최신 LaTeX renderer가
+  구현되어 있다.
+- 7B 기존 결과는 GPU 실행 없이 현재 paper 형식으로 다시 렌더링할 수 있다.
+  14B 경로는 현재 CSV/JSON diagnostic aggregate까지만 생성한다.
+- 최종 LaTeX 두 파일에는 core 5개 표와 robustness/funnel 2개 표가 들어간다.
+  미완료 setting이나 evidence는 고정 분모에서 삭제하지 않고 placeholder로
+  남긴다.
 
-코드가 구현됐다는 것과 논문 결과가 완성됐다는 것은 다르다. 현재 차단 조건은
-다음 명령으로 확인한다.
+체크인된 `KDD_UnlearningFail.pdf`는 현재 `paper/` 소스보다 오래된
+스냅샷이다. 코드와 표 생성 계약은 `paper/`, `configs/paper/evidence.yaml`,
+`src/rsus/evidence/tables.py`를 기준으로 한다. 코드 구현 여부와 실제 실험
+완료 여부는 다르며, 현재 결과 완성도는 생성된
+`evidence_readiness.json`과 `FINALIZATION_STATUS.json`으로 확인한다.
 
 ```bash
 python experiments/paper/preflight.py
@@ -34,7 +43,7 @@ python experiments/cluster/next_actions.py
 | H100 플릿 실행 | [docs/CLUSTER_FLEET_RUNBOOK.md](docs/CLUSTER_FLEET_RUNBOOK.md) |
 | 최종 결과와 LaTeX | [docs/FINAL_RESULTS_RUNBOOK.md](docs/FINAL_RESULTS_RUNBOOK.md) |
 | Table 1/2 수식 | [docs/TABLE12_METRICS.md](docs/TABLE12_METRICS.md) |
-| 최신 PDF 대비 구현 상태 | [docs/PDF_V4_CODE_AUDIT.md](docs/PDF_V4_CODE_AUDIT.md) |
+| 현재 paper/code 계약 | [configs/paper/evidence.yaml](configs/paper/evidence.yaml) |
 
 ## 설치와 CPU 검사
 
@@ -126,8 +135,9 @@ GPU 한 장을 사용하며, 서로 다른 호스트의 GPU는 각 호스트에�
 [클러스터 런북의 실험 전 필수 확인](docs/CLUSTER_FLEET_RUNBOOK.md#실험-전-필수-확인)을
 따른다.
 
-7B aggregate는 최신 논문 표 publish까지 수행한다. 14B aggregate는 CSV/JSON
-진단 결과만 생성한다. 공유 큐, 로그, 복구 절차는 cluster runbook에 있다.
+7B `experiment`는 aggregate 뒤 최신 논문 표 publish까지 수행한다. 14B
+실행기는 현재 experiment-only이며 CSV/JSON 진단 결과만 생성한다. 공유 큐,
+로그, 복구 절차는 cluster runbook에 있다.
 
 ### 최종 논문 Table 1/2
 
@@ -145,10 +155,11 @@ bash experiments/cluster/run_tofu_7b_h100.sh render-only
 /group-volume/fdmu/runs/paper_v4/table_robustness.tex
 ```
 
-- `table_core_evidence.tex`: 최신 논문의 core evidence 형식이다. GradDiff, NPO, SimNPO,
-  GRU, RMU, RepNoise, CB 7개 parent를 항상 모두 출력한다.
-- `table_robustness.tex`: robustness와 evidence funnel 형식이다. 논문 계약의 9개
-  model/dataset setting을 항상 모두 출력한다.
+- `table_core_evidence.tex`: prediction rank, Loss Susceptibility fidelity,
+  harmful-tail recovery, repair effects, repair contract의 5개 core 표다.
+  GradDiff, NPO, SimNPO, GRU, RMU, RepNoise, CB를 항상 모두 출력한다.
+- `table_robustness.tex`: 9개 setting의 robustness와 evidence funnel을
+  각각 출력한다.
 - 완료된 evidence는 숫자로 채우고, 미완료·비적격 evidence는 행을 없애지 않고
   `\tblph` 또는 `n/--`로 표시한다. 값을 임의로 만들지 않는다.
 - forgetting 기준에 도달하지 못한 parent는 마지막 완료 checkpoint의 관측값을
@@ -158,6 +169,19 @@ bash experiments/cluster/run_tofu_7b_h100.sh render-only
   중복 LaTeX는 재렌더 시 삭제한다.
 - channel-matrix 진단값은 `aggregate/pooled_channel_report.csv`와
   `pooled_channel_report.json`에서 확인한다. 별도 진단 `.tex`는 만들지 않는다.
+
+`E/P`는 `eligible/pass`다. `Rank E/P`는 prospective rank 조건만 판정하고,
+최종 `RQ1 E/P`는 rank 조건에 harmful-tail 조건을 추가한다.
+
+| 표기 | 의미 |
+|---|---|
+| `y/y` | 판정 자격이 있고 해당 조건 통과 |
+| `y/n` | 판정 자격은 있지만 해당 조건 실패 |
+| `n/--` | 자격 조건이 부족해 pass를 판정하지 않음 |
+
+RQ1 성공을 주장하려면 `Rank E/P`와 최종 `RQ1 E/P`가 모두 `y/y`여야 한다.
+Rank가 `y/y`이고 RQ1이 `y/n`이면 rank 조건은 통과했지만 harmful-tail
+조건이 실패한 것이다.
 
 최신 코드를 받은 뒤 기존 결과를 재렌더하는 전체 명령은 다음과 같다.
 

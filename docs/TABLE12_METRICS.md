@@ -1,54 +1,41 @@
-# Latest PDF Table 1/2 metric guide
+# Current paper evidence-table metric guide
 
 ## 0. 기준 문서
 
-이 문서의 유일한 기준은 저장소 루트의 `KDD_UnlearningFail.pdf`다.
+현재 기준은 추적 중인 `paper/` 소스, `configs/paper/evidence.yaml`, 그리고
+`src/rsus/evidence/tables.py`다. 루트의 `KDD_UnlearningFail.pdf`는 현재
+paper 소스보다 오래된 스냅샷이므로 roster나 표 배치의 기준으로 사용하지
+않는다.
 
-```text
-PDF creation: 2026-07-24 19:48 KST
-Pages: 13
-SHA-256: b0ea5de888e4e5b3e429ce57f5bebd6a6cb18f36306422bcbafb963d02d93209
-```
+현재 core 표 구조는 다음과 같다.
 
-PDF와 Markdown, LaTeX, YAML, 코드가 충돌하면 PDF 정의를 따른다. 특히
-`paper/sections/05_experiments.tex`의 predictor-by-objective channel matrix는
-이전 초안의 Table 1이며 최신 PDF Table 1이 아니다.
+- **Table I:** prospective rank correlation, endpoint/control gains, `Rank E/P`
+- **Table II:** Loss Susceptibility fidelity/cost와 no-refit swap diagnostic
+- **Table III:** harmful-tail recovery와 최종 `RQ1 E/P`
+- **Table IV:** fixed-budget repair damage effects와 `Effect E/P`
+- **Table V:** feasibility/native-retention contract와 최종 `RQ3 E/P`
+- **Robustness:** claim breadth와 evidence funnel 두 표
 
-최신 PDF의 표 구조는 다음과 같다.
-
-- **Table 1, Panel A:** `Joint rho [LB]`,
-  `min(g_G,g_H) [min LB]`, `f_rho/f_K [LB]`, `g_ctl [LB]`,
-  `L_tail [LB]; eligible n/N`, `RQ1 E/P`, `RQ2 E/P`
-- **Table 1, Panel B:** `Profile mean; CVaR`,
-  `No-repair mean; CVaR`, `max_(a,k) Delta_(a,k) [UCB]`,
-  `min_a h_a [LB]`, `min F/U slack`, `updates/rollback`, `RQ3 E/P`
-- **PDF Table 2:** `Axis`, `Setting`, `Plan/done`, `RQ1 E/P`, `RQ2 E/P`,
-  `RQ3 E/P`, `valid/reach`, `tail/common n`, `all-arm feasible`,
-  `worst RQ1/RQ2/RQ3 bounds`, `Failure modes`
-- **현재 generated Table 2:** 같은 판정과 분모를 보존하되 최신 H100 실험
-  브랜치의 가독성 변경을 반영해 breadth(2A)와 funnel(2B) 두 표로 나눈다.
-
-Table 1의 parent roster는 output-readout
+Core table의 parent roster는 output-readout
 `{GradDiff, NPO, SimNPO, GRU}`와 representation-readout
 `{RMU, RepNoise, CB}`다.
 
-PDF Table 2의 setting roster는 정확히 8행이다.
+Robustness setting roster는 정확히 9행이다.
 
-| Axis | PDF setting |
+| Axis | Current setting |
 |---|---|
-| Request | held-out TOFU requests |
+| Request | held-out TOFU requests (Qwen2.5-7B primary) |
 | Dataset | WMDP-bio/MMLU |
 | Dataset | MUSE-News |
 | Dataset | RWKU |
 | Dataset | MUSE-Books (stress) |
 | Dataset | PISTOL (stress) |
-| Model | Qwen2.5-7B |
+| Model | Qwen2.5-1.5B (boundary) |
+| Model | Qwen2.5-14B |
 | Model | Llama-3.1-8B |
 
-PDF Table 3은 TOFU primary를 `Qwen2.5-1.5B / fp32`, scale을
-`Qwen2.5-7B / fp32`, family를 `Llama-3.1-8B / fp32`로 정의한다.
-현재 코드/config의 7B-primary, 1.5B-boundary, 14B 추가 roster는 이 PDF와
-일치하지 않으며 별도 동기화 전에는 paper contract로 취급하면 안 된다.
+현재 primary는 `TOFU / Qwen2.5-7B`, 1.5B는 scale boundary, 14B는
+model-scale, Llama-3.1-8B는 model-family setting이다.
 
 계산과 렌더링이 구현되어 있다는 것과 실제 target campaign이 완료되어 숫자가
 채워졌다는 것은 다르다. 원자료가 없거나 eligibility가 불완전한 셀은
@@ -111,7 +98,7 @@ p_IUT      = max(p_1, ..., p_m)
 차이에는 one-sided upper bound를 사용한다. IUT(intersection-union test)는
 모든 구성 효과가 동시에 통과해야 한다.
 
-## 3. Table 1 Panel A: RQ1/RQ2
+## 3. Core Tables I--III: RQ1/RQ2
 
 Predictor 메트릭만 빠르게 확인하려면
 [`PREDICTOR_METRICS.md`](PREDICTOR_METRICS.md)를 본다. 각 값의 좋은 방향,
@@ -192,9 +179,14 @@ L_tail = Recall_M / q - 1
 
 - `E=y`: prediction selection, profile integrity, external gate reach,
   shared support가 유효하고 tail coverage가 `0.80` 이상이다.
-- `P=y`: `rho_S`, `g_G`, `g_H`, `L_tail`의 네 lower bound가 모두
-  `0`보다 크고 four-way IUT가 `alpha=0.05`를 통과한다.
+- `Rank E/P`의 `P=y`: `rho_S`, `g_G`, `g_H`, `g_ctl`의 네 lower
+  bound가 모두 `0`보다 크고 four-way IUT가 `alpha=0.05`를 통과한다.
+- 최종 `RQ1 E/P`의 `P=y`: rank 조건과 `L_tail` lower bound가 모두
+  양수이고 five-way IUT를 통과한다.
 - 모든 planned trajectory가 완료되지 않으면 pass가 차단된다.
+
+RQ1 성공에는 `Rank E/P=y/y`와 `RQ1 E/P=y/y`가 모두 필요하다.
+`Rank=y/y`, `RQ1=y/n`은 harmful-tail 조건 실패를 뜻한다.
 
 ### RQ2 E/P
 
@@ -206,7 +198,7 @@ L_tail = Recall_M / q - 1
 `g_H`는 RQ1에서는 두 endpoint 중 하나이고, RQ2에서는 proximity만으로는
 설명되지 않는 loss-shake의 added value를 검사한다.
 
-## 4. Table 1 Panel B: RQ3
+## 4. Core Tables IV--V: RQ3
 
 ### Profile mean; CVaR
 
@@ -292,13 +284,13 @@ request-balanced 평균이다. 최적화 진단이며 RQ3 IUT의 구성 효과�
   모두 `> 0`, twelve-way IUT가 `alpha=0.05`를 통과한다.
 - 모든 planned trajectory 완료도 별도로 필요하다.
 
-## 5. Table 2: robustness와 failure boundary
+## 5. Robustness와 failure boundary
 
 Table 2는 새로운 candidate metric을 계산하지 않는다. Table 1과 같은
 decision을 위에 열거한 PDF의 8개 predeclared setting에 대해 요약하며,
 미실행 setting도 분모에서 제거하지 않는다.
 
-### Table 2A: claim breadth
+### Claim breadth
 
 | 열 | 의미 |
 |---|---|
@@ -313,7 +305,7 @@ decision을 위에 열거한 PDF의 8개 predeclared setting에 대해 요약하
 아직 시도하지 않은 setting의 `Chain`은 실패를 뜻하는 `n`이 아니라
 `\tblph`로 남긴다. Stress setting은 primary 실패를 구제하지 않는다.
 
-### Table 2B: evidence funnel
+### Evidence funnel
 
 | 열 | 의미 |
 |---|---|
@@ -339,7 +331,7 @@ RQ1/RQ2/RQ3를 모두 통과한 parent가 있는지를 표시한다. Primary,
 model-transfer, dataset-replication group의 사전 동결 규칙까지 만족해야
 최종 transfer 문구가 licensed된다.
 
-## 6. 구현 위치와 PDF 일치 상태
+## 6. 구현 위치와 현재 상태
 
 | 단계 | 구현 |
 |---|---|
@@ -347,21 +339,11 @@ model-transfer, dataset-replication group의 사전 동결 규칙까지 만족�
 | Spearman, tail lift, CVaR, effect 집계 | `src/rsus/evidence/raw.py`, `src/rsus/analysis/prediction.py` |
 | Bootstrap bound와 p-value | `src/rsus/evidence/statistics.py` |
 | RQ1/RQ2/RQ3 IUT와 eligibility | `src/rsus/evidence/pdf_v4.py`, `src/rsus/evidence/decisions.py` |
-| Table 1/2 렌더링 | `src/rsus/evidence/tables.py`, `src/rsus/evidence/table1.py` |
+| 현재 paper 표 렌더링 | `src/rsus/evidence/tables.py`, `src/rsus/evidence/table1.py` |
 | 현재 동결 config | `configs/paper/evidence.yaml`, `configs/paper/campaign.yaml` |
 
-Metric 계산과 RQ1/RQ2/RQ3 IUT의 부호는 PDF와 대응한다. 그러나 저장소 전체가
-최신 PDF와 동기화된 것은 아니다.
-
-| 항목 | 상태 |
-|---|---|
-| Table 1 metric 열과 4/4/12-way IUT | PDF와 대응 |
-| Fractional CVaR.95와 low-tail-support 규칙 | PDF와 대응 |
-| `paper/main.tex`이 컴파일하는 Table 1 | 불일치: 구버전 channel matrix |
-| TOFU primary/scale/family roster | 불일치: PDF는 1.5B/7B/Llama |
-| Table 2 denominator | 불일치: PDF 8행, 현재 config/renderer 9행 |
-| 실제 target evidence | 미생성 |
-
-따라서 현재 생성 renderer의 숫자는 metric-level 진단에는 사용할 수 있지만,
-roster를 PDF와 동기화하기 전에는 최신 PDF Table 1/2를 채운 paper evidence로
-간주할 수 없다.
+현재 renderer와 `paper/main.tex`은 같은 generated core/robustness 파일을
+사용한다. 7B 완료 결과는 `render-only`로 현재 형식에 재집계할 수 있다.
+나머지 setting은 실제 evidence가 없으면 고정된 9행 분모를 유지하면서
+placeholder로 남는다. 결과 완성 여부는 `evidence_readiness.json`의
+eligibility/pass와 `FINALIZATION_STATUS.json`을 기준으로 판단한다.

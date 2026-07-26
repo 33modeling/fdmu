@@ -14,10 +14,10 @@ dataset or model and is safe on a login/CPU node.
 
 The checked inputs are:
 
-- `configs/paper/evidence.yaml`: the eight setting denominators used by the
+- `configs/paper/evidence.yaml`: the nine setting denominators used by the
   paper;
 - `configs/paper/campaign.yaml`: adapters, exact rosters, model sources,
-  frozen 8-setting/4-stage contract, precision, stage orchestrators,
+  frozen 9-setting/4-stage contract, precision, stage orchestrators,
   dataset-specific unit producers, and parent availability;
 - `src/rsus/data/registry.py`: the adapters that actually exist in code.
 
@@ -54,7 +54,7 @@ calibration, first-reaching parent damage for prediction, and PDF-v4 repair,
 all comparator arms, feasibility margins, and dataset-native retention for
 protection/target. A stage cannot become ready by pointing `unit_producer` at
 the orchestrator.
-Target evaluation additionally requires an exact 8-setting-by-7-parent
+Target evaluation additionally requires an exact 9-setting-by-7-parent
 prediction/protection selection freeze whose source campaign matches and whose
 `frozen_before_target` flag is true. Each protection selection also freezes
 positive integer `Kp`. The repository intentionally has no such file until all
