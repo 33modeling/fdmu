@@ -21,6 +21,11 @@ dependency/CUDA/data 검사
   -> trial 검증과 종료 판정
 ```
 
+Parent calibration의 exit `4`는 실패가 아니라 resolved proposal에 대한
+승인 경계다. 원큐 실행기는 이 상태만 정상으로 받아 다음
+`parent-freeze-approval` 단계로 진행한다. Exit `3`
+(`PARENT_CALIBRATION_UNRESOLVED`)은 그대로 중단한다.
+
 세 단계는 모두 저장소의 `.venv/bin/python`을 사용한다. `.venv`가 정상이면
 재생성하지 않는다. `yaml` import만 깨졌다면 다음 검사로 복구와 진단을 수행한다.
 
