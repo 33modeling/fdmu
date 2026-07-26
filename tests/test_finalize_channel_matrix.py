@@ -2,7 +2,10 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from experiments.paper.export_channel_matrix_raw import _loss_shake_profile_valid
+from experiments.paper.export_channel_matrix_raw import (
+    _artifact_reference,
+    _loss_shake_profile_valid,
+)
 from experiments.paper.finalize_channel_matrix import (
     _build_plan,
     _load_yaml,
@@ -14,6 +17,16 @@ from rsus.evidence.raw import raw_plan_from_mapping
 
 
 ROOT = Path(__file__).resolve().parents[1]
+
+
+def test_artifact_reference_accepts_external_campaign_root(tmp_path):
+    campaign_root = tmp_path / "group-volume" / "fdmu" / "runs" / "campaign"
+    damage = campaign_root / "audit" / "qwen25_7b" / "seed-0" / "damage.json"
+
+    assert (
+        _artifact_reference(damage, campaign_root)
+        == "audit/qwen25_7b/seed-0/damage.json"
+    )
 
 
 def test_7b_backfill_plan_uses_only_frozen_prediction_parents():

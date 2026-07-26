@@ -80,6 +80,15 @@ def _load_json(path: Path) -> dict[str, Any]:
     return value
 
 
+def _artifact_reference(path: Path, campaign_root: Path) -> str:
+    """Return a mount-independent source path for checkpoint identity."""
+    resolved = path.resolve()
+    try:
+        return resolved.relative_to(campaign_root.resolve()).as_posix()
+    except ValueError:
+        return str(resolved)
+
+
 def _profile_scores(
     path: Path,
 ) -> tuple[dict[str, float], set[str], dict[str, str], dict[str, Any]]:
@@ -481,7 +490,9 @@ def export_prediction(
                             "request": request_id,
                             "parent": parent,
                             "step": snapshot.get("step"),
-                            "source": str(damage_path.relative_to(ROOT)),
+                            "source": _artifact_reference(
+                                damage_path, output_root
+                            ),
                         },
                         sort_keys=True,
                     )
