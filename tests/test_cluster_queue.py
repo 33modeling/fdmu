@@ -135,6 +135,37 @@ def test_retry_repin_updates_targeted_pending_unit(tmp_path):
     assert payload["retry_pin"]["source_state"] == "pending"
 
 
+def test_model_commit_reconciliation_repins_only_stale_model_units(tmp_path):
+    from experiments.cluster.reconcile_queue_commit import reconcile
+
+    queue = WorkQueue(tmp_path / "q")
+    old_commit = "1" * 40
+    current_commit = "2" * 40
+    queue.enqueue(
+        [
+            _unit("aud__qwen25_14b__a181", code_commit=old_commit),
+            _unit("alpha__qwen25_14b__a181", code_commit=old_commit),
+            _unit("aud__qwen25_7b__a181", code_commit=old_commit),
+        ]
+    )
+
+    assert reconcile(queue.root, "qwen25_14b", current_commit) == [
+        "alpha__qwen25_14b__a181",
+        "aud__qwen25_14b__a181",
+    ]
+    for unit_id in ("alpha__qwen25_14b__a181", "aud__qwen25_14b__a181"):
+        payload = json.loads(
+            (queue.root / "pending" / f"{unit_id}.json").read_text(encoding="utf-8")
+        )
+        assert payload["unit"]["code_commit"] == current_commit
+    untouched = json.loads(
+        (queue.root / "pending" / "aud__qwen25_7b__a181.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    assert untouched["unit"]["code_commit"] == old_commit
+
+
 def test_enqueue_serializes_same_unit_producers(tmp_path):
     first_write_entered = threading.Event()
     release_first_write = threading.Event()

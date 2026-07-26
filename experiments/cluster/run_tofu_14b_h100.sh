@@ -202,6 +202,12 @@ printf '[INFO] retry scope: %s\n' "${AUDIT_UNIT_IDS[*]}"
   --code-commit "$CURRENT_COMMIT" \
   --queue "$QUEUE" "${RETRY_ARGS[@]}"
 
+stage model-queue-commit-reconciliation
+"$PYTHON" experiments/cluster/reconcile_queue_commit.py \
+  --queue "$QUEUE" \
+  --model-id "$MODEL_ID" \
+  --code-commit "$CURRENT_COMMIT"
+
 stage fidelity-contract-validation
 "$PYTHON" experiments/channel_matrix/run_campaign.py \
   --config configs/channel_matrix/14b_tofu.yaml --phase audit \

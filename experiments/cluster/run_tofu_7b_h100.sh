@@ -180,6 +180,12 @@ stage failed-audit-recovery
   --unit aud__qwen25_7b__a186 \
   --unit aud__qwen25_7b__a191
 
+stage model-queue-commit-reconciliation
+"$PYTHON" experiments/cluster/reconcile_queue_commit.py \
+  --queue "$QUEUE" \
+  --model-id "$MODEL_ID" \
+  --code-commit "$CURRENT_COMMIT"
+
 stage fidelity-contract-validation
 "$PYTHON" experiments/channel_matrix/run_campaign.py \
   --config configs/channel_matrix/7b_tofu.yaml --phase audit \
