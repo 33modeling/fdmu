@@ -43,6 +43,8 @@ GPU_IDS=0,1 bash local_run/run_tofu_1p5b_4090x2.sh
 | 목적 | 경로 |
 |---|---|
 | 전체 원클릭 로그 | `<RUN_ROOT>/launcher_logs/current.log` |
+| 현재 최상위 단계 | `<RUN_ROOT>/CURRENT_STAGE.txt` |
+| 마지막 실패 요약 | `<RUN_ROOT>/LAST_ERROR.txt` |
 | calibration 로그 | `<RUN_ROOT>/parent_calibration/launcher_logs/current.log` |
 | sweep 로그 | `<RUN_ROOT>/joint_sweep/launcher_logs/current.log` |
 | sweep 이벤트 | `<RUN_ROOT>/joint_sweep/events.jsonl` |
@@ -57,7 +59,35 @@ GPU_IDS=0,1 bash local_run/run_tofu_1p5b_4090x2.sh
 | 개발 winner | `<RUN_ROOT>/joint_sweep/BEST.json` |
 | fidelity 로그 | `<RUN_ROOT>/fidelity/launcher_logs/current.log` |
 | finalize 로그 | `<RUN_ROOT>/final/launcher_logs/current.log` |
+| finalize 내부 단계 | `<RUN_ROOT>/final/FINAL_CURRENT_STAGE.json` |
+| finalize 완료 마커 | `<RUN_ROOT>/final/FINALIZATION_STATUS.json` |
 | 최종 LaTeX | `<RUN_ROOT>/final/table1.tex` |
+
+최상위 순서는 `environment-bootstrap` → `calibration` →
+`automatic-parent-freeze` → `joint-sweep` → `declared-fidelity` →
+`target-evidence-latex`의 6단계다. `CURRENT_STAGE.txt`의 `state`, `stage_index`,
+`stage_total`, `elapsed_seconds`, `log`를 먼저 읽는다. `state=failed`이면
+`LAST_ERROR.txt`에서 exit code, line, command를 확인한 뒤 그 파일의 `log`를
+읽는다.
+
+재개 로그 판정:
+
+| 로그 | 의미 |
+|---|---|
+| `CALIBRATION SKIPPED` | terminal calibration marker가 유효하며 GPU 재학습 없음 |
+| `PARENT FREEZE SKIPPED` | 승인 record와 freeze 해시가 일치하며 재계산 없음 |
+| `JOINT SWEEP SKIPPED` | `BEST.json`과 terminal sweep status가 유효하며 재학습 없음 |
+| `DECLARED FIDELITY SKIPPED` | 기존 setting-level summary와 source hash 재사용 |
+| `LATEX SKIPPED` | 최종 marker의 Table 1 및 evidence artifact 해시가 모두 일치 |
+| `UNIT REUSED` / `TRIAL_REUSE` | 해당 유닛 검증 완료, `retraining=0` |
+| `UNIT PENDING` / `TRIAL_PENDING` | 출력된 `reason` 때문에 해당 유닛만 실행 |
+| `SFT_CACHE HIT` | theta0 SFT 학습 생략 |
+| `CLEANUP ... signal=TERM/KILL` | 실패 단계가 만든 process group 회수 |
+
+`target-evidence-latex` 내부는 7단계이며
+`FINAL_CURRENT_STAGE.json`에서 prediction, selection freeze, target evaluation,
+raw/aggregate evidence, Table 1 생성을 구분한다. 완료된 최종화는
+`FINALIZATION_STATUS.json`의 artifact SHA-256을 검증한 뒤 전체를 건너뛴다.
 
 현재 GPU 실행을 재시작하지 않고 read-only watcher만 붙일 때:
 

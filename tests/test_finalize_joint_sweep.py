@@ -10,6 +10,7 @@ from experiments.paper.finalize_joint_sweep import (
     _record_joint_best_freeze,
     _validate_existing_freeze,
     _write_final_campaign,
+    finalization_completion,
     parse_args,
     resolve_joint_winner,
 )
@@ -159,3 +160,59 @@ def test_existing_freeze_must_hash_both_development_inputs(
     )
 
     assert _validate_existing_freeze(freeze, prediction, protection) is True
+
+
+def test_finalization_marker_skips_only_hash_valid_table_outputs(
+    tmp_path: Path,
+) -> None:
+    joint = tmp_path / "joint"
+    final = tmp_path / "final"
+    setting = "tofu_qwen25_1p5b"
+    fidelity = tmp_path / "fidelity.json"
+    paths = {
+        "joint_best": joint / "BEST.json",
+        "joint_status": joint / "SWEEP_STATUS.json",
+        "fidelity_summary": fidelity,
+        "table1": final / "table1.tex",
+        "readiness": final / setting / "evidence_readiness.json",
+        "ledger": final / setting / "evidence_ledger.json",
+        "selection_freeze": final / setting / "selection_freeze.yaml",
+    }
+    for name, path in paths.items():
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(f"{name}\n", encoding="utf-8")
+    _write_json(
+        final / "FINALIZATION_STATUS.json",
+        {
+            "schema_version": 1,
+            "status": "complete",
+            "setting": setting,
+            "artifacts": {
+                name: {
+                    "path": str(path.resolve()),
+                    "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+                }
+                for name, path in paths.items()
+            },
+        },
+    )
+
+    complete, _reason = finalization_completion(
+        joint_root=joint,
+        output_root=final,
+        table_out=paths["table1"],
+        fidelity_input=fidelity,
+        setting=setting,
+    )
+    assert complete
+
+    paths["table1"].write_text("changed\n", encoding="utf-8")
+    complete, reason = finalization_completion(
+        joint_root=joint,
+        output_root=final,
+        table_out=paths["table1"],
+        fidelity_input=fidelity,
+        setting=setting,
+    )
+    assert not complete
+    assert "table1" in reason

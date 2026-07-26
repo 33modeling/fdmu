@@ -49,7 +49,9 @@ if [[ -x "$PYTHON" ]] \
   exit 0
 fi
 
-bash local_run/bootstrap_4090_env.sh
+if [[ "${FDMU_4090_BOOTSTRAPPED:-0}" != "1" ]]; then
+  bash local_run/bootstrap_4090_env.sh
+fi
 "$PYTHON" -c 'import datasets, site, sys, torch, transformers, yaml; print(
     f"[deps] python={sys.executable} prefix={sys.prefix} "
     f"site={site.getsitepackages()} yaml_file={yaml.__file__} "

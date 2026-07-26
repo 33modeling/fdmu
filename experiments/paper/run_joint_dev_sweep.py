@@ -808,8 +808,8 @@ def joint_sweep_completion(
         best = _load_json(best_path)
         status = _load_json(status_path)
         if (
-            best.get("status") != "selected"
-            or best.get("automatic_freeze_ready") is not True
+            best.get("status") not in {"draft", "selected"}
+            or best.get("human_review_required") not in {True, False}
             or best.get("development_only") is not True
             or best.get("target_used") is not False
         ):

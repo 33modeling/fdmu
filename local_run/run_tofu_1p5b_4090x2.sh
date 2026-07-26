@@ -219,6 +219,7 @@ run_stage_accept() {
       "$(timestamp)" "$name" "$status" "$accepted" >&2
     return "$status"
   fi
+  cleanup_active_stage "stage-accepted-exit-$status"
   complete_stage
 }
 
@@ -240,6 +241,7 @@ if ! command -v setsid >/dev/null 2>&1; then
 fi
 df -h "$RUN_ROOT" 2>&1 || true
 run_stage 1 environment-bootstrap bash local_run/bootstrap_4090_env.sh
+export FDMU_4090_BOOTSTRAPPED=1
 # Exit 4 is accepted for calibration artifacts produced by older checkouts.
 # Current calibration exits 0 once its target-free proposal is resolved.
 run_stage_accept 2 calibration "0 4" bash local_run/run_tofu_1p5b_calibration.sh

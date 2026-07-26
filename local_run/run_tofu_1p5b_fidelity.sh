@@ -71,7 +71,9 @@ then
   exit 0
 fi
 
-bash local_run/bootstrap_4090_env.sh
+if [[ "${FDMU_4090_BOOTSTRAPPED:-0}" != "1" ]]; then
+  bash local_run/bootstrap_4090_env.sh
+fi
 
 "$PYTHON" - "$MODEL_PATH" "$CAMPAIGN_ROOT" "$CERTIFICATE" "$CONFIG" <<'PY'
 from pathlib import Path

@@ -1,4 +1,12 @@
+import hashlib
+import json
 from pathlib import Path
+
+import yaml
+
+from experiments.paper.run_parent_calibration_4090x2 import (
+    calibration_completion,
+)
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -29,3 +37,59 @@ def test_4090_pipeline_accepts_resolved_calibration_boundary_only():
     assert 'setsid -- "$@" &' in launcher
     assert 'kill -TERM -- "-$ACTIVE_STAGE_PGID"' in launcher
     assert 'kill -KILL -- "-$ACTIVE_STAGE_PGID"' in launcher
+
+
+def test_completed_calibration_marker_prevents_retraining(tmp_path):
+    setting = "tofu_qwen25_1p5b"
+    selection = tmp_path / "stage" / "parent_selection_inputs.jsonl"
+    proposal = (
+        tmp_path
+        / "freeze_proposals"
+        / "tofu_parent_freeze_1p5b.recommended.yaml"
+    )
+    selection.parent.mkdir(parents=True)
+    proposal.parent.mkdir(parents=True)
+    selection.write_text('{"complete": true}\n', encoding="utf-8")
+    selection_hash = hashlib.sha256(selection.read_bytes()).hexdigest()
+    proposal.write_text(
+        yaml.safe_dump(
+            {
+                "schema_version": 1,
+                "contract": "tofu-pdf-v4-parent-freeze",
+                "status": "draft",
+                "unresolved": [],
+                "development_artifacts": [
+                    {
+                        "path": str(selection.resolve()),
+                        "sha256": selection_hash,
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    (tmp_path / "CALIBRATION_STATUS.json").write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "setting": setting,
+                "proposal": str(proposal.resolve()),
+                "proposal_sha256": hashlib.sha256(
+                    proposal.read_bytes()
+                ).hexdigest(),
+                "selection_input": str(selection.resolve()),
+                "selection_input_sha256": selection_hash,
+                "unresolved": [],
+                "approval_ready": True,
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    complete, _reason = calibration_completion(tmp_path, setting)
+    assert complete
+
+    selection.write_text('{"changed": true}\n', encoding="utf-8")
+    complete, reason = calibration_completion(tmp_path, setting)
+    assert not complete
+    assert "SHA-256" in reason

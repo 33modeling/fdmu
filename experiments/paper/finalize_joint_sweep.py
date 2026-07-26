@@ -24,7 +24,7 @@ from experiments.paper.run_joint_dev_sweep import (  # noqa: E402
     _EventLog,
     _absolute_executable,
     _run_lanes,
-    _unit_complete,
+    _unit_completion_status,
 )
 
 
@@ -414,6 +414,79 @@ def _required_file(value: object, name: str) -> Path:
     return path
 
 
+def finalization_completion(
+    *,
+    joint_root: Path,
+    output_root: Path,
+    table_out: Path,
+    fidelity_input: Path,
+    setting: str,
+) -> tuple[bool, str]:
+    status_path = output_root.resolve() / "FINALIZATION_STATUS.json"
+    if not status_path.is_file():
+        return False, f"missing {status_path}"
+    try:
+        status = _load_json(status_path)
+        if (
+            status.get("schema_version") != 1
+            or status.get("status") != "complete"
+            or status.get("setting") != setting
+        ):
+            return False, "finalization status contract mismatch"
+        expected = {
+            "joint_best": joint_root.resolve() / "BEST.json",
+            "joint_status": joint_root.resolve() / "SWEEP_STATUS.json",
+            "fidelity_summary": fidelity_input.resolve(),
+            "table1": table_out.resolve(),
+            "readiness": (
+                output_root.resolve() / setting / "evidence_readiness.json"
+            ),
+            "ledger": output_root.resolve() / setting / "evidence_ledger.json",
+            "selection_freeze": (
+                output_root.resolve() / setting / "selection_freeze.yaml"
+            ),
+        }
+        artifacts = status.get("artifacts")
+        if not isinstance(artifacts, Mapping) or set(artifacts) != set(expected):
+            return False, "finalization artifact roster mismatch"
+        for name, path in expected.items():
+            entry = artifacts.get(name)
+            if (
+                not isinstance(entry, Mapping)
+                or Path(str(entry.get("path", ""))).resolve() != path
+                or not path.is_file()
+                or entry.get("sha256") != _sha256(path)
+            ):
+                return False, f"finalization artifact mismatch: {name}"
+        if table_out.stat().st_size == 0:
+            return False, f"Table 1 output is empty: {table_out}"
+    except (FinalizationError, OSError, TypeError, ValueError) as error:
+        return False, f"{type(error).__name__}: {error}"
+    return True, f"validated {status_path}"
+
+
+def _final_stage(
+    output_root: Path,
+    index: int,
+    total: int,
+    name: str,
+) -> None:
+    path = output_root / "FINAL_CURRENT_STAGE.json"
+    _atomic_json(
+        path,
+        {
+            "state": "running",
+            "stage": name,
+            "stage_index": index,
+            "stage_total": total,
+        },
+    )
+    print(
+        f"\n========== [FINALIZE STAGE {index}/{total}] {name} ==========",
+        flush=True,
+    )
+
+
 def resolve_joint_winner(joint_root: Path) -> dict[str, Path]:
     joint_root = joint_root.resolve()
     best = _load_json(joint_root / "BEST.json")
@@ -577,24 +650,42 @@ def _run_resumable_stage(
     units = manifest.get("units")
     if not isinstance(units, list):
         raise FinalizationError(f"{manifest_path} has no unit list")
-    pending = [
-        unit
+    completion = [
+        (
+            unit,
+            *_unit_completion_status(
+                unit,
+                campaign_hash=str(manifest["campaign_config_sha256"]),
+                evidence_hash=str(manifest["evidence_config_sha256"]),
+                runtime_hash=str(manifest["runtime_config_sha256"]),
+                stage=stage,
+            ),
+        )
         for unit in units
         if isinstance(unit, Mapping)
-        and not _unit_complete(
-            unit,
-            campaign_hash=str(manifest["campaign_config_sha256"]),
-            evidence_hash=str(manifest["evidence_config_sha256"]),
-            runtime_hash=str(manifest["runtime_config_sha256"]),
-            stage=stage,
-        )
     ]
-    if len(pending) != sum(isinstance(unit, Mapping) for unit in units):
-        print(
-            f"[RESUME] stage={stage} valid={len(units) - len(pending)} "
-            f"pending={len(pending)}",
-            flush=True,
+    pending = [
+        unit for unit, complete, _reason in completion if not complete
+    ]
+    print(
+        f"[RESUME] stage={stage} valid={len(completion) - len(pending)} "
+        f"pending={len(pending)}",
+        flush=True,
+    )
+    for unit, complete, reason in completion:
+        identity = (
+            f"{unit.get('parent')}__{unit.get('request')}__seed-{unit.get('seed')}"
         )
+        if complete:
+            print(
+                f"[UNIT REUSED] stage={stage} unit={identity} retraining=0",
+                flush=True,
+            )
+        else:
+            print(
+                f"[UNIT PENDING] stage={stage} unit={identity} reason={reason}",
+                flush=True,
+            )
     _run_lanes(
         pending,
         gpus=args.gpus,
@@ -656,6 +747,24 @@ def _validate_existing_freeze(
 
 
 def run(args: argparse.Namespace) -> None:
+    complete, reason = finalization_completion(
+        joint_root=args.joint_root,
+        output_root=args.output_root,
+        table_out=args.table_out,
+        fidelity_input=args.fidelity_input,
+        setting=args.setting,
+    )
+    if complete:
+        print(
+            f"[FINALIZATION SKIPPED] already_complete=true rerun=0 reason={reason}",
+            flush=True,
+        )
+        return
+    print(
+        f"[FINALIZATION RESUME] already_complete=false reason={reason}",
+        flush=True,
+    )
+    _final_stage(args.output_root, 1, 7, "validate-joint-winner")
     winner = resolve_joint_winner(args.joint_root)
     _record_joint_best_freeze(args.joint_root, winner)
 
@@ -666,6 +775,7 @@ def run(args: argparse.Namespace) -> None:
     final_campaign = (args.output_root / "config" / "campaign.final.yaml").resolve()
     _write_final_campaign(winner["campaign"], final_campaign, selection_freeze)
 
+    _final_stage(args.output_root, 2, 7, "prediction")
     prediction_sealed = _run_resumable_stage(
         args,
         stage="prediction",
@@ -674,6 +784,7 @@ def run(args: argparse.Namespace) -> None:
         runtime=winner["runtime"],
     )
     prediction_input = prediction_sealed / "selection_inputs.jsonl"
+    _final_stage(args.output_root, 3, 7, "selection-freeze")
     if not _validate_existing_freeze(
         selection_freeze, prediction_input, winner["protection_input"]
     ):
@@ -701,6 +812,7 @@ def run(args: argparse.Namespace) -> None:
             ]
         )
 
+    _final_stage(args.output_root, 4, 7, "target-evaluation")
     target_sealed = _run_resumable_stage(
         args,
         stage="target_evaluation",
@@ -743,6 +855,7 @@ def run(args: argparse.Namespace) -> None:
     if fidelity_payload.get("certificate_passed") is not True:
         raise FinalizationError("declared fidelity certificate did not pass")
     print(f"[DONE] declared fidelity summary: {fidelity_summary}", flush=True)
+    _final_stage(args.output_root, 5, 7, "raw-evidence")
     _run(
         [
             str(args.python),
@@ -759,6 +872,7 @@ def run(args: argparse.Namespace) -> None:
             str(raw_plan),
         ]
     )
+    _final_stage(args.output_root, 6, 7, "aggregate-evidence")
     _run(
         [
             str(args.python),
@@ -776,6 +890,7 @@ def run(args: argparse.Namespace) -> None:
             str(ledger),
         ]
     )
+    _final_stage(args.output_root, 7, 7, "table1-latex")
     _run(
         [
             str(args.python),
@@ -796,6 +911,39 @@ def run(args: argparse.Namespace) -> None:
     )
     print(f"[DONE] Table 1 LaTeX: {args.table_out}", flush=True)
     print(f"[DONE] evidence readiness: {readiness}", flush=True)
+    artifact_paths = {
+        "joint_best": args.joint_root / "BEST.json",
+        "joint_status": args.joint_root / "SWEEP_STATUS.json",
+        "fidelity_summary": fidelity_summary,
+        "table1": args.table_out,
+        "readiness": readiness,
+        "ledger": ledger,
+        "selection_freeze": selection_freeze,
+    }
+    _atomic_json(
+        args.output_root / "FINALIZATION_STATUS.json",
+        {
+            "schema_version": 1,
+            "status": "complete",
+            "setting": args.setting,
+            "artifacts": {
+                name: {
+                    "path": str(path.resolve()),
+                    "sha256": _sha256(path.resolve()),
+                }
+                for name, path in artifact_paths.items()
+            },
+        },
+    )
+    _atomic_json(
+        args.output_root / "FINAL_CURRENT_STAGE.json",
+        {
+            "state": "complete",
+            "stage": "table1-latex",
+            "stage_index": 7,
+            "stage_total": 7,
+        },
+    )
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -823,6 +971,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         action="store_true",
         help=argparse.SUPPRESS,
     )
+    parser.add_argument(
+        "--check-complete",
+        action="store_true",
+        help="validate completed Table 1 outputs without running any stage",
+    )
     args = parser.parse_args(argv)
     try:
         args.gpus = tuple(int(value.strip()) for value in args.gpus.split(","))
@@ -846,7 +999,22 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 
 def main(argv: list[str] | None = None) -> int:
     try:
-        run(parse_args(argv))
+        args = parse_args(argv)
+        if args.check_complete:
+            complete, reason = finalization_completion(
+                joint_root=args.joint_root,
+                output_root=args.output_root,
+                table_out=args.table_out,
+                fidelity_input=args.fidelity_input,
+                setting=args.setting,
+            )
+            print(
+                f"[FINALIZATION STATUS] complete={str(complete).lower()} "
+                f"reason={reason}",
+                flush=True,
+            )
+            return 0 if complete else 1
+        run(args)
         return 0
     except (
         FinalizationError,

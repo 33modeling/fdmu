@@ -19,6 +19,21 @@ freeze를 자동 생성·검증한 뒤 joint sweep과 최종 LaTeX까지 계속 
 오류로 종료되어도 개별 calibration/freeze/fidelity/finalize 스크립트를 실행하지
 말고 위 명령만 다시 실행한다. 사람의 입력이나 수동 YAML 수정은 없다.
 
+재실행 시 terminal marker가 유효한 단계는 다음처럼 즉시 건너뛴다.
+
+```text
+[CALIBRATION SKIPPED] ... retraining=0
+[PARENT FREEZE SKIPPED] ... recompute=0
+[JOINT SWEEP SKIPPED] ... retraining=0
+[DECLARED FIDELITY SKIPPED] ... rerun=0
+[LATEX SKIPPED] ... rerun=0
+```
+
+완료 마커가 없는 partial 단계만 재개한다. 유닛마다 `[UNIT REUSED]` 또는
+`[UNIT PENDING] ... reason=...`을 출력하므로 재학습 여부와 이유를 로그에서
+구분할 수 있다. SFT는 `[SFT_CACHE] HIT ... training_skipped=true`일 때
+다시 학습하지 않는다.
+
 ## 전체 흐름
 
 실행 순서:
@@ -51,12 +66,29 @@ freeze 기록을 남긴 뒤 자동으로 다음 단계로 진행한다.
 Joint 로그는 `CURRENT_BEST`에 판정 상태와 closest trial을, `PROGRESS`에
 현재 trial, 전체 완료 수, 실행 시간과 `eta_seconds`를 주기적으로 출력한다.
 
+현재 최상위 단계와 마지막 실패는 다음 두 파일에서 즉시 확인한다.
+
+```text
+<RUN_ROOT>/CURRENT_STAGE.txt
+<RUN_ROOT>/LAST_ERROR.txt
+```
+
+최상위 로그에는 30초마다 `[STAGE i/6] RUNNING` heartbeat가 찍힌다. 최종화
+내부 단계는 `<RUN_ROOT>/final/FINAL_CURRENT_STAGE.json`과
+`[FINALIZE STAGE i/7]` 로그로 확인한다. 오류 시 `LAST_ERROR.txt`에는 stage,
+exit code, line, command, 통합 로그 경로가 기록된다.
+
+각 최상위 단계는 별도 process group에서 실행된다. 오류, `Ctrl-C`, 종료 시
+해당 단계의 자식 프로세스에 `TERM`을 보내고 제한 시간 뒤 남은 프로세스만
+`KILL`한다. 한 GPU 유닛이 실패하면 같은 trial에서 실행 중인 다른 GPU 유닛도
+종료하고 회수한 뒤 오류를 반환한다. 다른 실험의 프로세스는 건드리지 않는다.
+
 현재 Parent calibration은 resolved proposal을 생성하면 exit `0`으로
 종료하고 자동 freeze 검증 단계로 진행한다. 이전 checkout에서 생성된
 exit `4` 경계도 재개 호환성을 위해 원큐 실행기가 정상으로 받아들인다.
 Exit `3` (`PARENT_CALIBRATION_UNRESOLVED`)은 그대로 중단한다.
 
-세 단계는 모두 저장소의 `.venv/bin/python`을 사용한다. 환경 bootstrap은
+모든 단계는 저장소의 `.venv/bin/python`을 사용한다. 환경 bootstrap은
 `torch==2.7.1`을 항상 검증하며, `.venv`가 정상이고 버전이 정확하면 재설치하지
 않는다.
 

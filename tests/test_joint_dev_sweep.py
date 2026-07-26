@@ -28,6 +28,7 @@ from experiments.paper.run_joint_dev_sweep import (
     candidate_score,
     evaluate_cell,
     evaluate_trial,
+    joint_sweep_completion,
     validate_spec,
 )
 
@@ -646,3 +647,73 @@ def test_lane_failure_terminates_and_reaps_other_gpu_process(tmp_path):
     pid = int(slow_pid.read_text(encoding="utf-8"))
     with pytest.raises(ProcessLookupError):
         os.kill(pid, 0)
+
+
+def test_joint_completion_accepts_legacy_draft_without_gpu_work(tmp_path):
+    setting = "tofu_qwen25_1p5b"
+    root = tmp_path / "joint"
+    trial = root / "trials" / "winner"
+    runtime = trial / "config" / "tofu_v4.local.yaml"
+    freeze = tmp_path / "parent_freeze.yaml"
+    comparison = trial / "joint_comparison.json"
+    freeze.write_text("status: frozen\n", encoding="utf-8")
+    runtime.parent.mkdir(parents=True)
+    runtime.write_text(
+        yaml.safe_dump(
+            {
+                "settings": {
+                    setting: {"parent_freeze": str(freeze.resolve())}
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    comparison.write_text('{"passed": true}\n', encoding="utf-8")
+    (trial / "trial.json").write_text(
+        json.dumps(
+            {"resolved_configs": {"runtime": str(runtime.resolve())}}
+        ),
+        encoding="utf-8",
+    )
+    (root / "BEST.json").write_text(
+        json.dumps(
+            {
+                "status": "draft",
+                "human_review_required": True,
+                "development_only": True,
+                "target_used": False,
+                "trial_dir": str(trial.resolve()),
+                "recommended_runtime": str(runtime.resolve()),
+                "joint_comparison": str(comparison.resolve()),
+            }
+        ),
+        encoding="utf-8",
+    )
+    (root / "SWEEP_STATUS.json").write_text(
+        json.dumps(
+            {
+                "status": "joint_best",
+                "terminal": True,
+                "exit_code": 0,
+                "target_used": False,
+                "trial_dir": str(trial.resolve()),
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    complete, _reason = joint_sweep_completion(
+        root,
+        setting=setting,
+        parent_freeze=freeze,
+    )
+    assert complete
+
+    comparison.write_text('{"passed": false}\n', encoding="utf-8")
+    complete, reason = joint_sweep_completion(
+        root,
+        setting=setting,
+        parent_freeze=freeze,
+    )
+    assert not complete
+    assert "comparison" in reason
