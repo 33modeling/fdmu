@@ -34,9 +34,11 @@ def reconcile(queue_root: Path, model_id: str, code_commit: str) -> list[str]:
                 f"{unit_id}:{unit.get('code_commit', 'legacy-unpinned')}"
             )
     if claimed_mismatches:
-        raise RuntimeError(
-            "cannot re-pin active model units; stop their owning workers first: "
-            + ", ".join(claimed_mismatches)
+        print(
+            "commit reconciliation preserving active model units at their "
+            "original commit; they will finish under the existing claim: "
+            + ", ".join(claimed_mismatches),
+            flush=True,
         )
 
     stale_ids = set()
@@ -56,7 +58,8 @@ def reconcile(queue_root: Path, model_id: str, code_commit: str) -> list[str]:
         )
     print(
         f"commit reconciliation model={model_id} commit={code_commit} "
-        f"repinned={len(reconciled)} units={reconciled}",
+        f"repinned={len(reconciled)} units={reconciled} "
+        f"active_deferred={len(claimed_mismatches)}",
         flush=True,
     )
     return reconciled
