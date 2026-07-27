@@ -44,96 +44,96 @@ trials:
   - id: a050-k40-lr3e5-s120-m4
     alpha: 0.50
     Kp: 40
-    repair: {step_size: 3.0e-5, max_steps: 120, m_ref: 4, ridge_lambda: 1.0e-4}
+    repair: {step_size: 3.0e-5, max_steps: 120, batch_size: 1, m_ref: 4, ridge_lambda: 1.0e-4, epsilon_tok: 0.02, epsilon_ex: 0.02}
   - id: a025-k40-lr3e5-s120-m4
     alpha: 0.25
     Kp: 40
-    repair: {step_size: 3.0e-5, max_steps: 120, m_ref: 4, ridge_lambda: 1.0e-4}
+    repair: {step_size: 3.0e-5, max_steps: 120, batch_size: 1, m_ref: 4, ridge_lambda: 1.0e-4, epsilon_tok: 0.02, epsilon_ex: 0.02}
   - id: a075-k40-lr3e5-s120-m4
     alpha: 0.75
     Kp: 40
-    repair: {step_size: 3.0e-5, max_steps: 120, m_ref: 4, ridge_lambda: 1.0e-4}
+    repair: {step_size: 3.0e-5, max_steps: 120, batch_size: 1, m_ref: 4, ridge_lambda: 1.0e-4, epsilon_tok: 0.02, epsilon_ex: 0.02}
   - id: a050-k20-lr3e5-s120-m4
     alpha: 0.50
     Kp: 20
-    repair: {step_size: 3.0e-5, max_steps: 120, m_ref: 4, ridge_lambda: 1.0e-4}
+    repair: {step_size: 3.0e-5, max_steps: 120, batch_size: 1, m_ref: 4, ridge_lambda: 1.0e-4, epsilon_tok: 0.02, epsilon_ex: 0.02}
   - id: a050-k80-lr3e5-s120-m4
     alpha: 0.50
     Kp: 80
-    repair: {step_size: 3.0e-5, max_steps: 120, m_ref: 4, ridge_lambda: 1.0e-4}
+    repair: {step_size: 3.0e-5, max_steps: 120, batch_size: 1, m_ref: 4, ridge_lambda: 1.0e-4, epsilon_tok: 0.02, epsilon_ex: 0.02}
   - id: a050-k40-lr1e5-s240-m4
     alpha: 0.50
     Kp: 40
-    repair: {step_size: 1.0e-5, max_steps: 240, m_ref: 4, ridge_lambda: 1.0e-4}
+    repair: {step_size: 1.0e-5, max_steps: 240, batch_size: 1, m_ref: 4, ridge_lambda: 1.0e-4, epsilon_tok: 0.02, epsilon_ex: 0.02}
   - id: a050-k40-lr3e5-s240-m4
     alpha: 0.50
     Kp: 40
-    repair: {step_size: 3.0e-5, max_steps: 240, m_ref: 4, ridge_lambda: 1.0e-4}
+    repair: {step_size: 3.0e-5, max_steps: 240, batch_size: 1, m_ref: 4, ridge_lambda: 1.0e-4, epsilon_tok: 0.02, epsilon_ex: 0.02}
   - id: a050-k40-lr1e4-s120-m4
     alpha: 0.50
     Kp: 40
-    repair: {step_size: 1.0e-4, max_steps: 120, m_ref: 4, ridge_lambda: 1.0e-4}
+    repair: {step_size: 1.0e-4, max_steps: 120, batch_size: 1, m_ref: 4, ridge_lambda: 1.0e-4, epsilon_tok: 0.02, epsilon_ex: 0.02}
   - id: a025-k80-lr1e5-s240-m8
     alpha: 0.25
     Kp: 80
-    repair: {step_size: 1.0e-5, max_steps: 240, m_ref: 8, ridge_lambda: 1.0e-4}
+    repair: {step_size: 1.0e-5, max_steps: 240, batch_size: 1, m_ref: 8, ridge_lambda: 1.0e-4, epsilon_tok: 0.02, epsilon_ex: 0.02}
   - id: a075-k80-lr1e5-s240-m8
     alpha: 0.75
     Kp: 80
-    repair: {step_size: 1.0e-5, max_steps: 240, m_ref: 8, ridge_lambda: 1.0e-4}
+    repair: {step_size: 1.0e-5, max_steps: 240, batch_size: 1, m_ref: 8, ridge_lambda: 1.0e-4, epsilon_tok: 0.02, epsilon_ex: 0.02}
   - id: a050-k80-lr3e5-s240-m8
     alpha: 0.50
     Kp: 80
-    repair: {step_size: 3.0e-5, max_steps: 240, m_ref: 8, ridge_lambda: 1.0e-3}
+    repair: {step_size: 3.0e-5, max_steps: 240, batch_size: 1, m_ref: 8, ridge_lambda: 1.0e-3, epsilon_tok: 0.02, epsilon_ex: 0.02}
   - id: a050-k40-lr1e5-s360-m8
     alpha: 0.50
     Kp: 40
-    repair: {step_size: 1.0e-5, max_steps: 360, m_ref: 8, ridge_lambda: 1.0e-3}
+    repair: {step_size: 1.0e-5, max_steps: 360, batch_size: 1, m_ref: 8, ridge_lambda: 1.0e-3, epsilon_tok: 0.02, epsilon_ex: 0.02}
   - id: a025-k20-lr1e5-s240-m4
     alpha: 0.25
     Kp: 20
-    repair: {step_size: 1.0e-5, max_steps: 240, m_ref: 4, ridge_lambda: 1.0e-4}
+    repair: {step_size: 1.0e-5, max_steps: 240, batch_size: 1, m_ref: 4, ridge_lambda: 1.0e-4, epsilon_tok: 0.02, epsilon_ex: 0.02}
   - id: a075-k20-lr1e5-s240-m4
     alpha: 0.75
     Kp: 20
-    repair: {step_size: 1.0e-5, max_steps: 240, m_ref: 4, ridge_lambda: 1.0e-4}
+    repair: {step_size: 1.0e-5, max_steps: 240, batch_size: 1, m_ref: 4, ridge_lambda: 1.0e-4, epsilon_tok: 0.02, epsilon_ex: 0.02}
   - id: a025-k40-lr1e5-s360-m8
     alpha: 0.25
     Kp: 40
-    repair: {step_size: 1.0e-5, max_steps: 360, m_ref: 8, ridge_lambda: 1.0e-3}
+    repair: {step_size: 1.0e-5, max_steps: 360, batch_size: 1, m_ref: 8, ridge_lambda: 1.0e-3, epsilon_tok: 0.02, epsilon_ex: 0.02}
   - id: a075-k40-lr1e5-s360-m8
     alpha: 0.75
     Kp: 40
-    repair: {step_size: 1.0e-5, max_steps: 360, m_ref: 8, ridge_lambda: 1.0e-3}
+    repair: {step_size: 1.0e-5, max_steps: 360, batch_size: 1, m_ref: 8, ridge_lambda: 1.0e-3, epsilon_tok: 0.02, epsilon_ex: 0.02}
   - id: a025-k80-lr3e5-s240-m8
     alpha: 0.25
     Kp: 80
-    repair: {step_size: 3.0e-5, max_steps: 240, m_ref: 8, ridge_lambda: 1.0e-3}
+    repair: {step_size: 3.0e-5, max_steps: 240, batch_size: 1, m_ref: 8, ridge_lambda: 1.0e-3, epsilon_tok: 0.02, epsilon_ex: 0.02}
   - id: a075-k80-lr3e5-s240-m8
     alpha: 0.75
     Kp: 80
-    repair: {step_size: 3.0e-5, max_steps: 240, m_ref: 8, ridge_lambda: 1.0e-3}
+    repair: {step_size: 3.0e-5, max_steps: 240, batch_size: 1, m_ref: 8, ridge_lambda: 1.0e-3, epsilon_tok: 0.02, epsilon_ex: 0.02}
   - id: a050-k20-lr2e5-s240-m8
     alpha: 0.50
     Kp: 20
-    repair: {step_size: 2.0e-5, max_steps: 240, m_ref: 8, ridge_lambda: 1.0e-4}
+    repair: {step_size: 2.0e-5, max_steps: 240, batch_size: 1, m_ref: 8, ridge_lambda: 1.0e-4, epsilon_tok: 0.02, epsilon_ex: 0.02}
   - id: a050-k40-lr2e5-s360-m8
     alpha: 0.50
     Kp: 40
-    repair: {step_size: 2.0e-5, max_steps: 360, m_ref: 8, ridge_lambda: 1.0e-4}
+    repair: {step_size: 2.0e-5, max_steps: 360, batch_size: 1, m_ref: 8, ridge_lambda: 1.0e-4, epsilon_tok: 0.02, epsilon_ex: 0.02}
   - id: a050-k80-lr2e5-s360-m8
     alpha: 0.50
     Kp: 80
-    repair: {step_size: 2.0e-5, max_steps: 360, m_ref: 8, ridge_lambda: 1.0e-3}
+    repair: {step_size: 2.0e-5, max_steps: 360, batch_size: 1, m_ref: 8, ridge_lambda: 1.0e-3, epsilon_tok: 0.02, epsilon_ex: 0.02}
   - id: a025-k40-lr5e5-s240-m4
     alpha: 0.25
     Kp: 40
-    repair: {step_size: 5.0e-5, max_steps: 240, m_ref: 4, ridge_lambda: 1.0e-4}
+    repair: {step_size: 5.0e-5, max_steps: 240, batch_size: 1, m_ref: 4, ridge_lambda: 1.0e-4, epsilon_tok: 0.02, epsilon_ex: 0.02}
   - id: a075-k40-lr5e5-s240-m4
     alpha: 0.75
     Kp: 40
-    repair: {step_size: 5.0e-5, max_steps: 240, m_ref: 4, ridge_lambda: 1.0e-4}
+    repair: {step_size: 5.0e-5, max_steps: 240, batch_size: 1, m_ref: 4, ridge_lambda: 1.0e-4, epsilon_tok: 0.02, epsilon_ex: 0.02}
   - id: a050-k80-lr5e6-s480-m8
     alpha: 0.50
     Kp: 80
-    repair: {step_size: 5.0e-6, max_steps: 480, m_ref: 8, ridge_lambda: 1.0e-3}
+    repair: {step_size: 5.0e-6, max_steps: 480, batch_size: 1, m_ref: 8, ridge_lambda: 1.0e-3, epsilon_tok: 0.02, epsilon_ex: 0.02}
