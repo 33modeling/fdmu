@@ -65,6 +65,8 @@ export HF_HUB_OFFLINE="${HF_HUB_OFFLINE:-1}"
 export TRANSFORMERS_OFFLINE="${TRANSFORMERS_OFFLINE:-1}"
 export HF_DATASETS_OFFLINE="${HF_DATASETS_OFFLINE:-1}"
 export PYTORCH_CUDA_ALLOC_CONF="${PYTORCH_CUDA_ALLOC_CONF:-expandable_segments:True}"
+export RSUS_REPAIR_BASIS_STORAGE="${RSUS_REPAIR_BASIS_STORAGE:-cpu}"
+export RSUS_REPAIR_MEMORY_LOG="${RSUS_REPAIR_MEMORY_LOG:-1}"
 
 "$PYTHON" - <<'PY'
 from rsus.data.tofu import _load_tofu_config
@@ -102,6 +104,30 @@ for required in "$MODEL_PATH"; do
     exit 2
   fi
 done
+
+"$PYTHON" - "$MODEL_PATH" 8 <<'PY'
+import json
+import sys
+from pathlib import Path
+
+model_path = Path(sys.argv[1])
+last_n = int(sys.argv[2])
+config = json.loads((model_path / "config.json").read_text(encoding="utf-8"))
+hidden = int(config["hidden_size"])
+intermediate = int(config["intermediate_size"])
+layers = int(config["num_hidden_layers"])
+if not 0 < last_n <= layers:
+    raise SystemExit(f"invalid block_last_n={last_n} for layers={layers}")
+block_parameters = hidden * intermediate * last_n
+vector_bytes = block_parameters * 4
+print(
+    "[memory-plan] "
+    f"dtype=float32 block_last_n={last_n} "
+    f"block_parameters={block_parameters:,} "
+    f"one_gradient_vector_gib={vector_bytes / 2**30:.3f} "
+    "basis_storage=cpu gpu_basis_growth_gib=0.000"
+)
+PY
 
 if command -v nvidia-smi >/dev/null; then
   nvidia-smi --query-gpu=index,name,memory.total,memory.used --format=csv,noheader

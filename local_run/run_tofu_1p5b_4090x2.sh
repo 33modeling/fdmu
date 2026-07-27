@@ -16,6 +16,8 @@ export JOINT_ROOT="${JOINT_ROOT:-$RESULTS_ROOT}"
 export FINAL_ROOT="${FINAL_ROOT:-$RUN_ROOT/final}"
 export FIDELITY_ROOT="${FIDELITY_ROOT:-$RUN_ROOT/fidelity}"
 export PARENT_FREEZE="${PARENT_FREEZE:-$CALIBRATION_ROOT/freeze/tofu_parent_freeze_1p5b.yaml}"
+export RSUS_REPAIR_BASIS_STORAGE="${RSUS_REPAIR_BASIS_STORAGE:-cpu}"
+export RSUS_REPAIR_MEMORY_LOG="${RSUS_REPAIR_MEMORY_LOG:-1}"
 
 timestamp() {
   date -u '+%FT%TZ'
@@ -252,6 +254,8 @@ printf '[CONFIG] repo=%s python=%s gpus=%s run_root=%s\n' \
 printf '[STORAGE] calibration=%s sft_cache=%s sweep=%s final=%s\n' \
   "$CALIBRATION_ROOT" "$SFT_CACHE_ROOT" "$JOINT_ROOT" "$FINAL_ROOT"
 printf '[STORAGE] parent_freeze=%s fidelity=%s\n' "$PARENT_FREEZE" "$FIDELITY_ROOT"
+printf '[MEMORY] repair_basis_storage=%s repair_memory_log=%s\n' \
+  "$RSUS_REPAIR_BASIS_STORAGE" "$RSUS_REPAIR_MEMORY_LOG"
 printf '[STATUS] current_stage=%s\n' "$STATUS_FILE"
 printf '[STATUS] last_error=%s\n' "$ERROR_FILE"
 rm -f "$ERROR_FILE"

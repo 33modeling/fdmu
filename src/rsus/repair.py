@@ -21,6 +21,7 @@ frozen with a run; it must not be changed after target outcomes are opened.
 from __future__ import annotations
 
 import hashlib
+import os
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from typing import Callable, Iterator, Literal, Sequence
@@ -440,6 +441,8 @@ def _active_basis(
     streams,
     cfg: RepairConfig,
     budget: _TokenBudget,
+    *,
+    storage_device: torch.device,
 ) -> tuple[list[ParamVec], int, int]:
     """Return gradients of every active exact token/example constraint."""
     model.zero_grad(set_to_none=True)
@@ -472,7 +475,20 @@ def _active_basis(
                     gradient = grads_of(selected)
                     norm_sq = float(vec_dot(gradient, gradient))
                     if norm_sq > 0.0:
-                        basis.append(gradient)
+                        gradient_device = next(iter(gradient.values())).device
+                        if gradient_device == storage_device:
+                            basis.append(gradient)
+                        else:
+                            basis.append(
+                                {
+                                    name: value.to(
+                                        device=storage_device,
+                                        non_blocking=False,
+                                    )
+                                    for name, value in gradient.items()
+                                }
+                            )
+                            del gradient
                     else:
                         zero += 1
     model.zero_grad(set_to_none=True)
@@ -543,23 +559,109 @@ def damped_constraint_filter(
         raise RepairContractError("ridge_lambda must be strictly positive")
     if not basis:
         return {name: value.clone() for name, value in gradient.items()}
+    basis_devices = {
+        value.device
+        for constraint_gradient in basis
+        for value in constraint_gradient.values()
+    }
+    if len(basis_devices) != 1:
+        raise RepairContractError(
+            f"constraint-gradient basis spans multiple devices: {basis_devices}"
+        )
+    basis_device = next(iter(basis_devices))
+    gradient_for_solve = (
+        gradient
+        if all(value.device == basis_device for value in gradient.values())
+        else {
+            name: value.to(device=basis_device, non_blocking=False)
+            for name, value in gradient.items()
+        }
+    )
     size = len(basis)
     gram = torch.empty((size, size), dtype=torch.float64)
     rhs = torch.empty(size, dtype=torch.float64)
     for i, left in enumerate(basis):
-        rhs[i] = float(vec_dot(left, gradient))
-        for j, right in enumerate(basis):
-            gram[i, j] = float(vec_dot(left, right))
+        rhs[i] = float(vec_dot(left, gradient_for_solve))
+        for j in range(i, size):
+            value = float(vec_dot(left, basis[j]))
+            gram[i, j] = value
+            gram[j, i] = value
     coefficients = torch.linalg.solve(
         gram + ridge_lambda * torch.eye(size, dtype=torch.float64), rhs
     )
+    if gradient_for_solve is not gradient:
+        del gradient_for_solve
     filtered = {name: value.clone() for name, value in gradient.items()}
-    for coefficient, constraint_gradient in zip(coefficients.tolist(), basis):
-        filtered = {
-            name: filtered[name] - coefficient * constraint_gradient[name]
-            for name in filtered
-        }
+    with torch.no_grad():
+        for coefficient, constraint_gradient in zip(coefficients.tolist(), basis):
+            for name, destination in filtered.items():
+                source = constraint_gradient[name]
+                if source.device != destination.device:
+                    source = source.to(
+                        device=destination.device,
+                        non_blocking=False,
+                    )
+                destination.add_(source, alpha=-coefficient)
     return filtered
+
+
+def _basis_storage_device(
+    selected: dict[str, torch.nn.Parameter],
+) -> torch.device:
+    devices = {parameter.device for parameter in selected.values()}
+    if len(devices) != 1:
+        raise RepairContractError(
+            f"repair block spans multiple devices: {sorted(map(str, devices))}"
+        )
+    model_device = next(iter(devices))
+    policy = os.environ.get("RSUS_REPAIR_BASIS_STORAGE", "model").strip().lower()
+    if policy == "auto":
+        return torch.device("cpu") if model_device.type == "cuda" else model_device
+    if policy == "cpu":
+        return torch.device("cpu")
+    if policy == "model":
+        return model_device
+    raise RepairContractError(
+        "RSUS_REPAIR_BASIS_STORAGE must be one of: model, cpu, auto"
+    )
+
+
+def _param_vec_nbytes(vector: ParamVec) -> int:
+    return sum(value.numel() * value.element_size() for value in vector.values())
+
+
+def _repair_memory_status(
+    event: str,
+    *,
+    selected: dict[str, torch.nn.Parameter],
+    storage_device: torch.device,
+    basis: Sequence[ParamVec],
+) -> None:
+    if os.environ.get("RSUS_REPAIR_MEMORY_LOG", "0") != "1":
+        return
+    selected_bytes = sum(
+        parameter.numel() * parameter.element_size()
+        for parameter in selected.values()
+    )
+    basis_bytes = sum(_param_vec_nbytes(vector) for vector in basis)
+    fields = [
+        "[repair-memory]",
+        f"event={event}",
+        f"basis_storage={storage_device}",
+        f"block_gib={selected_bytes / 2**30:.3f}",
+        f"basis_vectors={len(basis)}",
+        f"basis_gib={basis_bytes / 2**30:.3f}",
+    ]
+    model_device = next(iter(selected.values())).device
+    if model_device.type == "cuda":
+        fields.extend(
+            (
+                f"cuda_allocated_gib={torch.cuda.memory_allocated(model_device) / 2**30:.3f}",
+                f"cuda_reserved_gib={torch.cuda.memory_reserved(model_device) / 2**30:.3f}",
+                f"cuda_peak_gib={torch.cuda.max_memory_allocated(model_device) / 2**30:.3f}",
+            )
+        )
+    print(" ".join(fields), flush=True)
 
 
 def _margin_report(
@@ -614,13 +716,26 @@ def run_repair(
     step_size = cfg.step_size
     stopped_reason = "max_steps"
     reference: RepairReference | None = None
+    basis_peak_bytes = 0
+    basis_peak_vectors = 0
 
     with Meter(rec), _count_model_tokens(model, budget):
         selected = block.select(model)
-        velocity: ParamVec = {name: torch.zeros_like(param) for name, param in selected.items()}
+        basis_storage = _basis_storage_device(selected)
+        velocity: ParamVec | None = (
+            {name: torch.zeros_like(param) for name, param in selected.items()}
+            if cfg.momentum
+            else None
+        )
         streams = None
         basis: list[ParamVec] = []
         active_count = zero_count = 0
+        _repair_memory_status(
+            "start",
+            selected=selected,
+            storage_device=basis_storage,
+            basis=basis,
+        )
         try:
             reference = build_repair_reference(
                 model, forget_guard, neutral, utility_guard, cfg.batch_size
@@ -638,8 +753,30 @@ def run_repair(
             while n_accepted < cfg.max_steps:
                 refreshed = n_accepted % cfg.m_ref == 0
                 if refreshed:
+                    # Release the previous refresh before constructing the next
+                    # one. Assignment alone keeps both lists alive until the
+                    # right-hand side completes and can double peak memory.
+                    basis.clear()
+                    if next(iter(selected.values())).device.type == "cuda":
+                        torch.cuda.empty_cache()
                     basis, active_count, zero_count = _active_basis(
-                        model, selected, streams, cfg, budget
+                        model,
+                        selected,
+                        streams,
+                        cfg,
+                        budget,
+                        storage_device=basis_storage,
+                    )
+                    current_basis_bytes = sum(
+                        _param_vec_nbytes(vector) for vector in basis
+                    )
+                    basis_peak_bytes = max(basis_peak_bytes, current_basis_bytes)
+                    basis_peak_vectors = max(basis_peak_vectors, len(basis))
+                    _repair_memory_status(
+                        "basis_refresh",
+                        selected=selected,
+                        storage_device=basis_storage,
+                        basis=basis,
                     )
 
                 gradient = _repair_gradient(
@@ -651,13 +788,17 @@ def run_repair(
                     cfg,
                     budget,
                 )
-                candidate_velocity = {
-                    name: cfg.momentum * velocity[name] + gradient[name]
-                    for name in velocity
-                }
+                candidate_velocity = gradient
+                if cfg.momentum:
+                    assert velocity is not None
+                    with torch.no_grad():
+                        for name, value in candidate_velocity.items():
+                            value.add_(velocity[name], alpha=cfg.momentum)
                 direction = damped_constraint_filter(
                     candidate_velocity, basis, cfg.ridge_lambda
                 )
+                del gradient
+                del candidate_velocity
                 before = save_params(selected)
                 target_step = n_accepted + 1
                 accepted = False
@@ -695,7 +836,6 @@ def run_repair(
                                 load_params_(selected, before)
                                 raise
                         n_accepted = next_accepted
-                        velocity = {name: value.clone() for name, value in direction.items()}
                         events.append(
                             RepairEvent(
                                 target_step,
@@ -711,6 +851,12 @@ def run_repair(
                             )
                         )
                         accepted = True
+                        # Direction tensors are already detached and are not
+                        # mutated after acceptance; transferring ownership
+                        # avoids another full block-sized clone.
+                        if cfg.momentum:
+                            velocity = direction
+                        del direction
                         if should_save:
                             saved_steps.append(n_accepted)
                         break
@@ -737,7 +883,9 @@ def run_repair(
                     )
                     step_size *= cfg.retry_shrink
 
+                del before
                 if not accepted:
+                    del direction
                     stopped_reason = "retry_exhausted"
                     break
 
@@ -761,6 +909,9 @@ def run_repair(
             "processed_tokens": budget.used,
             "accounting": "forward_tokens_plus_backward_token_equivalents",
             "constraint_reduction": cfg.constraint_reduction,
+            "basis_storage": str(basis_storage),
+            "basis_peak_vectors": basis_peak_vectors,
+            "basis_peak_bytes": basis_peak_bytes,
         }
     )
     return RepairResult(

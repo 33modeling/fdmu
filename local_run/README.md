@@ -13,6 +13,13 @@ cd /path/to/fdmu
 GPU_IDS=0,1 bash local_run/run_tofu_1p5b_4090x2.sh
 ```
 
+4090 경로는 FP32 수식과 마지막 8개 down-projection 블록을 유지하되,
+제약-gradient basis를 기본적으로 CPU RAM에 보관한다. Qwen2.5-1.5B의
+해당 블록은 gradient 벡터 하나가 약 0.41GiB이므로 GPU에 basis를 누적하지
+않는다. 로그의 `[memory-plan]`, `[repair-memory]`, `[CUDA_OOM]` 행에서
+계산값과 실제 peak를 확인할 수 있다. 특별한 검증 목적이 아니면
+`RSUS_REPAIR_BASIS_STORAGE`를 `model`로 덮어쓰지 않는다.
+
 런처는 완료된 calibration unit을 검증해 재사용하고, `pending=0`이면 parent
 freeze를 자동 생성·검증한 뒤 joint sweep과 최종 LaTeX까지 계속 진행한다.
 오류 후 같은 명령을 실행하면 완료된 단계는 재사용하고 미완료 단계부터 이어진다.

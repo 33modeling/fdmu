@@ -96,6 +96,19 @@ class LauncherContractTests(unittest.TestCase):
         self.assertIn('PIPELINE_LOG="$RUN_ROOT/launcher_logs/', top)
         self.assertNotIn('pip install "torch==', calibration)
         self.assertNotIn('pip install "torch==', sweep)
+        self.assertIn(
+            'RSUS_REPAIR_BASIS_STORAGE="${RSUS_REPAIR_BASIS_STORAGE:-cpu}"',
+            top,
+        )
+        self.assertIn(
+            'RSUS_REPAIR_BASIS_STORAGE="${RSUS_REPAIR_BASIS_STORAGE:-cpu}"',
+            sweep,
+        )
+        self.assertIn(
+            'RSUS_REPAIR_MEMORY_LOG="${RSUS_REPAIR_MEMORY_LOG:-1}"',
+            sweep,
+        )
+        self.assertIn("one_gradient_vector_gib=", sweep)
 
     def test_declared_fidelity_is_required_before_finalization(self):
         shell = (

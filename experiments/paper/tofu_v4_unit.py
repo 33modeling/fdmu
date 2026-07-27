@@ -15,6 +15,7 @@ import os
 from pathlib import Path
 import re
 import sys
+import traceback
 from types import SimpleNamespace
 from typing import Any, Iterable, Mapping, Sequence
 
@@ -1498,7 +1499,40 @@ def main(argv: list[str] | None = None) -> int:
         run_unit(parse_args(argv))
         return 0
     except (TOFUUnitError, ValueError, RuntimeError, OSError) as error:
-        print(f"TOFU PDF-v4 unit failed: {error}", file=sys.stderr)
+        print(
+            f"TOFU PDF-v4 unit failed: {type(error).__name__}: {error}",
+            file=sys.stderr,
+            flush=True,
+        )
+        traceback.print_exc()
+        if "out of memory" in str(error).lower():
+            try:
+                import torch
+
+                if torch.cuda.is_available():
+                    device = torch.cuda.current_device()
+                    print(
+                        "[CUDA_OOM] "
+                        f"device={device} name={torch.cuda.get_device_name(device)} "
+                        f"allocated_gib={torch.cuda.memory_allocated(device) / 2**30:.3f} "
+                        f"reserved_gib={torch.cuda.memory_reserved(device) / 2**30:.3f} "
+                        f"peak_gib={torch.cuda.max_memory_allocated(device) / 2**30:.3f} "
+                        f"basis_storage={os.environ.get('RSUS_REPAIR_BASIS_STORAGE', 'model')}",
+                        file=sys.stderr,
+                        flush=True,
+                    )
+                    print(
+                        torch.cuda.memory_summary(device=device, abbreviated=True),
+                        file=sys.stderr,
+                        flush=True,
+                    )
+            except Exception as diagnostic_error:
+                print(
+                    "[CUDA_OOM] memory diagnostics failed: "
+                    f"{type(diagnostic_error).__name__}: {diagnostic_error}",
+                    file=sys.stderr,
+                    flush=True,
+                )
         return 2
 
 

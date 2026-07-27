@@ -10,6 +10,7 @@ from rsus.data.substrate import make_substrate
 from rsus.repair import (
     RepairConfig,
     RepairContractError,
+    _basis_storage_device,
     build_repair_reference,
     damped_constraint_filter,
     run_repair,
@@ -35,6 +36,21 @@ def test_damped_filter_matches_closed_form():
     output = damped_constraint_filter(gradient, basis, ridge_lambda=1.0)
     # [I - e1 (e1^T e1 + 1)^-1 e1^T] [2, 3] = [1, 3]
     assert torch.equal(output["w"], torch.tensor([1.0, 3.0], dtype=torch.float64))
+
+
+def test_cpu_basis_storage_policy_keeps_the_model_device(monkeypatch):
+    model = build_tiny(2).eval()
+    selected = mlp_down_last_layers(model, 1).select(model)
+    monkeypatch.setenv("RSUS_REPAIR_BASIS_STORAGE", "cpu")
+    assert _basis_storage_device(selected) == torch.device("cpu")
+
+
+def test_invalid_basis_storage_policy_is_rejected(monkeypatch):
+    model = build_tiny(2).eval()
+    selected = mlp_down_last_layers(model, 1).select(model)
+    monkeypatch.setenv("RSUS_REPAIR_BASIS_STORAGE", "disk")
+    with pytest.raises(RepairContractError, match="model, cpu, auto"):
+        _basis_storage_device(selected)
 
 
 def test_reference_seals_full_neutral_distributions():
@@ -80,6 +96,7 @@ def test_repair_accepts_only_hard_feasible_updates_and_counts_tokens():
         cfg=RepairConfig(
             step_size=1e-5,
             beta=0.5,
+            momentum=0.5,
             max_steps=2,
             batch_size=4,
             m_ref=1,
