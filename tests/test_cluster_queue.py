@@ -166,6 +166,23 @@ def test_model_commit_reconciliation_repins_only_stale_model_units(tmp_path):
     assert untouched["unit"]["code_commit"] == old_commit
 
 
+def test_model_commit_reconciliation_ignores_claim_owner_metadata(tmp_path):
+    from experiments.cluster.reconcile_queue_commit import reconcile
+
+    queue = WorkQueue(tmp_path / "q")
+    current_commit = "2" * 40
+    queue.enqueue(
+        [_unit("aud__qwen25_14b__a181", code_commit=current_commit)]
+    )
+    claim = queue.claim()
+    assert claim is not None
+    assert (
+        queue.root / "claimed" / "aud__qwen25_14b__a181.meta.json"
+    ).is_file()
+
+    assert reconcile(queue.root, "qwen25_14b", current_commit) == []
+
+
 def test_enqueue_serializes_same_unit_producers(tmp_path):
     first_write_entered = threading.Event()
     release_first_write = threading.Event()

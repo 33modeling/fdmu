@@ -24,6 +24,8 @@ def reconcile(queue_root: Path, model_id: str, code_commit: str) -> list[str]:
     queue = WorkQueue(queue_root)
     claimed_mismatches = []
     for path in sorted((queue.root / "claimed").glob("*.json")):
+        if path.name.endswith(".meta.json"):
+            continue
         payload = _payload(path)
         unit = payload["unit"]
         unit_id = str(unit.get("unit_id", path.stem))
