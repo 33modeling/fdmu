@@ -29,9 +29,12 @@ prompt는 제거했으며, 과거 내용은 Git history에서만 확인한다.
 | 주제 | 문서 |
 |---|---|
 | H100 7B/14B campaign과 7B paper backfill | [Channel-matrix README](../experiments/channel_matrix/README.md) |
+| 5개 데이터셋 x 1.5B/7B/14B 확장 | [Local run](../local_run/README.md), [Cluster fleet runbook](CLUSTER_FLEET_RUNBOOK.md) |
 
 14B aggregate는 diagnostic-only다. 7B aggregate와 `render-only`는 완료된
 channel-matrix 결과를 현재 paper evidence/LaTeX 형식으로 변환한다.
+데이터셋 확장 wrapper의 `table_channel_matrix.tex`은 diagnostic-only이며
+PDF-v4 evidence ledger에 자동 publish하지 않는다.
 
 ## 보존 기록
 

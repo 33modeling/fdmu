@@ -45,6 +45,13 @@ def _request_id(cfg: dict, author: int) -> str:
         return f"rwku-t{author:03d}"
     if dataset == "wmdp_bio_mmlu":
         return f"wmdp-r{author:03d}"
+    if dataset == "muse_news":
+        return f"muse-news-r{author:03d}"
+    if dataset == "muse_books":
+        return f"muse-books-r{author:03d}"
+    if dataset == "pistol":
+        sample = int(cfg.get("common", {}).get("pistol_sample", 2))
+        return f"pistol-s{sample}-e{author:03d}"
     return f"tofu-a{author}"
 
 

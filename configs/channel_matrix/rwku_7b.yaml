@@ -39,20 +39,8 @@ common:
   probe_dirs: 64
   probe_norm_eta: 3.0e-3
   probe_seed: 0
-  sentence_encoder: sentence-transformers/all-MiniLM-L6-v2
 
-# Frozen randomized-sensitivity operating point evaluated on the disjoint
-# development pool. fd_fidelity.py grew --dataset rwku support on 2026-07-23;
-# the audit phase requires this certificate to exist and pass.
-fidelity:
-  author: 0
-  n_candidates: 128
-  candidate_seed: 314159
-  min_rho_ab: 0.70
-  min_rho_bc: 0.80
-  min_rho_ac: 0.80
-  min_eff_ratio: 0.90
-  min_frac_changed: 0.90
+fidelity: null
 
 calibration:
   authors: [0, 1]
@@ -151,7 +139,5 @@ audit:
   # audit still measures every column (reported as notreached boundaries).
   objectives: [repnoise]
   stress_objectives: [ga, graddiff, npo, simnpo, gru, rmu, circuit_breakers]
-  predictors: [grad_norm, fd_norm, knn_feature, knn_embed, knn_lexical, fd, random_rank]
+  predictors: [grad_norm, fd_norm, knn_feature, knn_lexical, fd, random_rank]
   objective_freeze: objective_freeze_rwku7b.yaml
-  fidelity_certificates:
-    qwen25_7b: runs/channel_matrix_rwku7b/fidelity/qwen25_7b.json

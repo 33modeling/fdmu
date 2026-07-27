@@ -44,21 +44,8 @@ common:
   probe_dirs: 64
   probe_norm_eta: 3.0e-3
   probe_seed: 0
-  sentence_encoder: sentence-transformers/all-MiniLM-L6-v2
 
-# Frozen randomized-sensitivity operating point evaluated on the disjoint
-# development pool via fd_fidelity.py --dataset wmdp_bio_mmlu (the same
-# registry adapter as the gate runs). The 13-subject development pool holds
-# 13 x 8 = 104 candidates, so the certificate covers the complete pool.
-fidelity:
-  author: 0
-  n_candidates: 104
-  candidate_seed: 314159
-  min_rho_ab: 0.70
-  min_rho_bc: 0.80
-  min_rho_ac: 0.80
-  min_eff_ratio: 0.90
-  min_frac_changed: 0.90
+fidelity: null
 
 calibration:
   authors: [0, 1]
@@ -149,7 +136,5 @@ audit:
   # never from audit outcomes.
   objectives: [graddiff, npo, simnpo, gru, rmu, repnoise, circuit_breakers]
   stress_objectives: [ga]
-  predictors: [grad_norm, fd_norm, knn_feature, knn_embed, knn_lexical, fd, random_rank]
+  predictors: [grad_norm, fd_norm, knn_feature, knn_lexical, fd, random_rank]
   objective_freeze: objective_freeze_wmdp7b.yaml
-  fidelity_certificates:
-    qwen25_7b: runs/channel_matrix_wmdp7b/fidelity/qwen25_7b.json

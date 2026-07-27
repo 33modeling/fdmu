@@ -260,6 +260,19 @@ def _wmdp_factory(**kwargs: Any) -> Request:
     return wmdp_request(**values)
 
 
+def _pistol_factory(**kwargs: Any) -> Request:
+    """Lazy wrapper around the official PISTOL edge-level request builder."""
+
+    from rsus.data.pistol import load_pistol_rows, pistol_request
+
+    values = dict(kwargs)
+    if values.get("rows") is None and values.get("tokenizer") is None:
+        raise TypeError("PISTOL adapter needs tokenizer (rows are loaded lazily)")
+    if values.get("rows") is None:
+        values["rows"] = load_pistol_rows(int(values.get("sample", 2)))
+    return pistol_request(**values)
+
+
 def _tofu_roster_id(value: str) -> bool:
     prefix = "tofu-a"
     if not value.startswith(prefix) or not value[len(prefix) :].isdigit():
@@ -288,11 +301,37 @@ def _substrate_roster_id(value: str) -> bool:
 
 
 def _muse_news_roster_id(value: str) -> bool:
-    return value == "muse-news"
+    if value == "muse-news":
+        return True
+    prefix = "muse-news-r"
+    return (
+        value.startswith(prefix)
+        and value[len(prefix) :].isdigit()
+        and 0 <= int(value[len(prefix) :]) < 10
+    )
 
 
 def _muse_books_roster_id(value: str) -> bool:
-    return value == "muse-books"
+    if value == "muse-books":
+        return True
+    prefix = "muse-books-r"
+    return (
+        value.startswith(prefix)
+        and value[len(prefix) :].isdigit()
+        and 0 <= int(value[len(prefix) :]) < 10
+    )
+
+
+def _pistol_roster_id(value: str) -> bool:
+    for sample, total in ((1, 20), (2, 75)):
+        prefix = f"pistol-s{sample}-e"
+        if (
+            value.startswith(prefix)
+            and value[len(prefix) :].isdigit()
+            and 0 <= int(value[len(prefix) :]) < total
+        ):
+            return True
+    return False
 
 
 ADAPTERS = DatasetAdapterRegistry()
@@ -347,14 +386,14 @@ ADAPTERS.register(
             stages=frozenset(
                 {"calibration", "prediction", "protection", "target_evaluation"}
             ),
-            roster_unit="corpus deletion request_id",
+            roster_unit="deterministic forget-QA chunk request_id",
             grouped_candidates=True,
-            native_audit=False,
-            independent_target_roster=False,
+            native_audit=True,
+            independent_target_roster=True,
         ),
         description=(
-            "MUSE-News knowmem corpus request; independent request-level paper "
-            "rosters remain unsupported"
+            "MUSE-News knowmem corpus request plus deterministic diagnostic "
+            "forget-QA chunk requests"
         ),
         roster_id_validator=_muse_news_roster_id,
     )
@@ -369,14 +408,14 @@ ADAPTERS.register(
             stages=frozenset(
                 {"calibration", "prediction", "protection", "target_evaluation"}
             ),
-            roster_unit="corpus deletion request_id",
+            roster_unit="deterministic forget-QA chunk request_id",
             grouped_candidates=True,
-            native_audit=False,
-            independent_target_roster=False,
+            native_audit=True,
+            independent_target_roster=True,
         ),
         description=(
-            "MUSE-Books knowmem corpus request; independent request-level paper "
-            "rosters remain unsupported"
+            "MUSE-Books knowmem corpus request plus deterministic diagnostic "
+            "forget-QA chunk requests"
         ),
         roster_id_validator=_muse_books_roster_id,
     )
@@ -402,6 +441,28 @@ ADAPTERS.register(
             "universe carries the native audit set"
         ),
         roster_id_validator=_wmdp_roster_id,
+    )
+)
+
+ADAPTERS.register(
+    DatasetAdapter(
+        key="pistol",
+        aliases=("PISTOL", "xinchiqiu/PISTOL"),
+        factory=_pistol_factory,
+        capabilities=AdapterCapabilities(
+            stages=frozenset(
+                {"calibration", "prediction", "protection", "target_evaluation"}
+            ),
+            roster_unit="structural edge request_id",
+            grouped_candidates=True,
+            native_audit=True,
+            independent_target_roster=True,
+        ),
+        description=(
+            "PISTOL structural QA: one deletion request per graph edge, with "
+            "retained candidates grouped by edge"
+        ),
+        roster_id_validator=_pistol_roster_id,
     )
 )
 

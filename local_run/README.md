@@ -162,7 +162,58 @@ Parent calibration의 strict gate를 만족하지 못한 parent도 가장 좋은
 Fidelity threshold 실패도 같은 방식으로 결과에 `false`로 기록되며 최종
 `table1.tex`과 `final/RESULT_CONCLUSION.json` 생성을 막지 않는다.
 
-## 2. 범용 단일-arm PDF-v4 진단
+## 2. 데이터셋 확장 1.5B (4090 x2)
+
+다음 5개 wrapper는 모두 같은 실행 계약을 사용한다.
+
+```bash
+bash local_run/run_wmdp_bio_1p5b_4090x2.sh all
+bash local_run/run_muse_news_1p5b_4090x2.sh all
+bash local_run/run_rwku_1p5b_4090x2.sh all
+bash local_run/run_muse_books_1p5b_4090x2.sh all
+bash local_run/run_pistol_1p5b_4090x2.sh all
+```
+
+`all`은 데이터와 tokenizer preflight, 두 calibration request의 GPU 병렬
+실행, target-free 자동 freeze, audit, aggregate, LaTeX까지 수행한다.
+실험을 시작하지 않고 명령만 검증하려면 `plan`, 기존 aggregate에서 LaTeX만
+다시 만들려면 `render`, 현재 파일 상태만 보려면 `status`를 명시한다.
+
+```bash
+bash local_run/run_pistol_1p5b_4090x2.sh plan
+bash local_run/run_pistol_1p5b_4090x2.sh status
+bash local_run/run_pistol_1p5b_4090x2.sh render
+```
+
+기본 저장 위치:
+
+```text
+/rdata/minsoo3.kim/results/dataset_campaigns/<dataset>_qwen25_1p5b/
+  runtime/campaign.yaml
+  sft_cache/
+  calibration/
+  freeze/objective_freeze.yaml
+  audit/
+  aggregate/pooled_channel_report.json
+  aggregate/table_channel_matrix.tex
+  launcher_logs/current.log
+```
+
+다른 디스크를 쓰려면 `RUN_ROOT`, 모델 위치는 `MODEL_PATH`, GPU는
+`GPU_IDS=0,1`로 지정한다. 런타임 config와 freeze는 기존 결과를 보호하기
+위해 같은 `RUN_ROOT`에서 다른 내용으로 덮어쓰지 않는다. 새 grid나 모델
+경로로 재실험할 때는 새 `RUN_ROOT`를 사용한다.
+
+MUSE-News/Books는 공식 corpus split에 독립 request ID가 없으므로 forget QA를
+결정적 chunk로 나눈 진단 request를 사용한다. 제한된 100개 retain QA를
+calibration/audit 후보군으로 겹치지 않게 분리하므로 audit request는 하나이며
+그 단계에서는 GPU 한 장만 활성화되는 것이 정상이다. PISTOL은 공식
+`pistol_data_2`의 graph edge 하나를 request로 사용한다.
+
+이 경로의 `table_channel_matrix.tex`은 channel diagnostic이다. 현재
+PDF-v4 Table 1/2 claim ledger에 자동 publish하지 않는다.
+
+## 3. 범용 단일-arm PDF-v4 진단
 
 이 경로는 paper claim이 아닌 `claim_eligible: false` 로컬 진단이다.
 
@@ -185,6 +236,7 @@ fail closed한다.
 ## 지원 범위
 
 - 4090 x2 공식 자동화 경로는 Qwen2.5-1.5B 개발 sweep이다.
+- 데이터셋 확장 4090 경로는 5개 데이터셋의 channel diagnostic이다.
 - 7B/14B paper campaign은 H100 runbook을 사용한다.
 - 예전 `gate.py`용 하드코딩 래퍼와 외부 문장 인코더 sweep은 현재 PDF-v4
   결과와 섞일 위험이 있어 제거했다.

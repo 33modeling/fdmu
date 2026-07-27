@@ -179,6 +179,70 @@ cache writer는 worker별 stage에 legacy 순차 형식으로 쓴 뒤 SHA-256을
 watcher/worker에는 lease FD를 넘기지 않는다. lease 대기는 기본 60초 후
 실패한다. 3초 안에 죽은 worker의 로그 tail을 출력한 뒤 즉시 실패한다.
 
+### 데이터셋 확장 7B/14B 원클릭
+
+아래 wrapper는 기존 TOFU 공유 queue와 섞이지 않는 사용자별
+`dataset_campaigns/` 결과 루트를 사용한다. 각 명령의 `all`은 preflight,
+calibration, development-only 자동 freeze, audit, aggregate, diagnostic
+LaTeX를 수행한다.
+
+```bash
+# Qwen2.5-7B
+bash experiments/cluster/run_wmdp_bio_7b_h100.sh all
+bash experiments/cluster/run_muse_news_7b_h100.sh all
+bash experiments/cluster/run_rwku_7b_h100.sh all
+bash experiments/cluster/run_muse_books_7b_h100.sh all
+bash experiments/cluster/run_pistol_7b_h100.sh all
+
+# Qwen2.5-14B
+bash experiments/cluster/run_wmdp_bio_14b_h100.sh all
+bash experiments/cluster/run_muse_news_14b_h100.sh all
+bash experiments/cluster/run_rwku_14b_h100.sh all
+bash experiments/cluster/run_muse_books_14b_h100.sh all
+bash experiments/cluster/run_pistol_14b_h100.sh all
+```
+
+기본 GPU 목록은 `0,1,2,3`이며 request별로 GPU 한 장을 사용한다.
+`GPU_IDS=0,1`처럼 명시적으로 줄일 수 있다. MUSE는 disjoint retained support
+제약 때문에 audit request가 하나라 audit 단계에서 GPU 하나만 쓰는 것이
+정상이다. 나머지 데이터셋은 audit request 네 개를 최대 네 GPU에 분배한다.
+
+실험과 후처리는 항상 action으로 구분한다.
+
+```bash
+bash experiments/cluster/run_pistol_7b_h100.sh plan
+bash experiments/cluster/run_pistol_7b_h100.sh calibration
+bash experiments/cluster/run_pistol_7b_h100.sh freeze
+bash experiments/cluster/run_pistol_7b_h100.sh audit
+bash experiments/cluster/run_pistol_7b_h100.sh aggregate
+bash experiments/cluster/run_pistol_7b_h100.sh render
+bash experiments/cluster/run_pistol_7b_h100.sh status
+```
+
+결과와 로그는 전부 group volume에 남는다.
+
+```text
+/group-volume/fdmu/runs/users/<user>/dataset_campaigns/<dataset>_qwen25_<scale>/
+  runtime/campaign.yaml
+  sft_cache/
+  calibration/
+  freeze/objective_freeze.yaml
+  audit/
+  aggregate/pooled_channel_report.{csv,json}
+  aggregate/table_channel_matrix.tex
+  launcher_logs/current.log
+```
+
+외부 sentence encoder와 fidelity certificate는 이 경로에 없다. 오류가 나면
+같은 `all` 명령을 다시 실행한다. 완료 run은 건너뛰고 partial run만
+`forensics/<phase>-partials/`에 보존한 뒤 재실행하며, 한 request가 실패하면
+같은 phase에서 실행 중인 자식 process group을 회수한다. 자동 freeze가 strict
+조건을 만족하지 못한 objective는 `best_observed_ineligible`로 기록하되 결과
+생성을 중단하지 않는다.
+
+이 aggregate와 LaTeX는 데이터셋 channel diagnostic이며 PDF-v4 evidence
+ledger나 최종 claim 표에 자동 publish하지 않는다.
+
 ### 1. 작업 enqueue (아무 노드에서 1회)
 
 ```bash
@@ -391,8 +455,8 @@ model/dataset setting을 publish하면 기존 setting 행은 유지되고 새 �
   frozen이면 alpha-audit, 아직 draft면 alpha-development를 같은 큐에 적재.
 - `llama`: 모델 경로(`/group-volume/models/Llama-3.1-8B-Instruct`) 부재 시
   `provision_llama.sh` 안내 후 중단. `rwku-audit`: fidelity 인증서 JSON이
-  `runs/channel_matrix_rwku7b/fidelity/`에 없으면
-  `experiments/diag/fd_fidelity.py --dataset rwku` 안내 후 중단.
+  필요 없는 현재 config를 사용한다. 구형 enqueue 경로가 인증서를 요구하면
+  사용하지 말고 위 데이터셋 확장 wrapper나 현재 config 기반 unit을 사용한다.
 - 적재 후 노드 투입은 언제나 수동:
   `bash experiments/cluster/launch_node.sh <큐>` (노드당 워커 8개, GPU 0-7).
   make_units가 만든 unit의 `max_attempts`는 그대로 둘 것.

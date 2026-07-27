@@ -211,26 +211,14 @@ class ChannelCampaignContractTest(unittest.TestCase):
         self.assertNotIn("fidelity", self.config)
         self.assertNotIn("fidelity_certificates", self.config["audit"])
 
-    def test_fidelity_command_carries_campaign_dataset(self):
+    def test_dataset_configs_do_not_require_fidelity_or_external_encoder(self):
         cfg = yaml.safe_load(
             (ROOT / "configs/channel_matrix/rwku_7b.yaml").read_text(encoding="utf-8")
         )
-        models = campaign._enabled_models(cfg, set())
-        _, _, command = next(iter(campaign.fidelity_commands(
-            cfg, models, ROOT / "runs/channel_matrix_rwku7b"
-        )))
-        self.assertEqual(command[command.index("--dataset") + 1], "rwku")
-        # The rwku fidelity request must carry the frozen remote pool: the
-        # runner refuses --dataset rwku without --candidate-authors.
-        self.assertEqual(command[command.index("--candidate-authors") + 1], "100-129")
-        self.assertIn("--enforce-gate", command)
-        _, _, reporting_command = next(iter(campaign.fidelity_commands(
-            cfg,
-            models,
-            ROOT / "runs/channel_matrix_rwku7b",
-            enforce_gate=False,
-        )))
-        self.assertNotIn("--enforce-gate", reporting_command)
+        self.assertIsNone(cfg["fidelity"])
+        self.assertNotIn("fidelity_certificates", cfg["audit"])
+        self.assertNotIn("sentence_encoder", cfg["common"])
+        self.assertNotIn("knn_embed", cfg["audit"]["predictors"])
 
     def test_draft_objective_freeze_blocks_audit(self):
         # The repo's live freeze became status=frozen on 2026-07-23, so the
@@ -325,10 +313,8 @@ class ChannelCampaignContractTest(unittest.TestCase):
             ROOT / "experiments/channel_matrix/h100_campaign.sh"
         ).read_text(encoding="utf-8")
         aggregate_call = wrapper.split(
-            "python experiments/channel_matrix/aggregate.py", 1
-        )[1].split(
-            "python experiments/channel_matrix/make_main_table.py", 1
-        )[0]
+            "experiments/channel_matrix/aggregate.py", 1
+        )[1].split("rm -f", 1)[0]
         self.assertIn('--config "$CONFIG"', aggregate_call)
         self.assertIn('--model-id "$MODEL_ID"', aggregate_call)
 

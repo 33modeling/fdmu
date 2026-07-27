@@ -2,10 +2,6 @@
 # original 8.0 bound too (t000 0.028/1.13/4.18, t001 0.080/0.42/2.80).
 # graddiff's frontier fails opposite bounds per target (t000 mean vs
 # t001 tail) across four rounds and stays a stress column.
-# NOTE: the audit launch additionally requires an RWKU fidelity
-# certificate. fd_fidelity.py grew --dataset rwku on 2026-07-23; run
-# the fidelity phase and confirm passed=true before enqueueing audit.
-
 # Values transcribed 2026-07-23 from the selector recommendation
 # (runs/*/objective_freeze.recommended.yaml) with unresolved: [].
 freeze_id: FREEZE-2026-07-23-RWKU7B-DEV4ROUNDS

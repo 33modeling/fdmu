@@ -188,11 +188,10 @@ def test_wmdp_campaign_config_builds_wmdp_gate_commands():
         assert "wmdp-r00" in str(out)
         assert "idkdpo" not in cmd  # excluded roster, parallel with RWKU
 
-    fidelity = list(
-        campaign.fidelity_commands(cfg, models, ROOT / "runs/channel_matrix_wmdp7b")
-    )
-    for _csv, _cert, cmd in fidelity:
-        assert cmd[cmd.index("--dataset") + 1] == "wmdp_bio_mmlu"
+    assert cfg["fidelity"] is None
+    assert "fidelity_certificates" not in cfg["audit"]
+    assert "sentence_encoder" not in cfg["common"]
+    assert "knn_embed" not in cfg["audit"]["predictors"]
 
 
 def test_fd_fidelity_builds_pools_through_registry_adapters():

@@ -1,0 +1,145 @@
+schema_version: 1
+contract: fdmu-dataset-expansion-v1
+
+datasets:
+  wmdp_bio:
+    label: WMDP-bio/MMLU
+    adapter: wmdp_bio_mmlu
+    universe_groups: 10
+    calibration_requests: [0, 1]
+    audit_requests: [10, 14, 18, 22]
+    candidate_pools:
+      calibration: "2-11"
+      audit:
+        "10": "12-21"
+        "14": "22-31"
+        "18": "32-41"
+        "22": "42-51"
+
+  muse_news:
+    label: MUSE-News
+    adapter: muse_news
+    universe_groups: 4
+    calibration_requests: [0, 1]
+    audit_requests: [4]
+    candidate_pools:
+      calibration: "4-7"
+      audit:
+        "4": "0-3"
+
+  rwku:
+    label: RWKU
+    adapter: rwku
+    universe_groups: 30
+    calibration_requests: [0, 1]
+    audit_requests: [30, 34, 38, 42]
+    candidate_pools:
+      calibration: "100-129"
+      audit:
+        "30": "130-159"
+        "34": "160-189"
+        "38": "60-89"
+        "42": "2-29,90-91"
+
+  muse_books:
+    label: MUSE-Books
+    adapter: muse_books
+    universe_groups: 4
+    calibration_requests: [0, 1]
+    audit_requests: [4]
+    candidate_pools:
+      calibration: "4-7"
+      audit:
+        "4": "0-3"
+
+  pistol:
+    label: PISTOL
+    adapter: pistol
+    pistol_sample: 2
+    universe_groups: 12
+    calibration_requests: [0, 1]
+    audit_requests: [10, 20, 30, 40]
+    candidate_pools:
+      calibration: "2-9,11-14"
+      audit:
+        "10": "15-19,21-27"
+        "20": "28-29,31-39,41"
+        "30": "42-53"
+        "40": "54-65"
+
+scales:
+  1p5b:
+    model_id: qwen25_1p5b
+    model_label: Qwen2.5-1.5B
+    default_model_path: /rdata/models/Qwen2.5-1.5B-Instruct
+    batch_size: 2
+    sft_steps: 1200
+  7b:
+    model_id: qwen25_7b
+    model_label: Qwen2.5-7B
+    default_model_path: /group-volume/models/Qwen2.5-7B-Instruct
+    batch_size: 4
+    sft_steps: 800
+  14b:
+    model_id: qwen25_14b
+    model_label: Qwen2.5-14B
+    default_model_path: /group-volume/models/Qwen2.5-14B-Instruct
+    batch_size: 2
+    sft_steps: 1000
+
+common:
+  device: cuda
+  dtype: float32
+  trainable_scope: probe_block
+  representation_retain_mode: stream_cached
+  block_last_n: 8
+  sft_lr: 1.0e-5
+  sft_target_loss: 0.8
+  sft_eval_every: 100
+  require_sft_target: true
+  probe_dirs: 64
+  probe_norm_eta: 3.0e-3
+  probe_seed: 0
+
+selection:
+  forget_recall_max: 0.10
+  mean_dnll_max: 2.0
+  cvar05_dnll_max: 16.0
+  require_every_development_run: true
+  tie_break: [mean_dnll, cvar05_dnll, steps, lr]
+
+objective_grid:
+  ga:
+    - {id: lr05_s60, lr: 5.0e-7, steps: 60}
+    - {id: lr1_s60, lr: 1.0e-6, steps: 60}
+  graddiff:
+    - {id: lr1_s120, lr: 1.0e-6, steps: 120, forget_weight: 1.0, retain_weight: 1.0}
+    - {id: lr2_s120, lr: 2.0e-6, steps: 120, forget_weight: 1.0, retain_weight: 1.0}
+  npo:
+    - {id: b01_lr4_s120, lr: 4.0e-6, steps: 120, beta: 0.1, forget_weight: 1.0, retain_weight: 1.0}
+    - {id: b01_lr8_s240, lr: 8.0e-6, steps: 240, beta: 0.1, forget_weight: 1.0, retain_weight: 1.0}
+  simnpo:
+    - {id: b45_lr4_s120, lr: 4.0e-6, steps: 120, beta: 4.5, forget_weight: 0.125, retain_weight: 1.0}
+    - {id: b45_lr8_s240, lr: 8.0e-6, steps: 240, beta: 4.5, forget_weight: 0.125, retain_weight: 1.0}
+  gru:
+    - {id: lr1_s120, lr: 1.0e-6, steps: 120, forget_weight: 1.0, retain_weight: 1.0}
+    - {id: lr2_s120, lr: 2.0e-6, steps: 120, forget_weight: 1.0, retain_weight: 1.0}
+  rmu:
+    - {id: a10_c3_lr4_s240, lr: 4.0e-6, steps: 240, rmu_alpha: 10.0, rmu_c: 3.0}
+    - {id: a10_c3_lr8_s240, lr: 8.0e-6, steps: 240, rmu_alpha: 10.0, rmu_c: 3.0}
+  repnoise:
+    - {id: a1_c3_lr1_s120, lr: 1.0e-6, steps: 120, rmu_alpha: 1.0, rmu_c: 3.0}
+    - {id: a1_c3_lr2_s240, lr: 2.0e-6, steps: 240, rmu_alpha: 1.0, rmu_c: 3.0}
+  circuit_breakers:
+    - {id: a1_lr1_s240, lr: 1.0e-6, steps: 240, rmu_alpha: 1.0}
+    - {id: a10_lr4_s240, lr: 4.0e-6, steps: 240, rmu_alpha: 10.0}
+
+predictors:
+  - grad_norm
+  - fd_norm
+  - knn_feature
+  - knn_lexical
+  - fd
+  - random_rank
+
+audit_seeds: [2025, 2026]

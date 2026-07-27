@@ -139,6 +139,33 @@ GPU 한 장을 사용하며, 서로 다른 호스트의 GPU는 각 호스트에�
 실행기는 현재 experiment-only이며 CSV/JSON 진단 결과만 생성한다. 공유 큐,
 로그, 복구 절차는 cluster runbook에 있다.
 
+### 데이터셋 확장: 5개 데이터셋 x 3개 모델
+
+WMDP-bio/MMLU, MUSE-News, RWKU, MUSE-Books, PISTOL을 Qwen2.5
+1.5B/7B/14B에서 실행하는 명시적 wrapper 15개가 있다. 각 wrapper는
+`all`, `preflight`, `plan`, `calibration`, `freeze`, `audit`, `aggregate`,
+`render`, `status` 중 하나를 반드시 받는다. GPU 실험과 기존 결과 렌더를
+옵션 생략으로 혼동하지 않는다.
+
+```bash
+# 4090 x2 예시
+bash local_run/run_wmdp_bio_1p5b_4090x2.sh all
+
+# H100 예시
+bash experiments/cluster/run_wmdp_bio_7b_h100.sh all
+bash experiments/cluster/run_wmdp_bio_14b_h100.sh all
+```
+
+`all`은 preflight, calibration, development-only 자동 freeze, sealed audit,
+aggregate, LaTeX를 순서대로 수행한다. 완료 unit과 SFT cache는 검증 후
+재사용하고, 중단된 단일 run만 forensics로 이동해 다시 실행한다. 외부 문장
+인코더와 fidelity certificate를 사용하지 않는다. 최종 파일은 각
+`RUN_ROOT/aggregate/`의 `pooled_channel_report.json`과
+`table_channel_matrix.tex`이다. 이 출력은 데이터셋 확장 진단이며 PDF-v4
+claim 표로 자동 승격되지 않는다. 전체 명령과 저장 위치는
+[로컬 런북](local_run/README.md)과
+[클러스터 런북](docs/CLUSTER_FLEET_RUNBOOK.md)에 있다.
+
 ### 최종 논문 Table 1/2
 
 이미 완료된 7B 결과로 표만 다시 만들 때는 다음 CPU-only 명령 하나를 실행한다.

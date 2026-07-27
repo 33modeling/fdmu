@@ -40,6 +40,7 @@ from transformers import AutoModelForCausalLM, AutoTokenizer, Qwen2Config, Qwen2
 from rsus.analysis.prediction import table1_rows  # noqa: E402
 from rsus.blocks import mlp_down_last_layers, set_trainable_  # noqa: E402
 from rsus.data.base import collate  # noqa: E402
+from rsus.data.indexed import build_indexed_request  # noqa: E402
 from rsus.data.tofu import (  # noqa: E402
     FORGET10_FIRST_AUTHOR,
     idk_variants,
@@ -71,14 +72,27 @@ def parse_args():
     p.add_argument("--device", default="cpu")
     p.add_argument("--dtype", default="float32", choices=["float32", "bfloat16"])
     p.add_argument(
-        "--dataset", default="tofu", choices=["tofu", "rwku", "wmdp_bio_mmlu"],
+        "--dataset",
+        default="tofu",
+        choices=[
+            "tofu",
+            "rwku",
+            "wmdp_bio_mmlu",
+            "muse_news",
+            "muse_books",
+            "pistol",
+        ],
         help=(
-            "request adapter: tofu (default, unchanged behavior); rwku, where "
-            "--author is the forget_target row index and --candidate-authors is "
-            "the frozen remote-target pool; or wmdp_bio_mmlu, where --author is "
-            "the frozen forget-slice index and --candidate-authors indexes the "
-            "sorted MMLU subject list"
+            "registered request adapter; --author is its integer request index "
+            "and --candidate-authors is its frozen retained-group index pool"
         ),
+    )
+    p.add_argument(
+        "--pistol-sample",
+        type=int,
+        choices=[1, 2],
+        default=2,
+        help="official PISTOL sample used by --dataset pistol (default: 2)",
     )
     p.add_argument("--author", type=int, default=FORGET10_FIRST_AUTHOR)
     p.add_argument("--universe-authors", type=int, default=30)
@@ -931,30 +945,7 @@ def main():
         f"trainable_scope={a.trainable_scope} seed={a.seed}")
     tokenizer = AutoTokenizer.from_pretrained(a.model)
     candidate_authors = parse_int_ranges(a.candidate_authors) if a.candidate_authors else None
-    if a.dataset == "rwku":
-        from rsus.data.rwku import rwku_request
-
-        if not candidate_authors:
-            sys.exit("--dataset rwku requires an explicit frozen --candidate-authors pool")
-        log(f"loading RWKU (remote pool={len(candidate_authors)} targets) ...")
-        req = rwku_request(
-            tokenizer,
-            target_index=a.author,
-            candidate_targets=list(candidate_authors),
-        )
-    elif a.dataset == "wmdp_bio_mmlu":
-        from rsus.data.wmdp import wmdp_request
-
-        if not candidate_authors:
-            sys.exit("--dataset wmdp_bio_mmlu requires an explicit frozen "
-                     "--candidate-authors MMLU subject pool")
-        log(f"loading WMDP-bio/MMLU (retain pool={len(candidate_authors)} MMLU subjects) ...")
-        req = wmdp_request(
-            tokenizer,
-            request_index=a.author,
-            candidate_subjects=list(candidate_authors),
-        )
-    else:
+    if a.dataset == "tofu" and not candidate_authors:
         log(f"loading TOFU (universe_authors={a.universe_authors}) ...")
         examples = load_tofu_examples(tokenizer)
         req = tofu_request(
@@ -963,6 +954,25 @@ def main():
             universe_authors=a.universe_authors,
             seed=a.seed,
             candidate_authors=candidate_authors,
+        )
+    else:
+        if not candidate_authors:
+            sys.exit(
+                f"--dataset {a.dataset} requires an explicit frozen "
+                "--candidate-authors pool"
+            )
+        log(
+            f"loading dataset={a.dataset} request_index={a.author} "
+            f"retained_groups={len(candidate_authors)} ..."
+        )
+        req = build_indexed_request(
+            a.dataset,
+            tokenizer,
+            a.author,
+            list(candidate_authors),
+            universe_groups=a.universe_authors,
+            seed=a.seed,
+            pistol_sample=a.pistol_sample,
         )
     by_id = {e.example_id: e for e in req.universe.examples}
     log(f"request {req.request_id}: |Df|={len(req.forget)} |C|={len(req.universe)}")

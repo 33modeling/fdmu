@@ -22,6 +22,7 @@ Choose one supported path:
 | Local single-arm diagnostic | `bash local_run.sh <action>` | `local_run/README.md` |
 | H100 7B diagnostic campaign | `bash experiments/cluster/run_tofu_7b_h100.sh` | `docs/CLUSTER_FLEET_RUNBOOK.md` |
 | H100 14B diagnostic campaign | `bash experiments/cluster/run_tofu_14b_h100.sh` | `docs/CLUSTER_FLEET_RUNBOOK.md` |
+| Dataset expansion, 1.5B/7B/14B | `*_1p5b_4090x2.sh all`, `*_h100.sh all` | local/cluster runbooks |
 | Paper evidence and LaTeX | `experiments/paper/` | `docs/FINAL_RESULTS_RUNBOOK.md` |
 
 The H100 7B/14B scripts run the older channel-matrix campaign. They are not the

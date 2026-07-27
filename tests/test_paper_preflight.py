@@ -48,6 +48,8 @@ def _ready_contract(tmp_path: Path) -> tuple[Path, Path, Path]:
                 "uses_adapter_registry": True,
                 "consumes_exact_roster": True,
                 "executes_unit_commands": True,
+                "validates_unit_run_manifests": True,
+                "validates_parent_selection_inputs": True,
                 "validates_selection_inputs": True,
                 "validates_candidate_level_prediction_raw": True,
                 "validates_fidelity_raw": True,
@@ -72,6 +74,7 @@ def _ready_contract(tmp_path: Path) -> tuple[Path, Path, Path]:
                 "uses_adapter_registry": True,
                 "executes_model": True,
                 "emits_fidelity_raw": True,
+                "emits_parent_selection_inputs": True,
                 "computes_exact_gradient_reference": True,
                 "emits_candidate_level_prediction_raw": True,
                 "emits_selection_inputs": True,
@@ -165,8 +168,8 @@ def test_ready_setting_reports_exact_rosters_dtype_and_seven_parents(tmp_path):
     assert set(report["required_parents"]) <= set(
         report["implemented_parent_objectives"]
     )
-    assert report["summary"]["settings_ready"] == 8
-    assert report["summary"]["stages_ready"] == 32
+    assert report["summary"]["settings_ready"] == 9
+    assert report["summary"]["stages_ready"] == 36
     assert report["summary"]["unready_executors"] == []
     assert report["summary"]["unready_unit_producers"] == []
     assert report["summary"]["selection_freeze_ready"]
@@ -203,10 +206,14 @@ def test_unresolved_rosters_and_missing_adapters_are_explicit(tmp_path):
     assert "WMDP-bio/MMLU" not in report["summary"]["missing_adapter_datasets"]
     assert "MUSE-News" not in report["summary"]["missing_adapter_datasets"]
     assert "MUSE-Books" not in report["summary"]["missing_adapter_datasets"]
-    assert "adapter lacks independent target-request rosters" in report["datasets"][
-        "MUSE-News"
-    ]["reasons"]
-    assert "PISTOL" in report["summary"]["missing_adapter_datasets"]
+    assert any(
+        "roster_unit" in reason
+        for reason in report["datasets"]["MUSE-News"]["reasons"]
+    )
+    assert "PISTOL" not in report["summary"]["missing_adapter_datasets"]
+    assert report["datasets"]["PISTOL"]["rosters"]["D_cal"]["reasons"] == [
+        "contains unresolved ids: TBD_PISTOL_D_CAL_REQUEST_IDS"
+    ]
     # RWKU graduated from this list on 2026-07-23: the adapter is registered
     # and its rosters are concrete, pairwise-disjoint request ids.
     assert "RWKU" not in report["summary"]["missing_adapter_datasets"]

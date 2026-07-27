@@ -1,9 +1,9 @@
-"""Launch a sealed, multi-model 7B channel-matrix campaign.
+"""Launch a sealed, multi-model channel-matrix campaign.
 
 The launcher has two deliberately separate phases:
 
 ``calibration``
-    Runs one objective at a time on development-only TOFU authors, without
+    Runs one objective at a time on development-only deletion requests, without
     computing susceptibility probes.  Learning rate and horizon may be chosen
     from these runs using forget reach and ordinary utility only.
 
@@ -132,6 +132,20 @@ def _expand_int_ranges(raw: str) -> set[int]:
 
 
 def _validate_campaign(cfg: dict) -> None:
+    dataset = str(cfg.get("dataset", "tofu"))
+    supported = {
+        "tofu",
+        "rwku",
+        "wmdp_bio_mmlu",
+        "muse_news",
+        "muse_books",
+        "pistol",
+    }
+    if dataset not in supported:
+        raise ValueError(
+            f"unsupported indexed campaign dataset {dataset!r}; "
+            f"expected one of {sorted(supported)}"
+        )
     calibration_authors = set(cfg["calibration"]["authors"])
     audit_authors = set(cfg["audit"]["authors"])
     if calibration_authors & audit_authors:
@@ -194,6 +208,13 @@ def _request_dirname(cfg: dict, author: int) -> str:
         return f"rwku-t{author:03d}"
     if dataset == "wmdp_bio_mmlu":
         return f"wmdp-r{author:03d}"
+    if dataset == "muse_news":
+        return f"muse-news-r{author:03d}"
+    if dataset == "muse_books":
+        return f"muse-books-r{author:03d}"
+    if dataset == "pistol":
+        sample = int(cfg.get("common", {}).get("pistol_sample", 2))
+        return f"pistol-s{sample}-e{author:03d}"
     return f"tofu-a{author}"
 
 
@@ -237,6 +258,8 @@ def _common_gate_args(
         args += ["--attn-impl", str(common["attn_impl"])]
     if common.get("sentence_encoder"):
         args += ["--sentence-encoder", str(common["sentence_encoder"])]
+    if cfg.get("dataset") == "pistol":
+        args += ["--pistol-sample", str(common.get("pistol_sample", 2))]
     return args
 
 
@@ -803,24 +826,29 @@ def _has_artifacts(out: Path) -> bool:
     return out.exists() and any(out.iterdir())
 
 
-def _quarantine_partial_audit(out: Path) -> Path:
-    """Preserve an interrupted sealed audit before an explicit resume retry."""
+def _quarantine_partial_run(out: Path, phase: str) -> Path:
+    """Preserve an interrupted run before an explicit resume retry."""
     runs_root = Path(
         os.environ.get("FDMU_CAMPAIGN_RUNS_ROOT")
         or os.environ.get("CLUSTER_RUNS_ROOT", ROOT / "runs")
     )
-    forensics = runs_root / "forensics" / "audit-partials"
+    forensics = runs_root / "forensics" / f"{phase}-partials"
     stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S.%fZ")
     identity = "__".join(out.parts[-4:])
     destination = forensics / f"{stamp}__{identity}"
     destination.parent.mkdir(parents=True, exist_ok=True)
     shutil.move(str(out), str(destination))
     print(
-        f"QUARANTINED partial sealed audit: source={out} "
+        f"QUARANTINED partial {phase} run: source={out} "
         f"destination={destination}",
         flush=True,
     )
     return destination
+
+
+def _quarantine_partial_audit(out: Path) -> Path:
+    """Backward-compatible audit quarantine entry point."""
+    return _quarantine_partial_run(out, "audit")
 
 
 def main() -> None:
@@ -1036,6 +1064,8 @@ def main() -> None:
             if a.resume and _complete(out, [objective], audit=False):
                 print(f"SKIP complete: {out}")
                 continue
+            if _has_artifacts(out) and a.resume:
+                _quarantine_partial_run(out, "calibration")
             if _has_artifacts(out):
                 raise RuntimeError(
                     f"partial or pre-existing calibration directory: {out}. Preserve it for "
