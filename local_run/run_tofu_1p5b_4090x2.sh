@@ -225,10 +225,13 @@ run_stage_accept() {
   printf '[%s] command:' "$(timestamp)"
   printf ' %q' "$@"
   printf '\n'
-  set +e
-  run_isolated_stage_command "$@"
-  status=$?
-  set -e
+  # Keep the command in an `if` condition so Bash suppresses the inherited
+  # ERR trap until we can compare its status with the accepted boundary.
+  if run_isolated_stage_command "$@"; then
+    status=0
+  else
+    status=$?
+  fi
   if [[ " $accepted " != *" $status "* ]]; then
     stop_stage_heartbeat
     write_stage_status failed "$status"

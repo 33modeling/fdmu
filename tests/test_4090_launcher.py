@@ -39,6 +39,7 @@ def test_4090_pipeline_accepts_resolved_calibration_boundary_only():
     assert 'setsid -- "$@" &' in launcher
     assert 'kill -TERM -- "-$ACTIVE_STAGE_PGID"' in launcher
     assert 'kill -KILL -- "-$ACTIVE_STAGE_PGID"' in launcher
+    assert 'if run_isolated_stage_command "$@"; then' in launcher
 
 
 def test_completed_calibration_marker_prevents_retraining(tmp_path):

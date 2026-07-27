@@ -37,8 +37,9 @@ budget:
 
 # Ordered, finite, target-free search. Each trial fixes one global alpha/Kp pair
 # across every D_prot cell, so the joint/comparator comparison is commensurate.
-# If all declared trials fail, exit 3 with NO_JOINT_DOMINANCE and a ranked
-# failure report. Add reviewed trials only at the end; never tune from target.
+# If all declared trials fail strict dominance, emit NO_JOINT_DOMINANCE,
+# select the best observed development trial, and continue to final evidence.
+# Add reviewed trials only at the end; never tune from target.
 trials:
   - id: a050-k40-lr3e5-s120-m4
     alpha: 0.50

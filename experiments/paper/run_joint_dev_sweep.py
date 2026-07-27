@@ -303,6 +303,238 @@ def _snapshot_current_config(source: Path, destination: Path) -> Path:
     return destination
 
 
+def _materialize_frozen_input(
+    source: Path,
+    destination: Path,
+    expected_sha256: str,
+) -> Path:
+    source = source.resolve()
+    destination = destination.resolve()
+    if not source.is_file() or _sha256(source) != expected_sha256:
+        raise SweepError(
+            f"cannot freeze input with expected SHA-256 {expected_sha256}: {source}"
+        )
+    if destination.is_file() and _sha256(destination) == expected_sha256:
+        return destination
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    temporary = destination.with_name(destination.name + ".tmp")
+    temporary.write_bytes(source.read_bytes())
+    os.replace(temporary, destination)
+    return destination
+
+
+def _canonical_trial_sources(
+    output_root: Path,
+) -> Mapping[str, Any] | None:
+    """Choose the already-started input contract with the most saved work."""
+    output_root = output_root.resolve()
+    preferred: list[Path] = []
+    for status_name in ("BEST.json", "SWEEP_STATUS.json"):
+        status_path = output_root / status_name
+        if not status_path.is_file():
+            continue
+        status = _load_json(status_path)
+        raw_trial = status.get("trial_dir")
+        if isinstance(raw_trial, str) and raw_trial:
+            preferred.append(Path(raw_trial).resolve() / "trial.json")
+
+    candidates = [
+        path.resolve()
+        for path in output_root.glob("trials/*/trial.json")
+        if path.is_file()
+    ]
+    ordered: list[Path] = []
+    seen: set[Path] = set()
+    for path in [*preferred, *sorted(candidates)]:
+        if path.is_file() and path not in seen:
+            seen.add(path)
+            ordered.append(path)
+    if not ordered:
+        return None
+
+    grouped: dict[
+        tuple[str, str, str],
+        dict[str, Any],
+    ] = {}
+    for metadata_path in ordered:
+        metadata = _load_json(metadata_path)
+        sources = metadata.get("canonical_sources")
+        if not isinstance(sources, Mapping):
+            raise SweepError(
+                f"existing trial lacks canonical source metadata: {metadata_path}"
+            )
+        hashes: list[str] = []
+        for name in ("campaign", "evidence", "runtime"):
+            digest = sources.get(f"{name}_sha256")
+            path = sources.get(name)
+            if (
+                not isinstance(path, str)
+                or not path
+                or not isinstance(digest, str)
+                or len(digest) != 64
+            ):
+                raise SweepError(
+                    f"existing trial has invalid canonical {name}: {metadata_path}"
+                )
+            hashes.append(digest)
+        key = tuple(hashes)
+        trial_dir = metadata_path.parent
+        completed_units = sum(
+            1 for _path in trial_dir.glob("units/*/run_manifest.json")
+        )
+        evaluated = int((trial_dir / "joint_comparison.json").is_file())
+        preferred_contract = int(metadata_path in preferred)
+        entry = grouped.setdefault(
+            key,
+            {
+                "sources": sources,
+                "completed_units": 0,
+                "evaluated_trials": 0,
+                "preferred": 0,
+                "trial_paths": [],
+            },
+        )
+        entry["completed_units"] += completed_units
+        entry["evaluated_trials"] += evaluated
+        entry["preferred"] = max(entry["preferred"], preferred_contract)
+        entry["trial_paths"].append(str(trial_dir))
+
+    selected = max(
+        grouped.values(),
+        key=lambda entry: (
+            int(entry["preferred"]),
+            int(entry["evaluated_trials"]),
+            int(entry["completed_units"]),
+            str(entry["trial_paths"][0]),
+        ),
+    )
+    _status(
+        "FROZEN_INPUT_RECOVERY "
+        f"contracts={len(grouped)} selected_trials={selected['trial_paths']} "
+        f"completed_units={selected['completed_units']} "
+        f"evaluated_trials={selected['evaluated_trials']}"
+    )
+    return selected["sources"]
+
+
+def _freeze_sweep_inputs(
+    output_root: Path,
+    sources: Mapping[str, Path],
+) -> dict[str, Path]:
+    """Pin canonical configs once so a code pull cannot restart GPU units."""
+    output_root = output_root.resolve()
+    record_path = output_root / "FROZEN_INPUTS.json"
+    snapshot_dir = output_root / "frozen_inputs"
+    names = ("campaign", "evidence", "runtime")
+    expected_paths = {
+        name: (snapshot_dir / f"{name}.yaml").resolve()
+        for name in names
+    }
+
+    if record_path.is_file():
+        record = _load_json(record_path)
+        entries = record.get("inputs")
+        if (
+            record.get("schema_version") != 1
+            or record.get("contract") != "tofu-joint-sweep-frozen-inputs"
+            or not isinstance(entries, Mapping)
+            or set(entries) != set(names)
+        ):
+            raise SweepError(f"frozen input record is invalid: {record_path}")
+        resolved: dict[str, Path] = {}
+        for name in names:
+            entry = entries[name]
+            path = expected_paths[name]
+            if (
+                not isinstance(entry, Mapping)
+                or Path(str(entry.get("path", ""))).resolve() != path
+                or not isinstance(entry.get("sha256"), str)
+                or len(str(entry["sha256"])) != 64
+                or not path.is_file()
+                or _sha256(path) != entry["sha256"]
+            ):
+                raise SweepError(f"frozen input mismatch for {name}: {record_path}")
+            resolved[name] = path
+        _status(f"FROZEN_INPUT_REUSE record={record_path}")
+        return resolved
+
+    existing = _canonical_trial_sources(output_root)
+    entries: dict[str, dict[str, str]] = {}
+    resolved = {}
+    for name in names:
+        current_source = sources[name].resolve()
+        if existing is None:
+            expected_sha256 = _sha256(current_source)
+            recovered = current_source
+            origin = "current-config"
+        else:
+            raw_source = existing[name]
+            raw_digest = existing[f"{name}_sha256"]
+            if not isinstance(raw_source, str) or not isinstance(raw_digest, str):
+                raise SweepError(f"existing trial has invalid canonical {name}")
+            expected_sha256 = raw_digest
+            recovered = _recover_git_snapshot(
+                Path(raw_source),
+                expected_sha256,
+                expected_paths[name],
+            )
+            origin = "existing-trial"
+        frozen = _materialize_frozen_input(
+            recovered,
+            expected_paths[name],
+            expected_sha256,
+        )
+        resolved[name] = frozen
+        entries[name] = {
+            "path": str(frozen),
+            "sha256": expected_sha256,
+            "origin": origin,
+            "source": str(recovered.resolve()),
+        }
+    _atomic_json(
+        record_path,
+        {
+            "schema_version": 1,
+            "contract": "tofu-joint-sweep-frozen-inputs",
+            "recorded_at_utc": _utc_now(),
+            "inputs": entries,
+        },
+    )
+    _status(f"FROZEN_INPUT_CREATE record={record_path}")
+    return resolved
+
+
+def _write_or_rebind_trial_metadata(
+    path: Path,
+    expected: Mapping[str, Any],
+) -> None:
+    """Allow canonical paths to move to byte-identical frozen snapshots."""
+    if not path.is_file():
+        _write_once(
+            path,
+            json.dumps(dict(expected), indent=2, sort_keys=True) + "\n",
+        )
+        return
+    existing = _load_json(path)
+    rebound = json.loads(json.dumps(existing))
+    old_sources = rebound.get("canonical_sources")
+    new_sources = expected.get("canonical_sources")
+    if not isinstance(old_sources, dict) or not isinstance(new_sources, Mapping):
+        raise SweepError(f"trial metadata lacks canonical sources: {path}")
+    for name in ("campaign", "evidence", "runtime"):
+        digest_key = f"{name}_sha256"
+        if old_sources.get(digest_key) != new_sources.get(digest_key):
+            raise SweepError(
+                f"trial canonical {name} hash changed: {path}"
+            )
+        old_sources[name] = new_sources[name]
+    if rebound != expected:
+        raise SweepError(f"append-only trial contract changed beyond paths: {path}")
+    if existing != expected:
+        _atomic_json(path, expected)
+        _status(f"TRIAL_SOURCE_REBOUND path={path}")
+
+
 def _resolve(value: str | Path, *, base: Path = ROOT) -> Path:
     expanded = os.path.expanduser(os.path.expandvars(str(value)))
     path = Path(expanded)
@@ -1550,6 +1782,7 @@ def _prepare_trial(
     runtime: Mapping[str, Any],
     campaign_source: Path,
     evidence_source: Path,
+    runtime_source: Path,
     python: Path,
     output_root: Path,
 ) -> tuple[Path, Path, Path, dict[str, Any]]:
@@ -1576,7 +1809,7 @@ def _prepare_trial(
             "trial": trial,
             "campaign_sha256": _sha256(campaign_source),
             "evidence_sha256": _sha256(evidence_source),
-            "runtime_sha256": _sha256(_resolve(spec["paths"]["runtime"])),
+            "runtime_sha256": _sha256(runtime_source),
             "resolved_runtime_sha256": _json_sha(runtime),
             "model_source": str(_resolve(spec["paths"]["model_source"])),
             "sft_cache_root": str(_resolve(spec["paths"]["sft_cache_root"])),
@@ -1610,18 +1843,15 @@ def _prepare_trial(
             "campaign_sha256": _sha256(campaign_source),
             "evidence": str(evidence_source),
             "evidence_sha256": _sha256(evidence_source),
-            "runtime": str(_resolve(spec["paths"]["runtime"])),
-            "runtime_sha256": _sha256(_resolve(spec["paths"]["runtime"])),
+            "runtime": str(runtime_source),
+            "runtime_sha256": _sha256(runtime_source),
         },
         "resolved_configs": {
             "campaign": str(campaign_path),
             "runtime": str(runtime_path),
         },
     }
-    _write_once(
-        trial_dir / "trial.json",
-        json.dumps(metadata, indent=2, sort_keys=True) + "\n",
-    )
+    _write_or_rebind_trial_metadata(trial_dir / "trial.json", metadata)
 
     manifest = build_manifest(
         campaign_local,
@@ -1785,17 +2015,24 @@ def run(args: argparse.Namespace) -> int:
         if value is not None:
             spec["paths"][name] = str(value)
 
-    campaign_path = _resolve(spec["paths"]["campaign"])
-    evidence_path = _resolve(spec["paths"]["evidence"])
-    runtime_source = _resolve(spec["paths"]["runtime"])
+    current_inputs = {
+        "campaign": _resolve(spec["paths"]["campaign"]),
+        "evidence": _resolve(spec["paths"]["evidence"]),
+        "runtime": _resolve(spec["paths"]["runtime"]),
+    }
     python = _absolute_executable(spec["paths"]["python"])
     output_root = _resolve(spec["paths"]["output_root"])
+    frozen_inputs = _freeze_sweep_inputs(output_root, current_inputs)
+    campaign_path = frozen_inputs["campaign"]
+    evidence_path = frozen_inputs["evidence"]
+    runtime_source = frozen_inputs["runtime"]
     _status(
         f"CONFIG setting={spec['setting']} trials={len(spec['trials'])} "
         f"gpus={spec['gpus']} progress_interval={args.progress_interval}s"
     )
     _status(
-        f"PATHS output={output_root} model={_resolve(spec['paths']['model_source'])}"
+        f"PATHS output={output_root} model={_resolve(spec['paths']['model_source'])} "
+        f"frozen_inputs={output_root / 'FROZEN_INPUTS.json'}"
     )
     campaign = _load_yaml(campaign_path)
     evidence = _load_yaml(evidence_path)
@@ -1951,6 +2188,7 @@ def run(args: argparse.Namespace) -> int:
             runtime=runtime,
             campaign_source=campaign_path,
             evidence_source=evidence_path,
+            runtime_source=runtime_source,
             python=python,
             output_root=output_root,
         )

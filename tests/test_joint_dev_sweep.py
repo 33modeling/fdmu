@@ -21,10 +21,13 @@ from experiments.paper.run_joint_dev_sweep import (
     _EventLog,
     _absolute_executable,
     _best_parent_freeze,
+    _canonical_trial_sources,
+    _freeze_sweep_inputs,
     _promote_best_available,
     _run_lanes,
     _unit_complete,
     _write_or_rebind_manifest,
+    _write_or_rebind_trial_metadata,
     _with_parent_freeze,
     build_exhaustion_report,
     candidate_score,
@@ -93,6 +96,95 @@ def test_existing_manifest_rebinds_resolved_base_python_to_venv(tmp_path):
     assert rebound == expected
     assert persisted == expected
     assert persisted["units"][0]["command"][0] == str(venv_python)
+
+
+def test_sweep_inputs_remain_frozen_after_source_files_change(tmp_path):
+    sources = {}
+    for name in ("campaign", "evidence", "runtime"):
+        source = tmp_path / "source" / f"{name}.yaml"
+        source.parent.mkdir(parents=True, exist_ok=True)
+        source.write_text(f"version: 1\nname: {name}\n", encoding="utf-8")
+        sources[name] = source
+
+    output = tmp_path / "joint"
+    first = _freeze_sweep_inputs(output, sources)
+    first_bodies = {
+        name: path.read_text(encoding="utf-8")
+        for name, path in first.items()
+    }
+    for name, source in sources.items():
+        source.write_text(f"version: 2\nname: {name}\n", encoding="utf-8")
+
+    resumed = _freeze_sweep_inputs(output, sources)
+
+    assert resumed == first
+    assert {
+        name: path.read_text(encoding="utf-8")
+        for name, path in resumed.items()
+    } == first_bodies
+
+
+def test_trial_metadata_rebinds_only_byte_identical_frozen_sources(tmp_path):
+    metadata_path = tmp_path / "trial.json"
+    old = {
+        "schema_version": 1,
+        "canonical_sources": {
+            "campaign": "/old/campaign.yaml",
+            "campaign_sha256": "a" * 64,
+            "evidence": "/old/evidence.yaml",
+            "evidence_sha256": "b" * 64,
+            "runtime": "/old/runtime.yaml",
+            "runtime_sha256": "c" * 64,
+        },
+    }
+    metadata_path.write_text(json.dumps(old), encoding="utf-8")
+    expected = deepcopy(old)
+    for name in ("campaign", "evidence", "runtime"):
+        expected["canonical_sources"][name] = str(
+            tmp_path / "frozen" / f"{name}.yaml"
+        )
+
+    _write_or_rebind_trial_metadata(metadata_path, expected)
+
+    assert json.loads(metadata_path.read_text(encoding="utf-8")) == expected
+    changed = deepcopy(expected)
+    changed["canonical_sources"]["evidence_sha256"] = "d" * 64
+    with pytest.raises(SweepError, match="evidence hash changed"):
+        _write_or_rebind_trial_metadata(metadata_path, changed)
+
+
+def test_existing_trial_contract_prefers_saved_gpu_work(tmp_path):
+    root = tmp_path / "joint"
+
+    def trial(name, digest, completed):
+        directory = root / "trials" / name
+        metadata = {
+            "canonical_sources": {
+                "campaign": "/repo/campaign.yaml",
+                "campaign_sha256": digest,
+                "evidence": "/repo/evidence.yaml",
+                "evidence_sha256": digest,
+                "runtime": "/repo/runtime.yaml",
+                "runtime_sha256": digest,
+            }
+        }
+        directory.mkdir(parents=True)
+        (directory / "trial.json").write_text(
+            json.dumps(metadata),
+            encoding="utf-8",
+        )
+        for index in range(completed):
+            manifest = directory / "units" / str(index) / "run_manifest.json"
+            manifest.parent.mkdir(parents=True)
+            manifest.write_text("{}\n", encoding="utf-8")
+        return metadata
+
+    expected = trial("older-progressed", "a" * 64, 3)
+    trial("newer-empty", "b" * 64, 0)
+
+    selected = _canonical_trial_sources(root)
+
+    assert selected == expected["canonical_sources"]
 
 
 def test_manifest_rebind_refuses_non_command_contract_change(tmp_path):

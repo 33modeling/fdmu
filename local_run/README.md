@@ -32,6 +32,12 @@ freeze를 자동 생성·검증한 뒤 joint sweep과 최종 LaTeX까지 계속 
 구분할 수 있다. SFT는 `[SFT_CACHE] HIT ... training_skipped=true`일 때
 다시 학습하지 않는다.
 
+Joint sweep은 첫 실행의 campaign/evidence/runtime를
+`<RUN_ROOT>/joint_sweep/FROZEN_INPUTS.json`과 `frozen_inputs/`에 고정한다.
+실행 중 `git pull`로 tracked config가 바뀌어도 기존 trial의 저장 작업량과
+SHA-256을 기준으로 원래 config를 복구하므로 새 fingerprint로 처음부터
+재실행하지 않는다.
+
 ## 전체 흐름
 
 실행 순서:
